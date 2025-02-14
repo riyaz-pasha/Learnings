@@ -12,8 +12,8 @@ export async function POST() {
                 { price: 'price_1QrYzdQNrIGfMhzQLFlERGDl', quantity: 1 },
             ],
             mode: 'payment',
-            success_url: `${origin}/payment/success`,
-            cancel_url: `${origin}?canceled=true`,
+            success_url: `${origin}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${origin}/?canceled=true`,
         });
 
         return NextResponse.redirect(session?.url ?? origin ?? '', 303); // Use only NextResponse.redirect
