@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev-webhook": "STRIPE_WEBHOOK_SECRET=$(stripe listen --print-secret) npm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
