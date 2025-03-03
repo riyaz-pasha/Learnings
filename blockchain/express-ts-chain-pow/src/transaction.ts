@@ -3,26 +3,26 @@ import { ec as EC } from 'elliptic';
 
 const ec = new EC('secp256k1');
 
-class TxOut {
+export class TxOut {
     constructor(
         public address: string,
         public amount: number,
     ) { }
 }
 
-class TxIn {
+export class TxIn {
     public txOutId: string;
     public txOutIndex: number;
     public signature: string;
 }
 
-class Transaction {
+export class Transaction {
     public id: string;
     public txIns: TxIn[];
     public txOuts: TxOut[];
 }
 
-class UnspentTxOut {
+export class UnspentTxOut {
     constructor(
         public readonly txOutId: string,
         public readonly txOutIndex: number,
@@ -31,7 +31,7 @@ class UnspentTxOut {
     ) { }
 }
 
-const getTransactionId = (tx: Transaction): string => {
+export const getTransactionId = (tx: Transaction): string => {
     const txInContent: string = tx.txIns
         .map(txIn => txIn.txOutId + txIn.txOutIndex)
         .join('');
@@ -43,7 +43,7 @@ const getTransactionId = (tx: Transaction): string => {
     return SHA256(txInContent + txOutContent).toString();
 }
 
-const signTxIn = (
+export const signTxIn = (
     tx: Transaction,
     txInIndex: number,
     privateKey: string,
