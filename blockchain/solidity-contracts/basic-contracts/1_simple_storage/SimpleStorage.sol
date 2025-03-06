@@ -8,25 +8,25 @@ contract SimpleStorage {
     // int(int256) -> int(8*[1..32]) -> int8, int16, int24, int32, int40 ... int256
 
     uint256 storedData;
-    mapping (string => uint) public nameToFavoriteNumber;
+    mapping(string => uint) public nameToFavoriteNumber;
     People[] public people;
 
-    struct People{
+    struct People {
         uint256 favoriteNumber;
-        string name;        
+        string name;
     }
 
-    function store(uint256 _storedData) public  {
-        storedData=_storedData;
+    function store(uint256 _storedData) public virtual {
+        storedData = _storedData;
     }
 
-    function retrieveStoredData() public view returns(uint) {
-        return  storedData;
+    function retrieveStoredData() public view returns (uint) {
+        return storedData;
     }
 
-    function addPerson(string memory _name, uint256 _favoriteNumber) public{
-        // people.push(People({favoriteNumber:_favoriteNumber,name:_name})); 
+    function addPerson(string memory _name, uint256 _favoriteNumber) public {
+        // people.push(People({favoriteNumber:_favoriteNumber,name:_name}));
         people.push(People(_favoriteNumber, _name)); // passed in the order of declaration
-        nameToFavoriteNumber[_name]=_favoriteNumber;
+        nameToFavoriteNumber[_name] = _favoriteNumber;
     }
 }
