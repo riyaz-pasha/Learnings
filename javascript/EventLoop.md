@@ -19,7 +19,7 @@ It continuously checks if there’s any pending task and decides:
 ### Event loop phases
 
 1. Timers Phase - Executes `setTimeout()` and `setInterval()` callbacks.
-2. I/O callbacks Phase - Executes I/O callbacks (e.g., file system, network).
+2. Pending callbacks Phase - Executes I/O callbacks (e.g., file system, network).
 3. Idle, Prepare Phase - Internal operations by Node.js
 4. Poll Phase - Retrieves new I/O events, executes related callbacks.
 5. Check Phase - Executes `setImmediate()` callbacks.
