@@ -6,3 +6,4 @@ fs.readFile(__filename, () => {
     setTimeout(() => console.log('setTimeout inside I/O phase'), 0);
     setImmediate(() => console.log('setImmediate inside I/O phase'));
 });
+
