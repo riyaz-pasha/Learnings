@@ -23,6 +23,11 @@ public class ReflectionExample {
         privateSetEmailMethod.invoke(myTestClassObj, "newTest@email.com");
 
         System.out.println("Private Email: " + privateEmailField.get(myTestClassObj));
+
+        Class<?> MathUtilsClass = Class.forName("MathUtils");
+        Method squareMethod = MathUtilsClass.getMethod("square", int.class);
+        System.out.println("Square : " + squareMethod.invoke(null, 3));
+
     }
 
     private static void print(Field[] fields, String type) {
@@ -56,5 +61,11 @@ class TestClass {
 
     public String getName() {
         return name;
+    }
+}
+
+class MathUtils {
+    public static int square(int num) {
+        return num * num;
     }
 }
