@@ -25,6 +25,30 @@
 * **Terminated**
   * Execution finished
 
+### Volatile
+
+* In a muti threaded environment, each thread keeps a cached copy of a variable instead of always reading from main memory. This can lead inconsitencies or stale data when 1 thread updates the variable and another thread reads the data.
+* `volatile` ensures visibility and ordering.
+
+* [](https://www.baeldung.com/java-volatile)
+
+**How CPU Caching Works?**
+
+* Modern CPUs has multi layered cache syatems (L1/L2/L2) to improve performance.
+* This means,
+  * Instead of always accessing main memory (RAM) (which is slow), CPUs store requrently used variables in CPU Registers and L1/L2/L3 caches.
+  * Each CPU core has its own cache, leading to the visibility problem in multi threading.
+
+**📌 Example of CPU Caching**
+
+* Imagine a shared variable `flag = false`, which is stored in main memory initially.
+* Thread 1 (CPU Core 1) reads flag → It loads it into its local cache (L1).
+* Thread 2 (CPU Core 2) also reads flag → It loads a separate cached copy.
+* Thread 2 updates `flag = true` → But the update is only in Core 2's cache, not in main memory!
+* Thread 1 keeps checking flag → It never sees the update because it's still reading its cached copy!
+* This is called the `cache coherence problem`. 
+
+* [Example](./concepts/threads/VolatileExample.java)
 
 ### Synchronized
 
