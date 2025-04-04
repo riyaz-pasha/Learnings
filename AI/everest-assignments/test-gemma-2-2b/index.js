@@ -123,8 +123,8 @@ function getCustomCsvData() {
 async function main() {
     try {
         // const csvData = getCustomCsvData();
-        // const csvData = await readCSV2(CSV_FILE2);
-        const csvData = await readCSV(CSV_FILE);
+        const csvData = await readCSV2(CSV_FILE2);
+        // const csvData = await readCSV(CSV_FILE);
         if (!csvData.length) {
             console.log("⚠️ No valid data found in CSV file.");
             return;
