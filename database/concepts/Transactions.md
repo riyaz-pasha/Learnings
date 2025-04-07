@@ -74,7 +74,8 @@ COMMIT;
 ### Isolation 
 
 - Concurrently running transactions do not interefere with each other.
-- We can decide if two or more transactions reading/modifying the same row at once, then we can decide how the data should look like.
+- For example, if one transaction makes several writes, then other transaction should see either all or none of those writes, but not some subset.
+-
 
 ---
 
