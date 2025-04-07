@@ -99,3 +99,6 @@
 - [ ] Stanford DB Course
 - [ ] Postgres Internals Blog Series
 - [ ] Real-world DB architecture talks (Uber, Etsy, Netflix)
+
+- https://www.freecodecamp.org/news/acid-databases-explained/
+- 
