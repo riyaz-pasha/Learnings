@@ -7,7 +7,7 @@ import "./AggregatorV3Interface.sol";
 // https://github.com/smartcontractkit/chainlink/blob/develop/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol
 
 library PriceConverterLibrary {
-    function getPrice() public view returns (uint256) {
+    function getPrice() internal view returns (uint256) {
         // ABI
         // Address ETH / USD 0x694AA1769357215DE4FAC081bf1f309aDC325306
 
@@ -26,7 +26,7 @@ library PriceConverterLibrary {
         // return uint256(price);
     }
 
-    function getVersion() public view returns (uint256) {
+    function getVersion() internal view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             0x694AA1769357215DE4FAC081bf1f309aDC325306
         );
@@ -35,7 +35,7 @@ library PriceConverterLibrary {
 
     function getConversionRate(
         uint256 ethAmount
-    ) public view returns (uint256) {
+    ) internal view returns (uint256) {
         uint256 ethPrice = getPrice();
         uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1e18;
         return ethAmountInUsd;
