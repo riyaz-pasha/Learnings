@@ -1,4 +1,7 @@
-from agents import (OpenAIChatCompletionsModel, set_default_openai_client,
+from typing import Any
+
+from agents import (Agent, FunctionTool, OpenAIChatCompletionsModel,
+                    RunContextWrapper, Runner, set_default_openai_client,
                     set_tracing_disabled)
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.utils.function_calling import convert_to_openai_function
@@ -30,18 +33,47 @@ def get_weather(city: str) -> str:
     return f"The weather in {city} is sunny with a temperature of 30°C."
 
 
-weather_function = convert_to_openai_function(WeatherSearch)
-print(weather_function)
+async def weather_tool_invoke(context: RunContextWrapper[Any], params_json: str) -> str:
+    try:
+        # Parse the JSON params into the WeatherSearch schema
+        params = WeatherSearch.model_validate_json(params_json)
+        return get_weather(city=params.city)
+    except Exception as e:
+        return f"Error getting weather: {str(e)}"
 
-model_with_tool = model.bind(functions=[weather_function])
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant. Use tools if needed."),
-    ("human", "{question}")
-])
-
-user_input = prompt.format_messages(
-    question="What's the weather like in Hyderabad?"
+# Define the FunctionTool
+weather_tool = FunctionTool(
+    name=get_weather.__name__,
+    description="Get the current weather of a city",
+    params_json_schema=WeatherSearch.model_json_schema(),
+    on_invoke_tool=weather_tool_invoke,
+    strict_json_schema=True
 )
 
-response = model_with_tool(user_input)
+agent = Agent(
+    name="Weather Assistant",
+    instructions="You are a helpful weather assistant. Use the get_weather tool when asked about the weather.",
+    model=model,
+    tools=[weather_tool]
+)
+
+
+async def main():
+    response = await Runner.run(agent, input="What's the weather in Paris?")
+    print(response.final_output)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+
+# weather_function = convert_to_openai_function(WeatherSearch)
+# print(weather_function)
+# model_with_tool = model.bind(functions=[weather_function])
+# prompt = ChatPromptTemplate.from_messages([
+#     ("system", "You are a helpful assistant. Use tools if needed."),
+#     ("human", "{question}")
+# ])
+# user_input = prompt.format_messages(
+#     question="What's the weather like in Hyderabad?"
+# )
+# response = model_with_tool(user_input)

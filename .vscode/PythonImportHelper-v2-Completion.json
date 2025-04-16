@@ -1,0 +1,1933 @@
+[
+    {
+        "label": "requests",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "requests",
+        "description": "requests",
+        "detail": "requests",
+        "documentation": {}
+    },
+    {
+        "label": "DocArrayInMemorySearch",
+        "importPath": "langchain_community.vectorstores",
+        "description": "langchain_community.vectorstores",
+        "isExtraImport": true,
+        "detail": "langchain_community.vectorstores",
+        "documentation": {}
+    },
+    {
+        "label": "Embeddings",
+        "importPath": "langchain_core.embeddings",
+        "description": "langchain_core.embeddings",
+        "isExtraImport": true,
+        "detail": "langchain_core.embeddings",
+        "documentation": {}
+    },
+    {
+        "label": "ChatPromptTemplate",
+        "importPath": "langchain.prompts",
+        "description": "langchain.prompts",
+        "isExtraImport": true,
+        "detail": "langchain.prompts",
+        "documentation": {}
+    },
+    {
+        "label": "ChatPromptTemplate",
+        "importPath": "langchain.prompts",
+        "description": "langchain.prompts",
+        "isExtraImport": true,
+        "detail": "langchain.prompts",
+        "documentation": {}
+    },
+    {
+        "label": "ChatPromptTemplate",
+        "importPath": "langchain.prompts",
+        "description": "langchain.prompts",
+        "isExtraImport": true,
+        "detail": "langchain.prompts",
+        "documentation": {}
+    },
+    {
+        "label": "ChatOllama",
+        "importPath": "langchain_ollama",
+        "description": "langchain_ollama",
+        "isExtraImport": true,
+        "detail": "langchain_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "OllamaLLM",
+        "importPath": "langchain_ollama",
+        "description": "langchain_ollama",
+        "isExtraImport": true,
+        "detail": "langchain_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "StrOutputParser",
+        "importPath": "langchain.schema.output_parser",
+        "description": "langchain.schema.output_parser",
+        "isExtraImport": true,
+        "detail": "langchain.schema.output_parser",
+        "documentation": {}
+    },
+    {
+        "label": "RunnableSequence",
+        "importPath": "langchain_core.runnables",
+        "description": "langchain_core.runnables",
+        "isExtraImport": true,
+        "detail": "langchain_core.runnables",
+        "documentation": {}
+    },
+    {
+        "label": "OpenAIChatCompletionsModel",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_default_openai_client",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_tracing_disabled",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "Agent",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "FunctionTool",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "OpenAIChatCompletionsModel",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "RunContextWrapper",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "Runner",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_default_openai_client",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_tracing_disabled",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "Agent",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "FunctionTool",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "OpenAIChatCompletionsModel",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "RunContextWrapper",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "Runner",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_default_openai_client",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "set_tracing_disabled",
+        "importPath": "agents",
+        "description": "agents",
+        "isExtraImport": true,
+        "detail": "agents",
+        "documentation": {}
+    },
+    {
+        "label": "openai",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "openai",
+        "description": "openai",
+        "detail": "openai",
+        "documentation": {}
+    },
+    {
+        "label": "AsyncOpenAI",
+        "importPath": "openai",
+        "description": "openai",
+        "isExtraImport": true,
+        "detail": "openai",
+        "documentation": {}
+    },
+    {
+        "label": "AsyncOpenAI",
+        "importPath": "openai",
+        "description": "openai",
+        "isExtraImport": true,
+        "detail": "openai",
+        "documentation": {}
+    },
+    {
+        "label": "AsyncOpenAI",
+        "importPath": "openai",
+        "description": "openai",
+        "isExtraImport": true,
+        "detail": "openai",
+        "documentation": {}
+    },
+    {
+        "label": "List",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Any",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Any",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "BaseModel",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "BaseModel",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "Field",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "BaseModel",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "Field",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "BaseModel",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "Field",
+        "importPath": "pydantic",
+        "description": "pydantic",
+        "isExtraImport": true,
+        "detail": "pydantic",
+        "documentation": {}
+    },
+    {
+        "label": "convert_to_openai_function",
+        "importPath": "langchain_core.utils.function_calling",
+        "description": "langchain_core.utils.function_calling",
+        "isExtraImport": true,
+        "detail": "langchain_core.utils.function_calling",
+        "documentation": {}
+    },
+    {
+        "label": "convert_to_openai_function",
+        "importPath": "langchain_core.utils.function_calling",
+        "description": "langchain_core.utils.function_calling",
+        "isExtraImport": true,
+        "detail": "langchain_core.utils.function_calling",
+        "documentation": {}
+    },
+    {
+        "label": "ChatOpenAI",
+        "importPath": "langchain_openai",
+        "description": "langchain_openai",
+        "isExtraImport": true,
+        "detail": "langchain_openai",
+        "documentation": {}
+    },
+    {
+        "label": "json",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "json",
+        "description": "json",
+        "detail": "json",
+        "documentation": {}
+    },
+    {
+        "label": "os",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "os",
+        "description": "os",
+        "detail": "os",
+        "documentation": {}
+    },
+    {
+        "label": "find_dotenv",
+        "importPath": "dotenv",
+        "description": "dotenv",
+        "isExtraImport": true,
+        "detail": "dotenv",
+        "documentation": {}
+    },
+    {
+        "label": "load_dotenv",
+        "importPath": "dotenv",
+        "description": "dotenv",
+        "isExtraImport": true,
+        "detail": "dotenv",
+        "documentation": {}
+    },
+    {
+        "label": "load_dotenv",
+        "importPath": "dotenv",
+        "description": "dotenv",
+        "isExtraImport": true,
+        "detail": "dotenv",
+        "documentation": {}
+    },
+    {
+        "label": "asyncio",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "asyncio",
+        "description": "asyncio",
+        "detail": "asyncio",
+        "documentation": {}
+    },
+    {
+        "label": "aiohttp",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "aiohttp",
+        "description": "aiohttp",
+        "detail": "aiohttp",
+        "documentation": {}
+    },
+    {
+        "label": "ollama",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "ollama",
+        "description": "ollama",
+        "detail": "ollama",
+        "documentation": {}
+    },
+    {
+        "label": "AgentType",
+        "importPath": "langchain.agents",
+        "description": "langchain.agents",
+        "isExtraImport": true,
+        "detail": "langchain.agents",
+        "documentation": {}
+    },
+    {
+        "label": "Tool",
+        "importPath": "langchain.agents",
+        "description": "langchain.agents",
+        "isExtraImport": true,
+        "detail": "langchain.agents",
+        "documentation": {}
+    },
+    {
+        "label": "initialize_agent",
+        "importPath": "langchain.agents",
+        "description": "langchain.agents",
+        "isExtraImport": true,
+        "detail": "langchain.agents",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "importPath": "flatted",
+        "description": "flatted",
+        "isExtraImport": true,
+        "detail": "flatted",
+        "documentation": {}
+    },
+    {
+        "label": "OllamaEmbeddings",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.doc_search_ollama",
+        "description": "AI.agents.concepts.doc_search_ollama",
+        "peekOfCode": "class OllamaEmbeddings(Embeddings):\n    def __init__(self, model=\"nomic-embed-text\"):\n        self.model = model\n    def embed_query(self, text):\n        return self._embed(text)\n    def embed_documents(self, texts):\n        return [self._embed(t) for t in texts]\n    def _embed(self, text):\n        res = requests.post(\n            \"http://localhost:11434/api/embeddings\",",
+        "detail": "AI.agents.concepts.doc_search_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "vector_store",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.doc_search_ollama",
+        "description": "AI.agents.concepts.doc_search_ollama",
+        "peekOfCode": "vector_store = DocArrayInMemorySearch.from_texts(\n    texts=[\n        \"Riyaz likes mangoes\",\n        \"Movies are popular in Hyderabad\",\n    ],\n    # Use embedding model running in Ollama\n    embedding=OllamaEmbeddings(model=\"nomic-embed-text\"),\n)\nretriever = vector_store.as_retriever()\n# Test queries",
+        "detail": "AI.agents.concepts.doc_search_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "retriever",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.doc_search_ollama",
+        "description": "AI.agents.concepts.doc_search_ollama",
+        "peekOfCode": "retriever = vector_store.as_retriever()\n# Test queries\nprint(retriever.invoke(\"what Riyaz likes?\"))\nprint(retriever.invoke(\"what is famous in Hyderabad?\"))",
+        "detail": "AI.agents.concepts.doc_search_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "prompt",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.lanchain_ollama_integration",
+        "description": "AI.agents.concepts.lanchain_ollama_integration",
+        "peekOfCode": "prompt = ChatPromptTemplate.from_template(\n    \"tell me a short joke about {topic}\"\n)\nmodel = ChatOllama(model=\"qwen2.5:7b\")\noutput_parser = StrOutputParser()\nchain = prompt | model | output_parser\n# chain = RunnableSequence(steps=[prompt, model, output_parser])\nresponse = chain.invoke({\"topic\": \"bears\"})\nprint(response)",
+        "detail": "AI.agents.concepts.lanchain_ollama_integration",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.lanchain_ollama_integration",
+        "description": "AI.agents.concepts.lanchain_ollama_integration",
+        "peekOfCode": "model = ChatOllama(model=\"qwen2.5:7b\")\noutput_parser = StrOutputParser()\nchain = prompt | model | output_parser\n# chain = RunnableSequence(steps=[prompt, model, output_parser])\nresponse = chain.invoke({\"topic\": \"bears\"})\nprint(response)",
+        "detail": "AI.agents.concepts.lanchain_ollama_integration",
+        "documentation": {}
+    },
+    {
+        "label": "output_parser",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.lanchain_ollama_integration",
+        "description": "AI.agents.concepts.lanchain_ollama_integration",
+        "peekOfCode": "output_parser = StrOutputParser()\nchain = prompt | model | output_parser\n# chain = RunnableSequence(steps=[prompt, model, output_parser])\nresponse = chain.invoke({\"topic\": \"bears\"})\nprint(response)",
+        "detail": "AI.agents.concepts.lanchain_ollama_integration",
+        "documentation": {}
+    },
+    {
+        "label": "chain",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.lanchain_ollama_integration",
+        "description": "AI.agents.concepts.lanchain_ollama_integration",
+        "peekOfCode": "chain = prompt | model | output_parser\n# chain = RunnableSequence(steps=[prompt, model, output_parser])\nresponse = chain.invoke({\"topic\": \"bears\"})\nprint(response)",
+        "detail": "AI.agents.concepts.lanchain_ollama_integration",
+        "documentation": {}
+    },
+    {
+        "label": "response",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.lanchain_ollama_integration",
+        "description": "AI.agents.concepts.lanchain_ollama_integration",
+        "peekOfCode": "response = chain.invoke({\"topic\": \"bears\"})\nprint(response)",
+        "detail": "AI.agents.concepts.lanchain_ollama_integration",
+        "documentation": {}
+    },
+    {
+        "label": "client",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.ollama_local",
+        "description": "AI.agents.concepts.ollama_local",
+        "peekOfCode": "client = AsyncOpenAI(base_url='http://localhost:11431/v1', api_key='ollama')\nset_default_openai_client(client=client)\nset_tracing_disabled(True)\nmodel = OpenAIChatCompletionsModel(model='qwen2.5:7b', openai_client=client)\nmessages = [\n    {\"role\": \"user\", \"content\": \"Suggest me a movie to watch\"}\n]\nresponse = model(input=messages)\nprint(response)",
+        "detail": "AI.agents.concepts.ollama_local",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.ollama_local",
+        "description": "AI.agents.concepts.ollama_local",
+        "peekOfCode": "model = OpenAIChatCompletionsModel(model='qwen2.5:7b', openai_client=client)\nmessages = [\n    {\"role\": \"user\", \"content\": \"Suggest me a movie to watch\"}\n]\nresponse = model(input=messages)\nprint(response)",
+        "detail": "AI.agents.concepts.ollama_local",
+        "documentation": {}
+    },
+    {
+        "label": "messages",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.ollama_local",
+        "description": "AI.agents.concepts.ollama_local",
+        "peekOfCode": "messages = [\n    {\"role\": \"user\", \"content\": \"Suggest me a movie to watch\"}\n]\nresponse = model(input=messages)\nprint(response)",
+        "detail": "AI.agents.concepts.ollama_local",
+        "documentation": {}
+    },
+    {
+        "label": "response",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.ollama_local",
+        "description": "AI.agents.concepts.ollama_local",
+        "peekOfCode": "response = model(input=messages)\nprint(response)",
+        "detail": "AI.agents.concepts.ollama_local",
+        "documentation": {}
+    },
+    {
+        "label": "UserNormal",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "class UserNormal:\n    def __init__(self, name: str, age: int, email: str):\n        self.name = name\n        self.age = age\n        self.email = email\nuser1 = UserNormal(name=\"Riyaz\", age=27, email=\"test@email.com\")\nuser2 = UserNormal(name=\"Riyaz\", age=\"Twenty Seven\", email=\"test@email.com\")\nprint(user1)\nprint(user2)\nprint(user2.age)",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "UserPydantic",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "class UserPydantic(BaseModel):\n    name: str\n    age: int\n    email: str\nuser3 = UserPydantic(name=\"Riyaz\", age=27, email=\"test@email.com\")\nuser4 = UserPydantic(name=\"Riyaz\", age=\"Twenty Seven\",\n                     email=\"test@email.com\")  # throws error\nprint(user3)\nclass Class(BaseModel):\n    students: List[UserPydantic]",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "Class",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "class Class(BaseModel):\n    students: List[UserPydantic]",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "user1",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "user1 = UserNormal(name=\"Riyaz\", age=27, email=\"test@email.com\")\nuser2 = UserNormal(name=\"Riyaz\", age=\"Twenty Seven\", email=\"test@email.com\")\nprint(user1)\nprint(user2)\nprint(user2.age)\nclass UserPydantic(BaseModel):\n    name: str\n    age: int\n    email: str\nuser3 = UserPydantic(name=\"Riyaz\", age=27, email=\"test@email.com\")",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "user2",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "user2 = UserNormal(name=\"Riyaz\", age=\"Twenty Seven\", email=\"test@email.com\")\nprint(user1)\nprint(user2)\nprint(user2.age)\nclass UserPydantic(BaseModel):\n    name: str\n    age: int\n    email: str\nuser3 = UserPydantic(name=\"Riyaz\", age=27, email=\"test@email.com\")\nuser4 = UserPydantic(name=\"Riyaz\", age=\"Twenty Seven\",",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "user3",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "user3 = UserPydantic(name=\"Riyaz\", age=27, email=\"test@email.com\")\nuser4 = UserPydantic(name=\"Riyaz\", age=\"Twenty Seven\",\n                     email=\"test@email.com\")  # throws error\nprint(user3)\nclass Class(BaseModel):\n    students: List[UserPydantic]",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "user4",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_example",
+        "description": "AI.agents.concepts.pydantic_example",
+        "peekOfCode": "user4 = UserPydantic(name=\"Riyaz\", age=\"Twenty Seven\",\n                     email=\"test@email.com\")  # throws error\nprint(user3)\nclass Class(BaseModel):\n    students: List[UserPydantic]",
+        "detail": "AI.agents.concepts.pydantic_example",
+        "documentation": {}
+    },
+    {
+        "label": "WeatherSearch",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "class WeatherSearch(BaseModel):\n    \"\"\"Get current weather of a given location\"\"\"\n    city: str = Field(description=\"Name of the city to get the weather for\")\ndef get_weather(city: str) -> str:\n    return f\"The weather in {city} is sunny with a temperature of 30°C.\"\nweather_function = convert_to_openai_function(WeatherSearch)\nprint(weather_function)\nprompt = ChatPromptTemplate.from_messages([\n    (\"system\", \"You are a helpful assistant. Use tools if needed.\"),\n    (\"human\", \"{question}\")",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "get_weather",
+        "kind": 2,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "def get_weather(city: str) -> str:\n    return f\"The weather in {city} is sunny with a temperature of 30°C.\"\nweather_function = convert_to_openai_function(WeatherSearch)\nprint(weather_function)\nprompt = ChatPromptTemplate.from_messages([\n    (\"system\", \"You are a helpful assistant. Use tools if needed.\"),\n    (\"human\", \"{question}\")\n])\nmodel = ChatOpenAI()\nmodel_with_tool = model.bind(functions=[weather_function])",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "weather_function",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "weather_function = convert_to_openai_function(WeatherSearch)\nprint(weather_function)\nprompt = ChatPromptTemplate.from_messages([\n    (\"system\", \"You are a helpful assistant. Use tools if needed.\"),\n    (\"human\", \"{question}\")\n])\nmodel = ChatOpenAI()\nmodel_with_tool = model.bind(functions=[weather_function])\nuser_input = prompt.format_messages(\n    question=\"What's the weather like in Hyderabad?\"",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "prompt",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "prompt = ChatPromptTemplate.from_messages([\n    (\"system\", \"You are a helpful assistant. Use tools if needed.\"),\n    (\"human\", \"{question}\")\n])\nmodel = ChatOpenAI()\nmodel_with_tool = model.bind(functions=[weather_function])\nuser_input = prompt.format_messages(\n    question=\"What's the weather like in Hyderabad?\"\n)\nresponse = model_with_tool.invoke(user_input)",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "model = ChatOpenAI()\nmodel_with_tool = model.bind(functions=[weather_function])\nuser_input = prompt.format_messages(\n    question=\"What's the weather like in Hyderabad?\"\n)\nresponse = model_with_tool.invoke(user_input)",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "model_with_tool",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "model_with_tool = model.bind(functions=[weather_function])\nuser_input = prompt.format_messages(\n    question=\"What's the weather like in Hyderabad?\"\n)\nresponse = model_with_tool.invoke(user_input)",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "user_input",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "user_input = prompt.format_messages(\n    question=\"What's the weather like in Hyderabad?\"\n)\nresponse = model_with_tool.invoke(user_input)",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "response",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai",
+        "description": "AI.agents.concepts.pydantic_openai",
+        "peekOfCode": "response = model_with_tool.invoke(user_input)",
+        "detail": "AI.agents.concepts.pydantic_openai",
+        "documentation": {}
+    },
+    {
+        "label": "WeatherSearch",
+        "kind": 6,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "class WeatherSearch(BaseModel):\n    \"\"\"Get current weather of a given location\"\"\"\n    city: str = Field(description=\"Name of the city to get the weather for\")\ndef get_weather(city: str) -> str:\n    return f\"The weather in {city} is sunny with a temperature of 30°C.\"\nasync def weather_tool_invoke(context: RunContextWrapper[Any], params_json: str) -> str:\n    try:\n        # Parse the JSON params into the WeatherSearch schema\n        params = WeatherSearch.model_validate_json(params_json)\n        return get_weather(city=params.city)",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "get_weather",
+        "kind": 2,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "def get_weather(city: str) -> str:\n    return f\"The weather in {city} is sunny with a temperature of 30°C.\"\nasync def weather_tool_invoke(context: RunContextWrapper[Any], params_json: str) -> str:\n    try:\n        # Parse the JSON params into the WeatherSearch schema\n        params = WeatherSearch.model_validate_json(params_json)\n        return get_weather(city=params.city)\n    except Exception as e:\n        return f\"Error getting weather: {str(e)}\"\n# Define the FunctionTool",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "external_client",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "external_client = AsyncOpenAI(\n    base_url='http://localhost:11434/v1',\n    api_key='ollama',  # required, but unused\n)\nset_default_openai_client(external_client)\nset_tracing_disabled(True)\n# Create model instance with Ollama\nmodel = OpenAIChatCompletionsModel(\n    model=\"qwen2.5:7b\",  # or another model\n    openai_client=external_client,",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "model = OpenAIChatCompletionsModel(\n    model=\"qwen2.5:7b\",  # or another model\n    openai_client=external_client,\n)\nclass WeatherSearch(BaseModel):\n    \"\"\"Get current weather of a given location\"\"\"\n    city: str = Field(description=\"Name of the city to get the weather for\")\ndef get_weather(city: str) -> str:\n    return f\"The weather in {city} is sunny with a temperature of 30°C.\"\nasync def weather_tool_invoke(context: RunContextWrapper[Any], params_json: str) -> str:",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "weather_tool",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "weather_tool = FunctionTool(\n    name=get_weather.__name__,\n    description=\"Get the current weather of a city\",\n    params_json_schema=WeatherSearch.model_json_schema(),\n    on_invoke_tool=weather_tool_invoke,\n    strict_json_schema=True\n)\nagent = Agent(\n    name=\"Weather Assistant\",\n    instructions=\"You are a helpful weather assistant. Use the get_weather tool when asked about the weather.\",",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "agent",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.pydantic_openai_ollama",
+        "description": "AI.agents.concepts.pydantic_openai_ollama",
+        "peekOfCode": "agent = Agent(\n    name=\"Weather Assistant\",\n    instructions=\"You are a helpful weather assistant. Use the get_weather tool when asked about the weather.\",\n    model=model,\n    tools=[weather_tool]\n)\nasync def main():\n    response = await Runner.run(agent, input=\"What's the weather in Paris?\")\n    print(response.final_output)\nif __name__ == \"__main__\":",
+        "detail": "AI.agents.concepts.pydantic_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "get_weather",
+        "kind": 2,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "def get_weather(city: str) -> str:\n    \"\"\"Get current weather of a given location\"\"\"\n    weather_data = {\n        \"Hyderabad\": \"32\",\n    }\n    return weather_data.get(city, \"Not Found\")\nfunctions = [\n    {\n        \"name\": get_weather.__name__,\n        \"description\": get_weather.__doc__,",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "openai_api_key",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "openai_api_key = os.environ['OPENAI_API_KEY']  # raises error\nopenai.api_key = openai_api_key\ndef get_weather(city: str) -> str:\n    \"\"\"Get current weather of a given location\"\"\"\n    weather_data = {\n        \"Hyderabad\": \"32\",\n    }\n    return weather_data.get(city, \"Not Found\")\nfunctions = [\n    {",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "openai.api_key",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "openai.api_key = openai_api_key\ndef get_weather(city: str) -> str:\n    \"\"\"Get current weather of a given location\"\"\"\n    weather_data = {\n        \"Hyderabad\": \"32\",\n    }\n    return weather_data.get(city, \"Not Found\")\nfunctions = [\n    {\n        \"name\": get_weather.__name__,",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "functions",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "functions = [\n    {\n        \"name\": get_weather.__name__,\n        \"description\": get_weather.__doc__,\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"city\": {\n                    \"type\": \"string\",\n                    \"description\": \"Name of the city, e.g. Hyderabad, Delhi, Mumbai\",",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "messages",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "messages = [\n    {\n        \"role\": \"user\",\n        \"content\": \"What is the weather in Hyderabad?\"\n    }\n]\nclient = openai.OpenAI()\nresponse = client.chat.completions.create(\n    model=\"gpt-3.5-turbo\",\n    messages=messages,",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "client",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "client = openai.OpenAI()\nresponse = client.chat.completions.create(\n    model=\"gpt-3.5-turbo\",\n    messages=messages,\n    # function_call=\"auto\"\n    # function_call=\"none\"\n    # function_call={\"name\": get_weather.__name__}\n    functions=functions\n)\nprint(response)",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "response",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "response = client.chat.completions.create(\n    model=\"gpt-3.5-turbo\",\n    messages=messages,\n    # function_call=\"auto\"\n    # function_call=\"none\"\n    # function_call={\"name\": get_weather.__name__}\n    functions=functions\n)\nprint(response)\n# open AI",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "response_message",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "response_message = response.choices[0].message\nprint(response_message)\nfn_call = response_message.function_call\nfn_call_args = json.loads(fn_call.arguments)",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "fn_call",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "fn_call = response_message.function_call\nfn_call_args = json.loads(fn_call.arguments)",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "fn_call_args",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_agent",
+        "description": "AI.agents.concepts.weather_agent",
+        "peekOfCode": "fn_call_args = json.loads(fn_call.arguments)",
+        "detail": "AI.agents.concepts.weather_agent",
+        "documentation": {}
+    },
+    {
+        "label": "external_client",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_openai_ollama",
+        "description": "AI.agents.concepts.weather_openai_ollama",
+        "peekOfCode": "external_client = AsyncOpenAI(\n    base_url='http://localhost:11434/v1',\n    api_key='ollama',  # required, but unused\n)\nset_default_openai_client(external_client)\nset_tracing_disabled(True)\n# Create model instance with Ollama\nmodel = OpenAIChatCompletionsModel(\n    model=\"qwen2.5:7b\",\n    openai_client=external_client,",
+        "detail": "AI.agents.concepts.weather_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_openai_ollama",
+        "description": "AI.agents.concepts.weather_openai_ollama",
+        "peekOfCode": "model = OpenAIChatCompletionsModel(\n    model=\"qwen2.5:7b\",\n    openai_client=external_client,\n)\n# Create a helper function for getting weather\nasync def fetch_weather(location: str) -> str:\n    \"\"\"Get current weather for a location.\"\"\"\n    async with aiohttp.ClientSession() as session:\n        async with session.get(f\"https://wttr.in/{location}?format=j1\") as response:\n            if response.status == 200:",
+        "detail": "AI.agents.concepts.weather_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "weather_tool",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_openai_ollama",
+        "description": "AI.agents.concepts.weather_openai_ollama",
+        "peekOfCode": "weather_tool = FunctionTool(\n    name=\"get_weather\",\n    description=\"Get the current weather for a specified location\",\n    params_json_schema={\n        \"type\": \"object\",\n         \"properties\": {\n                \"location\": {\n                    \"type\": \"string\",\n                    \"description\": \"The city or location to get weather for, e.g., 'Tokyo' or 'New York'\"\n                }",
+        "detail": "AI.agents.concepts.weather_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "agent",
+        "kind": 5,
+        "importPath": "AI.agents.concepts.weather_openai_ollama",
+        "description": "AI.agents.concepts.weather_openai_ollama",
+        "peekOfCode": "agent = Agent(\n    name=\"Weather assistant\",\n    instructions=\"You are a weather expert. Use the get_weather tool to find current weather information when asked about weather in a location.\",\n    model=model,\n    tools=[weather_tool]\n)\nasync def main():\n    # Create a FunctionTool with the correct parameters\n    response = await Runner.run(agent, input=\"What's the weather in Tokyo?\")\n    print(response.final_output)",
+        "detail": "AI.agents.concepts.weather_openai_ollama",
+        "documentation": {}
+    },
+    {
+        "label": "add_two_numbers",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "def add_two_numbers(a: int, b: int) -> int:\n    \"\"\"\n    Add two numbers.\n    Args:\n        a: The first integer.\n        b: The second integer.\n    Returns:\n        The sum of the two numbers.\n    \"\"\"\n    return a + b",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "multiply_two_numbers",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "def multiply_two_numbers(a: int, b: int) -> int:\n    \"\"\"\n    Multiply two numbers.\n    Args:\n        a: The first integer.\n        b: The second integer.\n    Returns:\n        The multiplied value of the two numbers.\n    \"\"\"\n    return a * b",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "get_model_response",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "def get_model_response(content: str) -> ollama.ChatResponse:\n    return ollama.chat(\n        model='qwen2.5:7b',\n        messages=[{'role': 'user', 'content': content}],\n        tools=[add_two_numbers, multiply_two_numbers],\n    )\ndef execute_tool_calls(tool_calls: list):\n    \"\"\"Executes any tool calls suggested by the model.\"\"\"\n    for tool_call in tool_calls or []:\n        function_name = tool_call.function.name",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "execute_tool_calls",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "def execute_tool_calls(tool_calls: list):\n    \"\"\"Executes any tool calls suggested by the model.\"\"\"\n    for tool_call in tool_calls or []:\n        function_name = tool_call.function.name\n        arguments = tool_call.function.arguments\n        function_to_call = available_functions.get(function_name)\n        if function_to_call:\n            result = function_to_call(**arguments)\n            print(f\"Function output: {result}\")\n        else:",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "available_functions",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "available_functions = {\n    add_two_numbers.__name__: add_two_numbers,\n    multiply_two_numbers.__name__: multiply_two_numbers,\n}\ndef get_model_response(content: str) -> ollama.ChatResponse:\n    return ollama.chat(\n        model='qwen2.5:7b',\n        messages=[{'role': 'user', 'content': content}],\n        tools=[add_two_numbers, multiply_two_numbers],\n    )",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "messages",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example",
+        "description": "AI.agents.function_calling.simple_example",
+        "peekOfCode": "messages = [\n    \"What is 4 plus 5?\",\n    \"What is 4 times 6?\",\n    \"What is 10 divided by 2\",\n    \"What is 3 power 2\",\n    \"What comes after Sunday?\",\n]\nfor message in messages:\n    response = get_model_response(message)\n    print(response)",
+        "detail": "AI.agents.function_calling.simple_example",
+        "documentation": {}
+    },
+    {
+        "label": "AddInput",
+        "kind": 6,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "class AddInput(BaseModel):\n    a: int = Field(..., description=\"The first integer.\")\n    b: int = Field(..., description=\"The second integer.\")\nclass MultiplyInput(BaseModel):\n    a: int = Field(..., description=\"The first integer.\")\n    b: int = Field(..., description=\"The second integer.\")\ndef add_two_numbers(a: int, b: int) -> int:\n    return a + b\ndef multiply_two_numbers(a: int, b: int) -> int:\n    return a * b",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "MultiplyInput",
+        "kind": 6,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "class MultiplyInput(BaseModel):\n    a: int = Field(..., description=\"The first integer.\")\n    b: int = Field(..., description=\"The second integer.\")\ndef add_two_numbers(a: int, b: int) -> int:\n    return a + b\ndef multiply_two_numbers(a: int, b: int) -> int:\n    return a * b\n# Wrap functions as tools with input schemas\ntools = [\n    Tool.from_function(",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "add_two_numbers",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "def add_two_numbers(a: int, b: int) -> int:\n    return a + b\ndef multiply_two_numbers(a: int, b: int) -> int:\n    return a * b\n# Wrap functions as tools with input schemas\ntools = [\n    Tool.from_function(\n        func=add_two_numbers,\n        name=\"add_two_numbers\",\n        description=\"Add two integers.\",",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "multiply_two_numbers",
+        "kind": 2,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "def multiply_two_numbers(a: int, b: int) -> int:\n    return a * b\n# Wrap functions as tools with input schemas\ntools = [\n    Tool.from_function(\n        func=add_two_numbers,\n        name=\"add_two_numbers\",\n        description=\"Add two integers.\",\n        args_schema=AddInput\n    ),",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "tools",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "tools = [\n    Tool.from_function(\n        func=add_two_numbers,\n        name=\"add_two_numbers\",\n        description=\"Add two integers.\",\n        args_schema=AddInput\n    ),\n    Tool.from_function(\n        func=multiply_two_numbers,\n        name=\"multiply_two_numbers\",",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "llm",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "llm = OllamaLLM(model=\"qwen2.5:7b\")\nagent = initialize_agent(\n    tools=tools,\n    llm=llm,\n    agent_type=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,\n    verbose=True\n)\n# Test messages\nmessages = [\n    \"What is 4 plus 5?\",",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "agent",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "agent = initialize_agent(\n    tools=tools,\n    llm=llm,\n    agent_type=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,\n    verbose=True\n)\n# Test messages\nmessages = [\n    \"What is 4 plus 5?\",\n    \"What is 4 times 6?\",",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "messages",
+        "kind": 5,
+        "importPath": "AI.agents.function_calling.simple_example_langchain",
+        "description": "AI.agents.function_calling.simple_example_langchain",
+        "peekOfCode": "messages = [\n    \"What is 4 plus 5?\",\n    \"What is 4 times 6?\",\n    \"What is 10 divided by 2?\",\n    \"What is 3 to the power of 2?\",\n    \"What comes after Sunday?\"\n]\nfor user_input in messages:\n    response = agent.invoke({\"input\": user_input})\n    print(response)",
+        "detail": "AI.agents.function_calling.simple_example_langchain",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "def stringify(value):\n    return _stringify(value, separators=(',', ':'))\nassert stringify([None, None]) == '[[null,null]]'\na = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "a = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['o']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "b",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "b = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['one']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['two']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['three']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['a']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['test']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['array']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "a2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "o2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "str",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "str = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "oo",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "peekOfCode": "oo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flat-cache@4.0.1.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "def stringify(value):\n    return _stringify(value, separators=(',', ':'))\nassert stringify([None, None]) == '[[null,null]]'\na = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "a = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['o']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "b",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "b = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['one']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['two']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['three']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['a']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['test']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['array']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "a2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "o2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "str",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "str = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "oo",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "peekOfCode": "oo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.flatted@3.3.2.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "def stringify(value):\n    return _stringify(value, separators=(',', ':'))\nassert stringify([None, None]) == '[[null,null]]'\na = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "a = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['o']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "b",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "b = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['one']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['two']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['three']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['a']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['test']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['array']",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "a2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o2",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "o2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "str",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "str = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "oo",
+        "kind": 5,
+        "importPath": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "description": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "peekOfCode": "oo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "next-js.nextjs-dashboard.node_modules..pnpm.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "def stringify(value):\n    return _stringify(value, separators=(',', ':'))\nassert stringify([None, None]) == '[[null,null]]'\na = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "a = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['o']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "b",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "b = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['one']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['two']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['three']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['a']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['test']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['array']",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a2",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "a2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o2",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "o2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "str",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "str = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "oo",
+        "kind": 5,
+        "importPath": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "description": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "peekOfCode": "oo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.accept-a-payment.server.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "def stringify(value):\n    return _stringify(value, separators=(',', ':'))\nassert stringify([None, None]) == '[[null,null]]'\na = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "a = []\no = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o = {}\nassert stringify(a) == '[[]]'\nassert stringify(o) == '[{}]'\na.append(a)\no['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['o']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['o'] = o\nassert stringify(a) == '[[\"0\"]]'\nassert stringify(o) == '[{\"o\":\"0\"}]'\nb = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "b",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "b = parse(stringify(a))\nassert isinstance(b, list) and b[0] == b\na.append(1)\na.append('two')\na.append(True)\no['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['one']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['one'] = 1\no['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['two']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['two'] = 'two'\no['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['three']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['three'] = True\nassert stringify(a) == '[[\"0\",1,\"1\",true],\"two\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true},\"two\"]'\na.append(o)\no['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['a']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['a'] = a\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\"}]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\"},\"two\",[\"2\",1,\"1\",true,\"0\"]]'\na.append({'test': 'OK'})\na.append([1, 2, 3])\no['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['test']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['test'] = {'test': 'OK'}\no['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o['array']",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o['array'] = [1, 2, 3]\nassert stringify(a) == '[[\"0\",1,\"1\",true,\"2\",\"3\",\"4\"],\"two\",{\"o\":\"2\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"0\",\"test\":\"3\",\"array\":\"4\"},{\"test\":\"5\"},[1,2,3],\"OK\"]'\nassert stringify(o) == '[{\"o\":\"0\",\"one\":1,\"two\":\"1\",\"three\":true,\"a\":\"2\",\"test\":\"3\",\"array\":\"4\"},\"two\",[\"2\",1,\"1\",true,\"0\",\"3\",\"4\"],{\"test\":\"5\"},[1,2,3],\"OK\"]'\na2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "a2",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "a2 = parse(stringify(a));\no2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "o2",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "o2 = parse(stringify(o));\nassert a2[0] == a2\nassert o2['o'] == o2\nassert a2[1] == 1 and a2[2] == 'two' and a2[3] == True and isinstance(a2[4], dict)\nassert a2[4] == a2[4]['o'] and a2 == a2[4]['o']['a']\nstr = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "str",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "str = parse('[{\"prop\":\"1\",\"a\":\"2\",\"b\":\"3\"},{\"value\":123},[\"4\",\"5\"],{\"e\":\"6\",\"t\":\"7\",\"p\":4},{},{\"b\":\"8\"},\"f\",{\"a\":\"9\"},[\"10\"],\"sup\",{\"a\":1,\"d\":2,\"c\":\"7\",\"z\":\"11\",\"h\":1},{\"g\":2,\"a\":\"7\",\"b\":\"12\",\"f\":6},{\"r\":4,\"u\":\"7\",\"c\":5}]')\nassert str['b']['t']['a'] == 'sup' and str['a'][1]['b'][0]['c'] == str['b']['t']\noo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    },
+    {
+        "label": "oo",
+        "kind": 5,
+        "importPath": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "description": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "peekOfCode": "oo = parse('[{\"a\":\"1\",\"b\":\"0\",\"c\":\"2\"},{\"aa\":\"3\"},{\"ca\":\"4\",\"cb\":\"5\",\"cc\":\"6\",\"cd\":\"7\",\"ce\":\"8\",\"cf\":\"9\"},{\"aaa\":\"10\"},{\"caa\":\"4\"},{\"cba\":\"5\"},{\"cca\":\"2\"},{\"cda\":\"4\"},\"value2\",\"value3\",\"value1\"]');\nassert oo['a']['aa']['aaa'] == 'value1' and oo == oo['b'] and oo['c']['ca']['caa'] == oo['c']['ca']\nprint('OK')",
+        "detail": "stripe.checkout-nextjs.node_modules.flatted.python.test",
+        "documentation": {}
+    }
+]
