@@ -1,3 +1,4 @@
+import json
 from typing import Sequence
 
 from ollama import Message, chat
@@ -27,44 +28,135 @@ def get_model_response(messages: Sequence[Message]):
 
 SYSTEM_PROMPT = """
 You are an AI assistant that operates through a sequence of states: START → PLAN → ACTION → OBSERVATION → OUTPUT.
-And return only 1 state at a time
 
-START: Wait for user input. Do not take any action before receiving input.
-PLAN: After receiving input, analyze the request and determine the necessary steps. Decide which tools or actions are required to fulfill the request. Do not execute yet—only plan.
-ACTION: From the plan phase, Extract the funcation to call and arguments to pass in this step. do not invoke any functions. and return action state output
-OBSERVATION: output of the action.
-OUTPUT: Based on the original user input (START) and the results from the OBSERVATION, generate a coherent, complete response and deliver it to the user.
+Respond using only one state at a time in proper JSON format.
+
+Behavior by state:
+
+START:
+- Accept the user input.
+- Do not analyze, plan, or take action—just receive the input.
+
+PLAN:
+- Based on the input from the START state, decide what needs to be done and which function/tool (if any) to use.
+- Do not execute—just create a plan.
+
+ACTION:
+- Based on the PLAN, specify the function to be called and the exact arguments.
+- Do not call the function.
+
+OBSERVATION:
+- Represent the result of the function call provided in the last ACTION step.
+- Do not return the final output here—just proceed to OUTPUT.
+
+OUTPUT:
+- Use the original input and the observation to create a final response for the user.
 
 Available Tools:
-get_weather(city: str)->str
+- get_weather(city: str) -> str
 
-EXAMPLE:
-{"state":"START",        input:"What is the weather in Hyderabad?"}
-{"state":"PLAN",
-    plan:"I will call get_weather to fetch weather details for city Hyderabad."}
-{"state":"ACTION",       function_call:"get_weather",arguments:"Hyderabad"}
-{"state":"OBSERVATION",  output:"30"}
-{"state":"OUTPUT",       message:"Wheather of Hyderabad is 30°C"}
+Always respond in valid JSON format.
+
+Example interaction:
+
+{
+  "state": "START",
+  "input": "What is the weather in Hyderabad?"
+}
+{
+  "state": "PLAN",
+  "plan": "I will call get_weather to fetch weather details for city Hyderabad."
+}
+{
+  "state": "ACTION",
+  "function_call": "get_weather",
+  "arguments": "Hyderabad"
+}
+{
+  "state": "OBSERVATION",
+  "output": "30"
+}
+{
+  "state": "OUTPUT",
+  "message": "Weather of Hyderabad is 30°C"
+}
 """
+
+# messages: Sequence[Message] = [
+#     Message(role="system", content=SYSTEM_PROMPT),
+#     # Message(role="user",
+#     #         content="{state: START, input: What's the weather in Hyderabad?}",
+#     #         ),
+#     # Message(role="user",
+#     #         content="{state:PLAN, plan:I will call get_weather to fetch weather details for city Hyderabad.}",
+#     #         ),
+#     # Message(role="user",
+#     #         content='{"state":"ACTION", "function_call":"get_weather", "arguments":"Hyderabad"}',
+#     #         ),
+#     # Message(role="user",
+#     #         content='{"state":"OBSERVATION", "output":"30"}',
+#     #         ),
+#     Message(role="user",
+#             content='{"state":"OUTPUT", "message":"The weather in Hyderabad is 30°C."}',
+#             ),
+# ]
+
+
+def handle_state(state, content):
+    if state == 'ACTION':
+        fn = content.get('function_call')
+        args = content.get('arguments')
+
+        if fn == 'get_weather':
+            result = get_weather(args)
+            # print(result)
+
+            return Message(
+                role='user',
+                content=json.dumps({
+                    "state": "OBSERVATION",
+                    "output": result,
+                })
+            )
+        else:
+            print("Unknown function:", fn)
+            return None
+
+    else:
+        return Message(
+            role='user',
+            content=json.dumps(content)
+        )
+
+
+def process_messages(messages):
+    while True:
+        response = get_model_response(messages=messages)
+        print(response.message)
+
+        content = json.loads(response.message.content)
+        # print(content)
+
+        state = content.get('state')
+
+        if state == 'OUTPUT':
+            break
+
+        next_state = handle_state(state, content)
+        if next_state is None:
+            break  # Exit if there's an unknown function or unhandled state
+
+        messages.append(next_state)
+        print("=" * 70)
+
 
 messages: Sequence[Message] = [
     Message(role="system", content=SYSTEM_PROMPT),
-    # Message(role="user",
-    #         content="{state: START, input: What's the weather in Hyderabad?}",
-    #         ),
-    # Message(role="user",
-    #         content="{state:PLAN, plan:I will call get_weather to fetch weather details for city Hyderabad.}",
-    #         ),
-    # Message(role="user",
-    #         content='{"state":"ACTION", "function_call":"get_weather", "arguments":"Hyderabad"}',
-    #         ),
-    # Message(role="user",
-    #         content='{"state":"OBSERVATION", "output":"30"}',
-    #         ),
-    Message(role="user",
-            content='{"state":"OUTPUT", "message":"The weather in Hyderabad is 30°C."}',
-            ),
+    # Message(role="user", content=json.dumps({
+    #     "state": "START",
+    #     "input": "What is the weather in Hyderabad?"
+    # })),
+    Message(role="user", content="What is the weather in Hyderabad?"),
 ]
 
-response = get_model_response(messages=messages)
-print(response)
+process_messages(messages)
