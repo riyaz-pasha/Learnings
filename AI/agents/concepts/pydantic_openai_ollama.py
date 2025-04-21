@@ -25,7 +25,7 @@ model = OpenAIChatCompletionsModel(
 
 
 class WeatherSearch(BaseModel):
-    """Get current weather of a given location"""
+    """Get current weather of a given city"""
     city: str = Field(description="Name of the city to get the weather for")
 
 
@@ -41,10 +41,11 @@ async def weather_tool_invoke(context: RunContextWrapper[Any], params_json: str)
     except Exception as e:
         return f"Error getting weather: {str(e)}"
 
+print(WeatherSearch.model_json_schema())
 # Define the FunctionTool
 weather_tool = FunctionTool(
     name=get_weather.__name__,
-    description="Get the current weather of a city",
+    description=WeatherSearch.__doc__,
     params_json_schema=WeatherSearch.model_json_schema(),
     on_invoke_tool=weather_tool_invoke,
     strict_json_schema=True
