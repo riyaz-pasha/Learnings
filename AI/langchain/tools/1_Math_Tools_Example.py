@@ -1,4 +1,5 @@
 import json
+import pprint
 
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain.memory import ConversationBufferMemory
@@ -89,18 +90,18 @@ res2 = agent_executor.invoke({
     "chat_history": memory.chat_memory.messages,
 })
 print("=" * 60)
-print(res2)
+pprint.pp(res2)
 
 res3 = agent_executor.invoke({
     "input": "Another fiend joined with us and brought 3 Apples. Total how many Apples we have?",
     "chat_history": memory,
 })
 print("=" * 60)
-print(res3)
+pprint.pprint(res3)
 
 res3 = agent_executor.invoke({
     "input": "If we divide apples equally how many apples each one gets?",
     "chat_history": memory,
 })
 print("=" * 60)
-print(res3)
+pprint.pp(res3)
