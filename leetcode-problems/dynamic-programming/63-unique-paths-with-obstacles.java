@@ -1,4 +1,5 @@
 class UniquePathsWithObstacles {
+
     public int uniquePathsWithObstacles(int[][] grid) {
         int rows = grid.length;
         int cols = grid[0].length;
@@ -36,6 +37,12 @@ class UniquePathsWithObstacles {
                 }
             }
         }
+
         return dp[cols - 1];
     }
+
+    // 📦 Complexity:
+    // Time: O(m * n)
+    // Space: O(n) (space-optimized) or O(m * n) (full DP table)
+
 }

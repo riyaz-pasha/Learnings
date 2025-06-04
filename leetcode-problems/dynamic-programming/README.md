@@ -10,4 +10,9 @@
 6. 740-delete-and-earn [740](./740-delete-and-earn.java)
 
 ### Matrix
-
+1. [62-unique-paths](./62-unique-paths.java)
+2. [64-minimum-path-sum](./64-minimum-path-sum.java)
+3. [63-unique-paths-with-obstacles](./63-unique-paths-with-obstacles.java)
+4. [120-triangle](./120-triangle.java)
+5. [931-min-falling-path-sum](./931-min-falling-path-sum.java)
+6. [221-maximal-square](./221-maximal-square.java)
