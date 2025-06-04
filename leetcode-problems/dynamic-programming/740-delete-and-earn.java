@@ -81,20 +81,71 @@ class DeleteAndEarn {
 
         return Math.max(take, skip);
     }
+
+    public int deleteAndEarn5(int[] nums) {
+        if (nums.length == 0)
+            return 0;
+
+        int max = 0;
+        for (int num : nums) {
+            max = Math.max(max, num);
+        }
+
+        int[] points = new int[max + 1];
+        for (int num : nums) {
+            points[num] += num;
+        }
+
+        int[] dp = new int[max + 1];
+        dp[0] = points[0];
+        dp[1] = Math.max(points[0], points[1]);
+
+        for (int i = 2; i <= max; i++) {
+            dp[i] = Math.max(dp[i - 1], dp[i - 2] + points[i]);
+        }
+
+        return dp[max];
+    }
+
+    public int deleteAndEarn6(int[] nums) {
+        if (nums.length == 0)
+            return 0;
+
+        int max = 0;
+        for (int num : nums) {
+            max = Math.max(max, num);
+        }
+
+        int[] points = new int[max + 1];
+        for (int num : nums) {
+            points[num] += num;
+        }
+
+        int prev2 = points[0], prev1 = Math.max(points[0], points[1]);
+        for (int i = 2; i <= max; i++) {
+            int curr = Math.max(prev1, prev2 + points[i]);
+            prev2 = prev1;
+            prev1 = curr;
+        }
+
+        return prev1;
+    }
+
 }
 // newTake -> 0+0=0 -> 0 -> 0+2=2 -> 0+3=3 -> 2+4=6
-// newSkip -> 0,0=0 -> 0 -> 0     -> 2,0=2 -> 3,2=3
-// take    -> 0     -> 0 -> 2     -> 3     -> 6
-// skip    -> 0     -> 0 -> 0     -> 2     -> 3
+// newSkip -> 0,0=0 -> 0 -> 0 -> 2,0=2 -> 3,2=3
+// take -> 0 -> 0 -> 2 -> 3 -> 6
+// skip -> 0 -> 0 -> 0 -> 2 -> 3
 
 // [2,2,3,3,3,4]
 // [2:4,3:9,4:1]
 // newTake -> 0 -> 0 -> 0+4=4 -> 0+9=9 -> 4+4=8
-// skip    -> 0 -> 0 -> 0,0=0 -> 0,4=4 -> 9
-// take    -> 0 -> 0 -> 4     -> 9     -> 8
+// skip -> 0 -> 0 -> 0,0=0 -> 0,4=4 -> 9
+// take -> 0 -> 0 -> 4 -> 9 -> 8
 
 // [8,10,4,9,1,3,5,9,4,10] -> 37
 // [1:1,2:0,3:3,4:8,5:5,6:0,7:0,8:8,9:18,10:20]
-// newTake -> 0 -> 0+1=1 -> 0+0=0  -> 1+3=4 -> 1+8=9 -> 4+5=9 -> 9+0=9 -> 9+0=9 -> 9+8=17 -> 9+18=27 -> 17+20=37
-// skip    -> 0 -> 0     -> 1      -> 1     -> 4     -> 9     -> 9     -> 9     -> 9      -> 17      -> 27
-// take    -> 0 -> 1     -> 0      -> 4     -> 9     -> 9     -> 9     -> 9     -> 17     -> 27      -> 37
+// newTake -> 0 -> 0+1=1 -> 0+0=0 -> 1+3=4 -> 1+8=9 -> 4+5=9 -> 9+0=9 -> 9+0=9
+// -> 9+8=17 -> 9+18=27 -> 17+20=37
+// skip -> 0 -> 0 -> 1 -> 1 -> 4 -> 9 -> 9 -> 9 -> 9 -> 17 -> 27
+// take -> 0 -> 1 -> 0 -> 4 -> 9 -> 9 -> 9 -> 9 -> 17 -> 27 -> 37

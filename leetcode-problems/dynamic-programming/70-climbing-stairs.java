@@ -30,8 +30,8 @@ class ClimbingStairs {
         if (noOfSteps <= 0) return 0;
         if (noOfSteps == 1) return 1;
         if (noOfSteps == 2) return 2;
-        return noOfWaysToClimbStairs(noOfSteps - 1)
-                + noOfWaysToClimbStairs(noOfSteps - 2);
+        return noOfWaysToClimbStairs2(noOfSteps - 1)
+                + noOfWaysToClimbStairs2(noOfSteps - 2);
     }
 
     public static void main(String[] args) {

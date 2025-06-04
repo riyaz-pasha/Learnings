@@ -11,6 +11,26 @@ class RobHouses {
         return dp[0];
     }
 
+    public int rob3(int[] nums) {
+        int n = nums.length;
+        if (n == 0)
+            return 0;
+        if (n == 1)
+            return nums[0];
+        if (n == 2)
+            return Math.max(nums[0], nums[1]);
+
+        int[] dp = new int[n];
+        dp[0] = nums[0];
+        dp[1] = Math.max(nums[0], nums[1]);
+
+        for (int i = 2; i < n; i++) {
+            dp[i] = Math.max(dp[i - 1], nums[i] + dp[i - 2]);
+        }
+
+        return dp[n - 1];
+    }
+
     // O(n) time and O(1) space
     public int rob(int[] nums) {
         int n = nums.length;
@@ -25,12 +45,31 @@ class RobHouses {
         return prev1;
     }
 
+    public int rob4(int[] nums) {
+        int n = nums.length;
+        if (n == 0)
+            return 0;
+        if (n == 1)
+            return nums[0];
+        int prev1 = Math.max(nums[0], nums[1]);
+        int prev2 = nums[0];
+
+        for (int i = 2; i < n; i++) {
+            int curr = Math.max(prev1, nums[i] + prev2);
+            prev2 = prev1;
+            prev1 = curr;
+        }
+
+        return prev1;
+    }
+
     public int robRecursive(int[] nums) {
         return robRecursive(nums, nums.length - 1);
     }
 
     private int robRecursive(int[] nums, int i) {
-        if (i < 0) return 0;
+        if (i < 0)
+            return 0;
         return Math.max(nums[i] + robRecursive(nums, i - 2), robRecursive(nums, i - 1));
     }
 }
