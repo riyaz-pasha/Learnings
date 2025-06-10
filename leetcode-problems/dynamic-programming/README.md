@@ -16,3 +16,11 @@
 4. [120-triangle](./120-triangle.java)
 5. [931-min-falling-path-sum](./931-min-falling-path-sum.java)
 6. [221-maximal-square](./221-maximal-square.java)
+
+### On Strings
+1. [5-LongestPalindromicSubstring](./5-LongestPalindromicSubstring.java)
+2. [139-word-break](./139-word-break.java)
+3. [516-longest-palindromic-subsequence](./516-longest-palindromic-subsequence.java)
+4. [72-edit-distance](./72-edit-distance.java)
+5. [712-min-delete-ASCII-sum](./712-min-delete-ASCII-sum.java)
+6. [115-distinct-subsequences](./115-distinct-subsequences.java)
