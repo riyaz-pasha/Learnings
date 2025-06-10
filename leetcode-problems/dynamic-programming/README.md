@@ -40,3 +40,9 @@
 2. [1035-uncrossed-lines](./1035-uncrossed-lines.java)
 3. [1312-min-insertions-to-make-string-palindrome](./1312-min-insertions-to-make-string-palindrome.java)
    
+### Best Time to Buy & Sell Stock / State Machine
+1. [309-buy-sell-stock-with-cooldown](./309-buy-sell-stock-with-cooldown.java)
+2. [714-buy-sell-stock-with-txn-fee](./714-buy-sell-stock-with-txn-fee.java)
+3. [123-buy-sell-stock-III](./123-buy-sell-stock-III.java)
+4. [188-buy-sell-stock-IV](./188-buy-sell-stock-IV.java)
+
