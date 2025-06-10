@@ -24,3 +24,13 @@
 4. [72-edit-distance](./72-edit-distance.java)
 5. [712-min-delete-ASCII-sum](./712-min-delete-ASCII-sum.java)
 6. [115-distinct-subsequences](./115-distinct-subsequences.java)
+
+
+### Longest Increasing Subsequence
+1. [300-longest-increasing-subsequence](./300-longest-increasing-subsequence.java)
+2. [673-number-of-lis](./673-number-of-lis.java)
+3. [646-max-len-of-pair-chain](./646-max-len-of-pair-chain.java)
+4. [1218-longest-arithmetic-subsequence-of-given-diff](./1218-longest-arithmetic-subsequence-of-given-diff.java)
+5. [1027-longest-arithmetic-subsequence](./1027-longest-arithmetic-subsequence.java)
+6. [354-russian-doll-envelopes](./354-russian-doll-envelopes.java)
+7. [1964-longest-obstacle-course-at-each-position](./1964-longest-obstacle-course-at-each-position.java)
