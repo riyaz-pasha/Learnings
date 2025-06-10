@@ -34,3 +34,9 @@
 5. [1027-longest-arithmetic-subsequence](./1027-longest-arithmetic-subsequence.java)
 6. [354-russian-doll-envelopes](./354-russian-doll-envelopes.java)
 7. [1964-longest-obstacle-course-at-each-position](./1964-longest-obstacle-course-at-each-position.java)
+
+### Longest Common Subsequence
+1. [1143-longest-common-subsequence](./1143-longest-common-subsequence.java)
+2. [1035-uncrossed-lines](./1035-uncrossed-lines.java)
+3. [1312-min-insertions-to-make-string-palindrome](./1312-min-insertions-to-make-string-palindrome.java)
+   
