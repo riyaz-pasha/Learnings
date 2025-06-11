@@ -46,3 +46,11 @@
 3. [123-buy-sell-stock-III](./123-buy-sell-stock-III.java)
 4. [188-buy-sell-stock-IV](./188-buy-sell-stock-IV.java)
 
+### On Trees
+1. [](./96-unique-binary-search-trees.java)
+
+### Knapsack
+1. [](./279-perfect-squares.java)
+2. [](./518-coin-change-II.java)
+3. [](./377-combination-sum-IV.java)
+4. []()
