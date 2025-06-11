@@ -2,12 +2,12 @@
 
 
 ### Fibonacci Style
-1. 70-climbing-stairs [70](./70-climbing-stairs.java)
-2. 509-fibonacci [509](./509-fibonacci.java)
-3. 1137-tribonacci [1137](./1137-tribonacci.java)
-4. 746-cost-of-climbing-stairs [746](./746-cost-of-climbing-stairs.java)
-5. 198-rob-houses [198](./198-rob-houses.java)
-6. 740-delete-and-earn [740](./740-delete-and-earn.java)
+1. [70-climbing-stairs](./70-climbing-stairs.java)
+2. [509-fibonacci](./509-fibonacci.java)
+3. [1137-tribonacci](./1137-tribonacci.java)
+4. [746-cost-of-climbing-stairs](./746-cost-of-climbing-stairs.java)
+5. [198-rob-houses](./198-rob-houses.java)
+6. [740-delete-and-earn](./740-delete-and-earn.java)
 
 ### Matrix
 1. [62-unique-paths](./62-unique-paths.java)
@@ -47,10 +47,19 @@
 4. [188-buy-sell-stock-IV](./188-buy-sell-stock-IV.java)
 
 ### On Trees
-1. [](./96-unique-binary-search-trees.java)
+1. [96-unique-binary-search-trees](./96-unique-binary-search-trees.java)
 
 ### Knapsack
-1. [](./279-perfect-squares.java)
-2. [](./518-coin-change-II.java)
-3. [](./377-combination-sum-IV.java)
-4. []()
+1. [279-perfect-squares.java](./279-perfect-squares.java)
+2. [518-coin-change-II.java](./518-coin-change-II.java)
+3. [377-combination-sum-IV.java](./377-combination-sum-IV.java)
+4. [474-ones-and-zeroes.java](./474-ones-and-zeroes.java)
+
+### General 1D
+1. [2140-solving-questions-with-brainpower](./2140-solving-questions-with-brainpower.java)
+2. [322-coin-change](./322-coin-change.java)
+3. [2466-count-ways-to-build-good-strings](./2466-count-ways-to-build-good-strings.java)
+4. [91-decode-ways](./91-decode-ways.java)
+5. [983-min-cost-for-tickets](./983-min-cost-for-tickets.java)
+6. [790-domino-tromino-tailing](./790-domino-tromino-tailing.java)
+
