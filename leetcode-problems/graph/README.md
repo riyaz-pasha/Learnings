@@ -28,3 +28,9 @@
 4. [695-max-area-of-island](./695-max-area-of-island.java)
 5. [417-pacific-atlantic-water-flow](./417-pacific-atlantic-water-flow.java)
 
+### Graph Theory
+1. [997-find-the-town-judge](./997-find-the-town-judge.java)
+2. [1557-min-no-of-vertices-to-reach-all-nodes](./1557-min-no-of-vertices-to-reach-all-nodes.java)
+3. [1615-maximal-network-rank](./1615-maximal-network-rank.java)
+4. [785-is-graph-bipartite](./785-is-graph-bipartite.java)
+
