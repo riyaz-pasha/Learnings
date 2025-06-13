@@ -21,3 +21,10 @@
 8. [863-all-nodes-distance-k-binary-tree](./863-all-nodes-distance-k-binary-tree.java)
 9. [864-shortest-path-to-get-all-keys](./864-shortest-path-to-get-all-keys.java)
 
+### Matrix Graphs
+1. [200-number-of-islands](./200-number-of-islands.java)
+2. [1020-number-of-enclaves](./1020-number-of-enclaves.java)
+3. [1254-number-of-closed-islands](./1254-number-of-closed-islands.java)
+4. [695-max-area-of-island](./695-max-area-of-island.java)
+5. [417-pacific-atlantic-water-flow](./417-pacific-atlantic-water-flow.java)
+
