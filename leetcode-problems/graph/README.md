@@ -39,3 +39,8 @@
 2. [](./990-satisfiability-of-equality-equations.java)
 3. [](./1061-lexicographically-smallest-equivalent-string.java)
 
+### Topological Sort
+1. [207-course-schedule](./207-course-schedule.java)
+2. [210-course-schedule-II](./210-course-schedule-II.java)
+3. [1203-sort-items-by-groups-respecting-dependencies](./1203-sort-items-by-groups-respecting-dependencies.java)
+
