@@ -34,3 +34,8 @@
 3. [1615-maximal-network-rank](./1615-maximal-network-rank.java)
 4. [785-is-graph-bipartite](./785-is-graph-bipartite.java)
 
+### Union Find
+1. [](./721-accounts-merge.java)
+2. [](./990-satisfiability-of-equality-equations.java)
+3. [](./1061-lexicographically-smallest-equivalent-string.java)
+
