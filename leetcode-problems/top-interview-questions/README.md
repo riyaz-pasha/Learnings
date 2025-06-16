@@ -46,3 +46,14 @@
 4. [73-set-matrix-zeroes](../matrix/73-set-matrix-zeroes.java)
 5. [289-game-of-life](../matrix/289-game-of-life.java)
 
+### HashMap
+1. [383-ransom-note](../hashmap/383-ransom-note.java)
+2. [205-isomorphic-strings](../hashmap/205-isomorphic-strings.java)
+3. [290-word-pattern](../hashmap/290-word-pattern.java)
+4. [242-valid-anagram](../hashmap/242-valid-anagram.java)
+5. [49-group-anagrams](../hashmap/49-group-anagrams.java)
+6. [1-two-sum](../hashmap/1-two-sum.java)
+7. [202-happy-number](../hashmap/202-happy-number.java)
+8. [219-contains-duplicate-II](../hashmap/219-contains-duplicate-II.java)
+9. [128-longest-consecutive-sequence](../hashmap/128-longest-consecutive-sequence.java)
+
