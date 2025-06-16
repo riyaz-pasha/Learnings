@@ -39,3 +39,10 @@
 3. [30-substring-with-concatenation-of-all-words](../sliding-window/30-substring-with-concatenation-of-all-words.java)
 4. [76-minimum-window-substring](../sliding-window/76-minimum-window-substring.java)
 
+### Matrix
+1. [36-valid-sudoku](../matrix/36-valid-sudoku.java)
+2. [54-spiral-matrix](../matrix/54-spiral-matrix.java)
+3. [48-rotate-image](../matrix/48-rotate-image.java)
+4. [73-set-matrix-zeroes](../matrix/73-set-matrix-zeroes.java)
+5. [289-game-of-life](../matrix/289-game-of-life.java)
+
