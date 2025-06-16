@@ -26,3 +26,10 @@
 23. [28-find-the-index-of-the-first-occurrence-in-a-string](../arrays/28-find-the-index-of-the-first-occurrence-in-a-string.java)
 24. [68-text-justification](../arrays/68-text-justification.java)
 
+### Two Pointers
+1. [125-valid-palindrome](../two-pointers/125-valid-palindrome.java)
+2. [393-is-subsequence](../two-pointers/393-is-subsequence.java)
+3. [167-two-sum-ii-input-array-is-sorted](../two-pointers/167-two-sum-ii-input-array-is-sorted.java)
+4. [11-container-with-most-water](../two-pointers/11-container-with-most-water.java)
+5. [15-3sum](../two-pointers/15-3sum.java)
+
