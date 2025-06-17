@@ -57,3 +57,9 @@
 8. [219-contains-duplicate-II](../hashmap/219-contains-duplicate-II.java)
 9. [128-longest-consecutive-sequence](../hashmap/128-longest-consecutive-sequence.java)
 
+### Intervals
+1. [228-summary-ranges](../interval-tree/228-summary-ranges.java)
+2. [56-merge-intervals](../interval-tree/56-merge-intervals.java)
+3. [57-insert-interval](../interval-tree/57-insert-interval.java)
+4. [452-minimum-number-of-arrows-to-burst-balloons](../interval-tree/452-minimum-number-of-arrows-to-burst-balloons.java)
+
