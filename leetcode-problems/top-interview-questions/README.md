@@ -70,3 +70,12 @@
 4. [150-evaluate-reverse-polish-notation](../stack/150-evaluate-reverse-polish-notation.java)
 5. [224-basic-calculator](../stack/224-basic-calculator.java)
 
+### Backtracking
+1. [17-letter-combinations-of-a-phone-number](../backtracking/17-letter-combinations-of-a-phone-number.java)
+2. [77-combinations](../backtracking/77-combinations.java)
+3. [46-permutations](../backtracking/46-permutations.java)
+4. [39-combination-sum](../backtracking/39-combination-sum.java)
+5. [52-n-queens-II](../backtracking/52-n-queens-II.java)
+6. [22-generate-parentheses](../backtracking/22-generate-parentheses.java)
+7. [79-word-search](../backtracking/79-word-search.java)
+
