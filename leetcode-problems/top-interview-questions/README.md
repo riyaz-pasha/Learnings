@@ -63,3 +63,10 @@
 3. [57-insert-interval](../interval-tree/57-insert-interval.java)
 4. [452-minimum-number-of-arrows-to-burst-balloons](../interval-tree/452-minimum-number-of-arrows-to-burst-balloons.java)
 
+### Stack
+1. [20-valid-parentheses](../stack/20-valid-parentheses.java)
+2. [71-simplify-path](../stack/71-simplify-path.java)
+3. [155-min-stack](../stack/155-min-stack.java)
+4. [150-evaluate-reverse-polish-notation](../stack/150-evaluate-reverse-polish-notation.java)
+5. [224-basic-calculator](../stack/224-basic-calculator.java)
+
