@@ -98,3 +98,11 @@
 6. [153-find-minimum-in-rotated-sorted-array](../binary-search/153-find-minimum-in-rotated-sorted-array.java)
 7. [4-median-of-two-sorted-arrays](../binary-search/4-median-of-two-sorted-arrays.java)
 
+### Bit Manipulation
+1. [67-add-binary](../bit-manipulation/67-add-binary.java)
+2. [190-reverse-bits](../bit-manipulation/190-reverse-bits.java)
+3. [191-number-of-1-bits](../bit-manipulation/191-number-of-1-bits.java)
+4. [136-single-number](../bit-manipulation/136-single-number.java)
+5. [137-single-number-II](../bit-manipulation/137-single-number-II.java)
+6. [201-bitwise-and-of-numbers-range](../bit-manipulation/201-bitwise-and-of-numbers-range.java)
+
