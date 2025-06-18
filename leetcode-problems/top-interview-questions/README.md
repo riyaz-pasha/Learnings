@@ -89,3 +89,12 @@
 1. [53-maximum-subarray](../kadanes-algorithm/53-maximum-subarray.java)
 2. [918-maximum-sum-circular-subarray](../kadanes-algorithm/918-maximum-sum-circular-subarray.java)
 
+### Binary Search
+1. [35-search-insert-position](../binary-search/35-search-insert-position.java)
+2. [74-search-a-2d-matrix](../binary-search/74-search-a-2d-matrix.java)
+3. [162-find-peak-element](../binary-search/162-find-peak-element.java)
+4. [33-search-in-rotated-sorted-array](../binary-search/33-search-in-rotated-sorted-array.java)
+5. [34-find-first-and-last-position-of-element-in-sorted-array](../binary-search/34-find-first-and-last-position-of-element-in-sorted-array.java)
+6. [153-find-minimum-in-rotated-sorted-array](../binary-search/153-find-minimum-in-rotated-sorted-array.java)
+7. [4-median-of-two-sorted-arrays](../binary-search/4-median-of-two-sorted-arrays.java)
+
