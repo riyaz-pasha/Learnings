@@ -80,8 +80,12 @@
 7. [79-word-search](../backtracking/79-word-search.java)
 
 ### Divide & Conquer
-1. [](../divide-and-conquer/108-convert-sorted-array-to-binary-search-tree.java)
-2. [](../divide-and-conquer/148-sort-list.java)
-3. [](../divide-and-conquer/427-construct-quad-tree.java)
-4. [](../divide-and-conquer/23-merge-k-sorted-lists.java)
+1. [108-convert-sorted-array-to-binary-search-tree](../divide-and-conquer/108-convert-sorted-array-to-binary-search-tree.java)
+2. [148-sort-list](../divide-and-conquer/148-sort-list.java)
+3. [427-construct-quad-tree](../divide-and-conquer/427-construct-quad-tree.java)
+4. [23-merge-k-sorted-lists](../divide-and-conquer/23-merge-k-sorted-lists.java)
+
+### Kadane's Algorithm
+1. [53-maximum-subarray](../kadanes-algorithm/53-maximum-subarray.java)
+2. [918-maximum-sum-circular-subarray](../kadanes-algorithm/918-maximum-sum-circular-subarray.java)
 
