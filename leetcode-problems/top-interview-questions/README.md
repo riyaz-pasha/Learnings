@@ -79,3 +79,9 @@
 6. [22-generate-parentheses](../backtracking/22-generate-parentheses.java)
 7. [79-word-search](../backtracking/79-word-search.java)
 
+### Divide & Conquer
+1. [](../divide-and-conquer/108-convert-sorted-array-to-binary-search-tree.java)
+2. [](../divide-and-conquer/148-sort-list.java)
+3. [](../divide-and-conquer/427-construct-quad-tree.java)
+4. [](../divide-and-conquer/23-merge-k-sorted-lists.java)
+
