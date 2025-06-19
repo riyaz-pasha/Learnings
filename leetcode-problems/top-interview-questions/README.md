@@ -106,3 +106,9 @@
 5. [137-single-number-II](../bit-manipulation/137-single-number-II.java)
 6. [201-bitwise-and-of-numbers-range](../bit-manipulation/201-bitwise-and-of-numbers-range.java)
 
+### Math
+1. [](../math/9-palindrome-number.java)
+2. [](../math/66-plus-one.java)
+3. [](../math/172-factorial-trailing-zeroes.java)
+4. [](../math/50-pow.java)
+5. 
