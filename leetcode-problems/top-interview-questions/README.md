@@ -107,8 +107,20 @@
 6. [201-bitwise-and-of-numbers-range](../bit-manipulation/201-bitwise-and-of-numbers-range.java)
 
 ### Math
-1. [](../math/9-palindrome-number.java)
-2. [](../math/66-plus-one.java)
-3. [](../math/172-factorial-trailing-zeroes.java)
-4. [](../math/50-pow.java)
-5. 
+1. [9-palindrome-number](../math/9-palindrome-number.java)
+2. [66-plus-one](../math/66-plus-one.java)
+3. [172-factorial-trailing-zeroes](../math/172-factorial-trailing-zeroes.java)
+4. [50-pow](../math/50-pow.java)
+
+### Linked List
+01. [141-linked-list-cycle](../linked-list/141-linked-list-cycle.java)
+02. [2-add-two-numbers](../linked-list/2-add-two-numbers.java)
+03. [21-merge-two-sorted-lists](../linked-list/21-merge-two-sorted-lists.java)
+04. [138-copy-list-with-random-pointer](../linked-list/138-copy-list-with-random-pointer.java)
+05. [92-reverse-linked-list-ii](../linked-list/92-reverse-linked-list-ii.java)
+06. [25-reverse-nodes-in-k-group](../linked-list/25-reverse-nodes-in-k-group.java)
+07. [19-remove-nth-node-from-end-of-list](../linked-list/19-remove-nth-node-from-end-of-list.java)
+08. [82-remove-duplicates-from-sorted-list-II](../linked-list/82-remove-duplicates-from-sorted-list-II.java)
+09. [61-rotate-list](../linked-list/61-rotate-list.java)
+10. [86-partition-list](../linked-list/86-partition-list.java)
+11. [146-lru-cache](../linked-list/146-lru-cache.java)
