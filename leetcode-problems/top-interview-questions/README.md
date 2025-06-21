@@ -124,3 +124,8 @@
 09. [61-rotate-list](../linked-list/61-rotate-list.java)
 10. [86-partition-list](../linked-list/86-partition-list.java)
 11. [146-lru-cache](../linked-list/146-lru-cache.java)
+
+### Trie
+1. [211-design-add-and-search-words-data-structure](../trie/211-design-add-and-search-words-data-structure.java)
+2. [212-word-search-II](../trie/212-word-search-II.java)
+
