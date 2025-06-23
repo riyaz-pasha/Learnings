@@ -1,4 +1,5 @@
 class FloydWarshall {
+
     private final int INF = Integer.MAX_VALUE;
 
     public int[][] shortestPaths(int numVertices, int[][] graph) {
@@ -24,4 +25,5 @@ class FloydWarshall {
 
         return dist;
     }
+
 }

@@ -7,6 +7,7 @@ import java.util.List;
 // Given a connected,undirected,weighted graph,a spanning tree is a subgraph that connects all the vertices together without any cycles and with the minimum possible total edge weight.
 
 class Kurskals {
+
     public static List<Edge> findMST(int numVertices, List<Edge> edges) {
         Collections.sort(edges, Comparator.comparingInt(e -> e.weight));
         List<Edge> mst = new ArrayList<>();
@@ -41,9 +42,11 @@ class Kurskals {
         }
         System.out.println("Total weight of MST: " + totalWeight);
     }
+
 }
 
 class DisjointSet {
+
     private final int[] parent, rank;
 
     public DisjointSet(int n) {
@@ -76,9 +79,11 @@ class DisjointSet {
             this.rank[rootI]++;
         }
     }
+
 }
 
 class Edge implements Comparable<Edge> {
+
     final int source, destination, weight;
 
     public Edge(int source, int destination, int weight) {
@@ -91,6 +96,7 @@ class Edge implements Comparable<Edge> {
     public int compareTo(Edge o) {
         return this.weight - o.weight;
     }
+
 }
 
 /*

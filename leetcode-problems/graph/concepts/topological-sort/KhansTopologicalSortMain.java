@@ -1,10 +1,10 @@
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 
 public class KhansTopologicalSortMain {
+
     public static void main(String[] args) {
         int numVertices = 6;
         List<List<Integer>> adjList = new ArrayList<>();
@@ -24,10 +24,12 @@ public class KhansTopologicalSortMain {
         List<Integer> result = sorter.topologicalSort(numVertices, adjList);
         System.out.println("Topological Sort Order: " + result);
     }
+
 }
 
 
 class KhansTopologicalSort {
+
     public List<Integer> topologicalSort(int numVertices, List<List<Integer>> adjList) {
         int[] inDegree = new int[numVertices];
         for (int inVertex = 0; inVertex < numVertices; inVertex++) {
@@ -61,6 +63,7 @@ class KhansTopologicalSort {
         }
         return topoOrder;
     }
+
 }
 
 /*

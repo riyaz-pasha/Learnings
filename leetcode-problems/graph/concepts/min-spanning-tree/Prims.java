@@ -3,6 +3,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 class Prims {
+
     static List<Edge> primMST(List<List<Edge>> graph, int n) {
         List<Edge> mst = new ArrayList<>();
         boolean[] visited = new boolean[n];
@@ -31,9 +32,11 @@ class Prims {
         System.out.println("Total weight : " + totalWeight);
         return mst;
     }
+
 }
 
 class PrimStepByStep {
+
     public static void main(String[] args) {
         int V = 5; // Number of vertices
 
@@ -61,9 +64,11 @@ class PrimStepByStep {
         graph.get(source).add(new Edge(source, destination, weight));
         graph.get(destination).add(new Edge(destination, source, weight));
     }
+
 }
 
 class Edge implements Comparable<Edge> {
+
     final int source, destination, weight;
 
     public Edge(int source, int destination, int weight) {
@@ -76,6 +81,7 @@ class Edge implements Comparable<Edge> {
     public int compareTo(Edge o) {
         return this.weight - o.weight;
     }
+
 }
 
 /*

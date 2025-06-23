@@ -3,6 +3,7 @@ import java.util.Arrays;
 import java.util.PriorityQueue;
 
 class Dijkstras {
+
     public static final int INF = Integer.MAX_VALUE;
 
     public int[] shortestPaths2(int[][] graph, int sourceVertex) {
@@ -84,6 +85,7 @@ class Dijkstras {
         }
 
     }
+
 }
 
 /*

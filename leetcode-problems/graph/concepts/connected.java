@@ -2,6 +2,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 class ConnectedComponents {
+
     private final int numVertices;
     private final List<List<Integer>> adjList;
 
@@ -58,4 +59,5 @@ class ConnectedComponents {
             System.out.println(component);
         }
     }
+
 }

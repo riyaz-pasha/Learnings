@@ -3,6 +3,7 @@ import java.util.Arrays;
 import java.util.List;
 
 class BellmanFord {
+
     private final int INF = Integer.MAX_VALUE;
     private final int numVertices;
     private final List<Edge> edges;
@@ -65,6 +66,7 @@ class BellmanFord {
             this.weight = weight;
         }
     }
+
 }
 
 /*
