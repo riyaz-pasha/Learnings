@@ -11,6 +11,7 @@ class MinHeapMain {
 }
 
 class MinHeap {
+
     private int[] heap;
     private int size;
     private int capacity;
@@ -113,4 +114,5 @@ class MinHeap {
             this.heap = newHeap;
         }
     }
+
 }
