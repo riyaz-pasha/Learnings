@@ -1,9 +1,20 @@
 import java.util.LinkedList;
 import java.util.Queue;
 
-import javax.swing.tree.TreeNode;
+class TreeNode {
+
+    int val;
+    TreeNode left;
+    TreeNode right;
+
+    TreeNode(int x) {
+        val = x;
+    }
+
+}
 
 class BSTSerailizeDeserialize {
+
     public String serialize(TreeNode root) {
         StringBuilder sb = new StringBuilder();
         serializePreorder(root, sb);
@@ -52,6 +63,7 @@ class BSTSerailizeDeserialize {
 
         return node;
     }
+
 }
 
 class BSTSerailizeDeserializePostOrder {
@@ -96,4 +108,5 @@ class BSTSerailizeDeserializePostOrder {
 
         return node;
     }
+
 }
