@@ -43,4 +43,5 @@
 1. [207-course-schedule](./207-course-schedule.java)
 2. [210-course-schedule-II](./210-course-schedule-II.java)
 3. [1203-sort-items-by-groups-respecting-dependencies](./1203-sort-items-by-groups-respecting-dependencies.java)
-
+4. [851-loud-and-rich](./851-loud-and-rich.java)
+5. [329-longest-increasing-path-in-a-matrix](./329-longest-increasing-path-in-a-matrix.java)
