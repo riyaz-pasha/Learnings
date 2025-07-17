@@ -126,3 +126,42 @@ class Edge implements Comparable<Edge> {
  *   - Requires a priority queue and adjacency list representation
  *   - Slightly more complex than Kruskal for edge-based logic
  */
+
+/*
+* DETAILED COMPLEXITY ANALYSIS:
+* 
+* TIME COMPLEXITY:
+* 1. INITIALIZATION: O(V)
+*    - Arrays.fill(): O(V)
+*    - Initial pq.offer(): O(1)
+* 
+* 2. MAIN LOOP: Exactly V iterations
+*    - Each vertex is added to MST exactly once
+*    - Loop continues until MST has V-1 edges
+* 
+* 3. VERTEX EXTRACTIONS: V times, each O(log V)
+*    - pq.poll(): O(log V)
+*    - Total: O(V log V)
+* 
+* 4. EDGE PROCESSING: Each edge processed twice (undirected graph)
+*    - Total edge examinations: 2E
+*    - For each beneficial edge update: pq.offer() = O(log V)
+*    - Total: O(E log V)
+* 
+* 5. FINAL TIME COMPLEXITY: O(V) + O(V log V) + O(E log V) = O((V + E) log V)
+* 
+* SPACE COMPLEXITY:
+* 1. INPUT GRAPH: O(V + E) - adjacency list representation
+* 2. ALGORITHM ARRAYS: 
+*    - inMST[]: O(V)
+*    - parent[]: O(V)  
+*    - key[]: O(V)
+* 3. PRIORITY QUEUE: O(E) worst case - might store one entry per edge
+* 4. RESULT MST: O(V) - stores V-1 edges
+* 5. TOTAL SPACE: O(V + E)
+* 
+* WHEN TO USE DIFFERENT IMPLEMENTATIONS:
+* - Dense graphs (E ≈ V²): Array-based O(V²) is better
+* - Sparse graphs (E << V²): Binary heap O((V + E) log V) is better
+* - Theoretical optimum: Fibonacci heap O(E + V log V)
+*/

@@ -36,6 +36,10 @@ class FindBridgesTarjansAlgo {
                 reachableAncestorTime[currentVertex] = Math.min(
                         reachableAncestorTime[neighbor],
                         reachableAncestorTime[currentVertex]);
+                // neighbor cannot reach any ancestor of currentVertex
+                // The only path between them is through edge (currentVertex, neighbor)
+                // Removing this edge would disconnect the graph
+                // Therefore, it's a bridge!
                 if (reachableAncestorTime[neighbor] > discoveryTime[currentVertex]) {
                     bridgeList.add(Arrays.asList(currentVertex, neighbor));
                 }
@@ -72,4 +76,26 @@ class FindBridgesTarjansAlgo {
  * 4. Collect all such (u, v) pairs where the bridge condition holds.
  *
  * Time Complexity: O(V + E), where V is the number of nodes and E is the number of edges.
+ */
+
+/*
+ * MATHEMATICAL EXPLANATION:
+ * 
+ * The reachableAncestorTime (low-link) value represents:
+ * "The earliest discovery time reachable from this vertex"
+ * 
+ * When we encounter a back edge from vertex u to vertex v:
+ * - v was discovered at time discoveryTime[v]
+ * - v might be able to reach even earlier vertices (reachableAncestorTime[v] <
+ * discoveryTime[v])
+ * - But u can only reach v directly, so u can reach "at earliest" the time when
+ * v was discovered
+ * - Therefore: reachableAncestorTime[u] = min(reachableAncestorTime[u],
+ * discoveryTime[v])
+ * 
+ * If we used reachableAncestorTime[v] instead:
+ * - We'd be saying u can reach whatever v can reach
+ * - But u can only reach v directly via the back edge
+ * - What v can reach beyond that is irrelevant to u's reachability
+ * - This would give incorrect low-link values
  */

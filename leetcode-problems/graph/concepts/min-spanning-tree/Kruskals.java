@@ -144,3 +144,51 @@ class Edge implements Comparable<Edge> {
  *   - Needs edge list (not adjacency list/matrix)
  *   - Not efficient for dense graphs compared to Prim’s with a Fibonacci heap
  */
+
+/*
+* DETAILED COMPLEXITY ANALYSIS:
+* 
+* TIME COMPLEXITY:
+* 1. SORTING EDGES: O(E log E)
+*    - Dominant factor in the algorithm
+*    - Since E ≤ V(V-1)/2, we have E log E ≤ V² log V²
+*    - Can also be written as O(E log V)
+* 
+* 2. UNION-FIND INITIALIZATION: O(V)
+*    - Create parent and rank arrays
+*    - Initialize each element
+* 
+* 3. PROCESSING EDGES: O(E × α(V))
+*    - Process at most E edges
+*    - Each edge requires 2 find() operations and possibly 1 union()
+*    - find() and union() are O(α(V)) amortized
+*    - α(V) ≈ 4 for V ≤ 2^65536 (practically constant)
+* 
+* 4. OVERALL TIME: O(E log E) + O(V) + O(E × α(V)) = O(E log E)
+* 
+* SPACE COMPLEXITY:
+* 1. INPUT EDGES: O(E) - list of all edges
+* 2. UNION-FIND STRUCTURE:
+*    - parent[]: O(V)
+*    - rank[]: O(V)
+* 3. RESULT MST: O(V) - stores V-1 edges
+* 4. SORTING: O(log E) additional space for sorting algorithm
+* 5. TOTAL SPACE: O(V + E)
+* 
+* COMPARISON WITH PRIM'S ALGORITHM:
+* 
+* | Aspect | Prim's | Kruskal's |
+* |--------|--------|-----------|
+* | Time | O((V + E) log V) | O(E log E) |
+* | Space | O(V + E) | O(V + E) |
+* | Approach | Vertex-based (grow MST) | Edge-based (sort all edges) |
+* | Best for | Dense graphs | Sparse graphs |
+* | Data structure | Priority Queue | Union-Find |
+* | Implementation | More complex | Simpler conceptually |
+* 
+* WHEN TO USE KRUSKAL'S:
+* - Sparse graphs where E << V²
+* - When edges are already sorted or nearly sorted
+* - When you need to process edges in weight order anyway
+* - Simple implementation requirements
+*/
