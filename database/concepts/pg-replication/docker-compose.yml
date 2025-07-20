@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  master:
+    image: postgres:16
+    container_name: pg-master
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    # POSTGRES_DB: appdb
+    volumes:
+      - pg_master_data:/var/lib/postgresql/data
+      # - ./master/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./master/postgres.conf:/etc/postgresql/postgresql.conf
+      - ./master/conf/pg_hba.conf:/custom/pg_hba.conf
+      - ./master/init.sh:/docker-entrypoint-initdb.d/init.sh
+    ports:
+      - "5432:5432"
+    networks:
+      - pgnet
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+
+  replica:
+    image: postgres:16
+    container_name: pg-replica
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    depends_on:
+      - master
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./replica/postgres.conf:/etc/postgresql/postgresql.conf
+      - pg_replica_data:/var/lib/postgresql/data
+    networks:
+      - pgnet
+    command: >
+      bash -c "
+        echo 'Waiting for master...' &&
+        until pg_isready -h master -p 5432; do echo 'Waiting...'; sleep 2; done &&
+        rm -rf /var/lib/postgresql/data/* &&
+        PGPASSWORD=postgres pg_basebackup -h master -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R &&
+        echo \"primary_conninfo='host=master port=5432 user=postgres password=postgres'\" >> /var/lib/postgresql/data/postgresql.auto.conf &&
+        chown -R postgres:postgres /var/lib/postgresql/data &&
+        chmod 700 /var/lib/postgresql/data &&
+        exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
+      "
+
+networks:
+  pgnet:
+    driver: bridge
+
+volumes:
+  pg_master_data:
+  pg_replica_data:
