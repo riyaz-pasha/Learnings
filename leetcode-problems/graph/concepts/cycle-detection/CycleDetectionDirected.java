@@ -47,3 +47,11 @@ public class CycleDetectionDirected {
     }
 
 }
+
+/*
+ * Time Complexity: O(V+E)+O(V) , where V = no. of nodes and E = no. of edges.
+ * There can be at most V components. So, another O(V) time complexity.
+ * 
+ * Space Complexity: O(2N) + O(N) ~ O(2N): O(2N) for two visited arrays and O(N)
+ * for recursive stack space.
+ */
