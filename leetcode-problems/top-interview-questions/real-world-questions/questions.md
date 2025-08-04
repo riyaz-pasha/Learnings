@@ -1216,6 +1216,101 @@ public double computeNetWorth(Map<String, Double> wallets, String base, Map<Stri
 }
 ```
 
+
 ---
 
-```
+
+## 🔁 Level 1: Constraint Variations
+
+### 1. **Cheapest Flight with Exactly K Stops**
+
+**Problem:**
+Find the cheapest flight from `src` to `dst` with **exactly K stops** (not at most K).
+**Hint:** Track the number of stops and only accept result if `stops == K`.
+
+---
+
+### 2. **Count All Valid Paths with At Most K Stops**
+
+**Problem:**
+Return the **number of different paths** from `src` to `dst` with total cost ≤ budget and stops ≤ K.
+**Hint:** Use DFS with memoization or modified BFS to track cost and stop constraints.
+
+---
+
+### 3. **Cheapest Flight with Maximum Budget**
+
+**Problem:**
+Find the number of paths from `src` to `dst` such that total cost ≤ given `budget` and ≤ K stops.
+**Hint:** This adds another pruning condition inside DFS/BFS.
+
+---
+
+## 🔁 Level 2: Graph Model & Algorithm Shifts
+
+### 4. **Flight Prices with Negative Costs (Allow Discounts)**
+
+**Problem:**
+If flight costs can be negative (e.g., promo codes), find the cheapest route.
+**Hint:** Dijkstra fails. Use **Bellman-Ford**.
+
+---
+
+### 5. **Multi-Source Cheapest Flights**
+
+**Problem:**
+Given a list of starting cities, find the minimum cost to reach `dst` from **any of them** within K stops.
+**Hint:** Initialize your PQ with all starting cities.
+
+---
+
+### 6. **Minimum Time Instead of Minimum Cost**
+
+**Problem:**
+Each flight has a duration and layover time. Find the fastest route from `src` to `dst` with ≤ K stops.
+**Hint:** Replace `cost` with `time` in your priority queue logic.
+
+---
+
+## 🔁 Level 3: Advanced Modeling
+
+### 7. **Cheapest Multi-City Trip**
+
+**Problem:**
+Find the cheapest way to visit a given set of cities `{A, B, C, D}` starting and ending at `src`, like a traveling salesman problem with constraints.
+**Hint:** Variation of **TSP** using DP + bitmasking.
+
+---
+
+### 8. **Cheapest Flight with Layover Constraints**
+
+**Problem:**
+You can only take the next flight if the layover between current and next flight is ≥ 1 hour and ≤ 6 hours.
+**Hint:** Model each edge with `(toCity, arrivalTime, cost)` and simulate layovers.
+
+---
+
+### 9. **Flight Booking System with Caching**
+
+**Problem:**
+Implement a system that caches the cheapest flight from `src → dst` with at most K stops. If queried again with same parameters, return cached result.
+**Hint:** Use memoization or a hashmap with composite keys.
+
+---
+
+### 10. **Return Actual Path (Not Just Cost)**
+
+**Problem:**
+Modify your solution to return the **full path** (list of cities) of the cheapest route.
+**Hint:** Store parent pointers or path arrays in your `State`.
+
+---
+
+## 🧠 Bonus Challenge
+
+### 11. **Cheapest Flight in a Dynamic Graph**
+
+**Problem:**
+The list of available flights changes over time (flights get canceled/added). Update your algorithm to handle dynamic changes efficiently.
+**Hint:** Use an event-driven or observer-based architecture.
+
