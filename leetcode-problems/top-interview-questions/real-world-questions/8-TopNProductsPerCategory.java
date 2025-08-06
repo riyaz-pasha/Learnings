@@ -150,7 +150,7 @@ class TopNProductsPerCategoryV2 {
         topSalesOfCategory.add(productSales);
 
         if (topSalesOfCategory.size() > n) {
-            topSalesOfCategory.pollLast();
+            topSalesOfCategory.pollFirst(); // removes the lowest sales
         }
     }
 
@@ -164,5 +164,15 @@ class TopNProductsPerCategoryV2 {
     public List<ProductSales> getTopNProducts(Category category) {
         return new ArrayList<>(this.categoryTotalSalesMap.getOrDefault(category, new TreeSet<>()));
     }
+
+    /*
+     * | Operation | Time Complexity |
+     * | ---------------------------- | --------------- |
+     * | `add(E e)` | O(log N) |
+     * | `remove(Object o)` | O(log N) |
+     * | `contains(Object o)` | O(log N) |
+     * | `first()` / `last()` | O(log N) |
+     * | `pollFirst()` / `pollLast()` | O(log N) |
+     */
 
 }

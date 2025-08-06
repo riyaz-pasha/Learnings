@@ -237,14 +237,14 @@ class PersistentTrendingHashtags {
  * - TreeSet-Based: Best for real-time and high query frequency use cases.
  */
 
+class Tweet {
+
+    Set<String> hashtags;
+    long timestamp;
+
+}
+
 class SlidingWindowHashtags {
-
-    class Tweet {
-
-        Set<String> hashtags;
-        long timestamp;
-
-    }
 
     private final long windowSizeMillis;
     /*
@@ -311,6 +311,13 @@ class SlidingWindowHashtags {
                 // this.hashtagToFreqMap.computeIfPresent(hashtag, (key, value) -> value == 0 ?
                 // null : value);
                 // this.hashtagToFreqMap.remove(hashtag, 0);
+
+                // this.hashtagToFreqMap.compute(hashtag, (k, v) -> {
+                // if (v == null || v == 1)
+                // return null; // remove if absent or frequency becomes 0
+                // return v - 1; // else decrement
+                // });
+
             }
         }
     }
@@ -318,6 +325,90 @@ class SlidingWindowHashtags {
     private void updateHashtags(Set<String> hashtags) {
         for (String hashtag : hashtags) {
             this.hashtagToFreqMap.put(hashtag, this.hashtagToFreqMap.getOrDefault(hashtag, 0) + 1);
+        }
+    }
+
+}
+
+class SlidingWindowHashtagsTreeSet {
+
+    private final long windowSizeMillis;
+    private final Deque<Tweet> tweets;
+    private final Map<String, Integer> hashtagToFreqMap;
+    private final TreeSet<HashtagEntry> topNSet;
+    private final int topN;
+
+    public SlidingWindowHashtagsTreeSet(long windowSizeMillis, int topN) {
+        this.windowSizeMillis = windowSizeMillis;
+        this.tweets = new ArrayDeque<>();
+        this.hashtagToFreqMap = new HashMap<>();
+        this.topNSet = new TreeSet<>();
+        this.topN = topN;
+    }
+
+    public List<String> getTopNHashtags() {
+        List<String> result = new ArrayList<>();
+        for (HashtagEntry entry : this.topNSet) {
+            result.add(entry.hashtag);
+        }
+        return result;
+    }
+
+    public void addTweet(Tweet tweet) {
+        this.tweets.offerLast(tweet);
+        updateHashtags(tweet.hashtags);
+        cleanOldTweets(tweet.timestamp);
+    }
+
+    private void cleanOldTweets(long currentTimestamp) {
+        while (!this.tweets.isEmpty() && currentTimestamp - this.tweets.peekFirst().timestamp > this.windowSizeMillis) {
+            Tweet oldTweet = this.tweets.pollFirst();
+            for (String hashtag : oldTweet.hashtags) {
+                int oldFreq = hashtagToFreqMap.getOrDefault(hashtag, 0);
+                if (oldFreq > 0) {
+                    // Remove old from TreeSet
+                    topNSet.remove(new HashtagEntry(hashtag, oldFreq));
+
+                    if (oldFreq == 1) {
+                        hashtagToFreqMap.remove(hashtag);
+                    } else {
+                        hashtagToFreqMap.put(hashtag, oldFreq - 1);
+                        HashtagEntry updated = new HashtagEntry(hashtag, oldFreq - 1);
+                        maybeAddToTopN(updated);
+                    }
+                }
+            }
+        }
+    }
+
+    private void updateHashtags(Set<String> hashtags) {
+        for (String hashtag : hashtags) {
+            int oldFreq = hashtagToFreqMap.getOrDefault(hashtag, 0);
+            if (oldFreq > 0) {
+                topNSet.remove(new HashtagEntry(hashtag, oldFreq));
+            }
+
+            int newFreq = oldFreq + 1;
+            hashtagToFreqMap.put(hashtag, newFreq);
+            HashtagEntry updated = new HashtagEntry(hashtag, newFreq);
+            maybeAddToTopN(updated);
+        }
+    }
+
+    private void maybeAddToTopN(HashtagEntry entry) {
+        if (topNSet.contains(entry)) {
+            topNSet.remove(entry); // Remove outdated version
+            topNSet.add(entry);
+        } else if (topNSet.size() < topN) {
+            topNSet.add(entry);
+        } else {
+            HashtagEntry lowest = topNSet.last(); // min-priority at the end (since TreeSet is descending)
+            if (entry.compareTo(lowest) < 0) {
+                // entry is smaller than existing bottom → do nothing
+            } else {
+                topNSet.pollLast(); // remove lowest
+                topNSet.add(entry);
+            }
         }
     }
 

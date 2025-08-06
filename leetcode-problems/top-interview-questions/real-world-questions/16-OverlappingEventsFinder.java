@@ -34,12 +34,21 @@ class OverlappingEventsFinder {
             return result;
         }
 
-        // Sort events by start time
+        // Sort events by start time O(N log N)
         events.sort(Comparator.comparingLong(e -> e.start));
 
         // Min-heap to store events by their end time
         PriorityQueue<Event> active = new PriorityQueue<>(Comparator.comparingLong(e -> e.end));
 
+        /*
+         * For each event:
+         * - Remove all events from min-heap whose end <= current.start → amortized O(N)
+         * over all events.
+         * - For all events left in heap (say K active events), add overlapping pairs →
+         * total overlap checks across all events = O(M) where M = number of overlapping
+         * pairs
+         * - Insert current event in heap → O(log N)
+         */
         for (Event event : events) {
             // Remove all events that have ended
             while ((!active.isEmpty() && active.peek().end <= event.start)) {
@@ -110,5 +119,23 @@ class EventStreamProcessor {
         return overlaps;
     }
 
-}
+    /*
+     * 🔍 Steps per event:
+     * timeline.headMap(newEvent.end, false) → O(log N) for TreeMap operation (range
+     * lookup by key)
+     * 
+     * Loop through returned events and check if e.end > newEvent.start → up to O(K)
+     * where K = overlapping events
+     * 
+     * Insert event into TreeMap → O(log N)
+     * 
+     * ✅ Time Complexity per event:
+     * O(log N + K) (where K is number of overlapping events found)
+     * So, for N events total:
+     * O(N log N + total_K) where total_K = total overlaps found across all events
+     * 
+     * ✅ Space Complexity:
+     * O(N) for TreeMap storing all past events.
+     */
 
+}

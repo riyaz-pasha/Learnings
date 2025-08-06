@@ -424,13 +424,6 @@ public void processOrder(Order order) {
 }
 ```
 
-Here’s **Batch 2: Real-World DSA Problems 11–20** in the same **Markdown format**, covering more modeling-based, open-ended problems commonly asked in top-tier interviews like Google, Meta, and Netflix.
-
----
-
-### ✅ **Batch 2: Problems 11–20**
-
-````markdown
 ---
 
 ## 11. Job Matching System
@@ -465,7 +458,7 @@ public List<Job> getTopJobMatches(Candidate c, List<Job> jobs, int n) {
     // Compute scores, use max-heap
     return new ArrayList<>();
 }
-````
+```
 
 ---
 
@@ -821,18 +814,6 @@ public boolean allowRequest(String userId, long timestamp) {
 
 ---
 
-```
-
-
-Here’s **Batch 3: Real-World DSA Problems 21–30** in Markdown format — the final set in your curated simulation set.
-
----
-
-### ✅ **Batch 3: Problems 21–30**
-
-````markdown
----
-
 ## 21. Dynamic Friend Suggestion System
 
 **Prompt:**  
@@ -865,7 +846,7 @@ public List<User> suggestFriends(User user, int n) {
     // BFS + score
     return new ArrayList<>();
 }
-````
+```
 
 ---
 
