@@ -44,6 +44,8 @@
 
 ### 5. 🧠 **Regex Match on Flattened DOM**
 
+[](#6--regex-match-across-dom-nodes)
+
 **Prompt:**
 
 > Flatten a DOM tree and apply a regex pattern like `"is.*code"` to the combined content. Return nodes contributing to the match.
