@@ -22,6 +22,8 @@
 
 ### 3. 🔗 **Concatenated Paths in File System**
 
+[](#4--full-path-match-in-file-system-tree)
+
 **Prompt:**
 
 > You have a directory tree where each file or directory is a node with a name. Find all paths where the full path string (from root to leaf) contains a given search phrase.
