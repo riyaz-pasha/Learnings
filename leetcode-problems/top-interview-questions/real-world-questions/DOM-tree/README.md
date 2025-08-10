@@ -66,6 +66,8 @@
 
 ### 7. 🧭 **Build Index from Tree for Fast Phrase Search**
 
+[](#7--index-dom-tree-for-fast-search)
+
 **Prompt:**
 
 > Given a DOM tree, preprocess it to allow **fast search** for any phrase later (e.g., "code is"). You can index at build time. How would you do it?
