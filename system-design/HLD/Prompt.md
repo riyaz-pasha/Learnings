@@ -11,12 +11,15 @@ Please provide a detailed High-Level System Design (HLSD) plan, breaking down th
     * Provide a quick estimation of key metrics like QPS (Queries Per Second), storage needs, and bandwidth requirements.
     * Justify your assumptions for these numbers (e.g., number of users, daily active users, read-to-write ratio).
 
-3.  **High-Level Architecture:**
+3. **API Design**
+
+4.  **High-Level Architecture:**
     * Draw a block diagram showing the main components of the system (e.g., Load Balancer, Web Servers, API Gateway, Databases, Caches).
     * Explain the role of each component and how they interact.
     * Mention the communication protocols you would use (e.g., HTTP, gRPC, REST).
+    * Go through the each API (functional requirement) and disucss how it is implemented with this architecture. How components are interacting with each other etc. ( Discuss challenges and optimal production ready solutions ).
 
-4.  **Component Deep Dive:**
+5.  **Component Deep Dive:**
     * **Data Storage:**
         * Discuss the choice of database(s) (SQL vs. NoSQL) and justify why.
         * Describe the schema or data model you would use.
@@ -27,11 +30,11 @@ Please provide a detailed High-Level System Design (HLSD) plan, breaking down th
     * **Load Balancing:**
         * Describe where load balancers would be placed and what type you would use (e.g., Round Robin, Least Connections).
 
-5.  **Scalability and Availability:**
+6.  **Scalability and Availability:**
     * Explain how you would ensure the system is horizontally scalable (stateless services, distributed databases).
     * Discuss how you would handle single points of failure (SPOFs) and ensure high availability (redundancy, failover).
 
-6.  **Potential Bottlenecks and Trade-offs:**
+7.  **Potential Bottlenecks and Trade-offs:**
     * Identify potential performance bottlenecks in your design.
     * Discuss key trade-offs you made (e.g., consistency vs. availability, read-heavy vs. write-heavy design).
     * Mention potential future improvements or extensions to the system.
