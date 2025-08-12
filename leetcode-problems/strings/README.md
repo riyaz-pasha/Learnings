@@ -11,9 +11,9 @@
   * *Reverse Words in a String*
   * *Valid Palindrome*
 
-* [Reverse Words in a String](https://leetcode.com/problems/reverse-words-in-a-string/)
-* [Valid Palindrome](https://leetcode.com/problems/valid-palindrome/)
-* [String Compression](https://leetcode.com/problems/string-compression/)
+* [151-reverse-words](./151-reverse-words.java) [Reverse Words in a String](https://leetcode.com/problems/reverse-words-in-a-string/)
+* [125-valid-palindrome](./125-valid-palindrome.java) [Valid Palindrome](https://leetcode.com/problems/valid-palindrome/)
+* [443-string-compression](./443-string-compression.java) [String Compression](https://leetcode.com/problems/string-compression/)
 
 
 ### 2. **String Matching (Pattern Search)**
