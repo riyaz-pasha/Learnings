@@ -1,0 +1,25 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      # Required for KRaft mode
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      # Add this line to specify the controller quorum voters
+      # KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
+      #      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@0.0.0.0:9093"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+
+      # Set the directory for Kafka logs and metadata
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+
+      # Generate a unique cluster ID for KRaft
+      CLUSTER_ID: "4L6gI2_1S5rIu9s-1I0o3w"
