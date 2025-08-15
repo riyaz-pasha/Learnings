@@ -1,6 +1,6 @@
-# High-Level System Design (HLSD) Prompt Template
+# High-Level System Design (HLSD)
 
-**Task:** Design a scalable system for `[INSERT YOUR SYSTEM REQUIREMENTS HERE]`.
+**Task:** Design a scalable system for `[Design a scalable chat system like WhatsApp. Include message delivery, real-time sync, storage, groups, and end-to-end encryption]`.
 
 **Output format required:** Plain text / Markdown (easy to copy-paste). No images. Provide compact ASCII diagrams where helpful. Provide `[LANGUAGE]` pseudocode for critical flows. Show example DB queries and `[MESSAGING_SYSTEM]`/`[CACHE_SYSTEM]` commands. Use tables for schema definitions.
 
