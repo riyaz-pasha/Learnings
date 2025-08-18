@@ -1,29 +1,37 @@
 # High-Level System Design (HLSD)
 
-**Task:** Design a scalable system for `[Design a scalable chat system like WhatsApp. Include message delivery, real-time sync, storage, groups, and end-to-end encryption]`.
-
-**Output format required:** Plain text / Markdown (easy to copy-paste). No images. Provide compact ASCII diagrams where helpful. Provide `[LANGUAGE]` pseudocode for critical flows. Show example DB queries and `[MESSAGING_SYSTEM]`/`[CACHE_SYSTEM]` commands. Use tables for schema definitions.
+**Task:** Design a scalable system for `[]`.
 
 ---
 
 ## Required deliverables (produce all sections below)
 
-### 0. Executive summary (1–2 paragraphs)
-
-* Short problem statement, recommended architecture (one-line), and why it fits the requirements.
-
----
 
 ## 1. Functional & Non-Functional Requirements
 
-* List all core features as **actionable tasks**. Mark priority P0/P1/P2.
-* Define user personas and their primary needs.
-* For each feature, list **technical & business complexities** that must be considered.
+### Functional Requirements:
 
-Include:
+* List all core features of the system.
+* Define each feature as a specific, actionable task.
+* Prioritize requirements (P0/P1/P2) if applicable.
+* Define user personas and their needs.
+* For each feature, highlight potential **technical or business complexities**.
 
-* SLOs and SLAs (latency targets, availability percentages).
-* Tunable parameters (e.g., `[PARAMETER_NAME] = [VALUE]`, `[PARAMETER_NAME] = [VALUE]`).
+### Non-Functional Requirements:
+
+* **Performance:** Latency targets, throughput, peak vs. average load.
+* **Scalability:** Expected growth patterns, max concurrent users, QPS.
+* **Reliability & Availability:** Uptime targets (e.g., 99.9% or 99.99%), fault tolerance.
+* **Consistency:** Strong vs. eventual consistency requirements.
+* **Security:** Authentication, authorization, encryption, data protection.
+* **Compliance:** Regulatory or industry standards.
+* **Maintainability:** Ease of updates, monitoring, and debugging.
+
+### Assumptions & Scope:
+
+* Clarify assumptions (scope, user base, data model).
+* Define what is explicitly **out of scope**.
+* Mention constraints (budget, timeline, existing infrastructure).
 
 ---
 
@@ -59,6 +67,26 @@ Include:
 ## 5. Functional Requirement Deep Dives (for every P0 and important P1)
 
 For each requirement (e.g., `[FEATURE_1]`, `[FEATURE_2]`, `[FEATURE_3]`, etc.):
+
+**Instruction:**
+
+> I want a detailed implementation of all functional requirements. For each functional requirement, explain:
+>
+> 1. **Request flow from client to server**: how the request is initiated, what the server does step by step. Include WebSocket/HTTP/REST/GRPC details where relevant.
+> 2. **Data storage and retrieval**: how data is persisted in DB, what tables/collections/primary keys/indexes are used, cache keys, TTLs, and structure.
+> 3. **Delivery to other clients / devices**: how the system pushes data to recipients, handles multi-device scenarios, offline users, and group scenarios.
+> 4. **Edge cases and failure handling**: what happens if a recipient is offline, connection is lost, or data fails to persist.
+> 5. **Optional features**: presence, typing indicators, push notifications, read receipts.
+>
+> Present the results in **plain English words first** describing the flows, and optionally include **example Redis / Kafka commands, DB queries, or pseudo code**.
+>
+> Finally, provide a **summary table** listing:
+>
+> * Functional requirement
+> * Client → Server flow
+> * Server → DB/Cache flow
+> * Server → Recipient flow
+> * Notes / multi-device / offline handling
 
 * **Components involved**
 * **Step-by-step data flow**
@@ -148,21 +176,6 @@ For **every service** that persists data (`[SERVICE_1]`, `[SERVICE_2]`, `[SERVIC
 
 * Identify main cost drivers and suggest cost-optimization levers.
 * Trade-offs (consistency vs freshness, memory vs latency, fan-out vs pull).
-* Short-term MVP vs long-term evolution (`[FUTURE_FEATURE_1]`, `[FUTURE_FEATURE_2]`, `[INTEGRATION_OPPORTUNITIES]`).
-
----
-
-## 12. Technology Recommendations
-
-* Suggested languages, frameworks (mention `[PREFERRED_LANGUAGE]` option for core services and show one `[PREFERRED_LANGUAGE]` snippet in deep dives), databases, cache, messaging, cloud infra.
-* DevOps: CI/CD, infra-as-code, monitoring stack.
-* Third-party integrations (`[EXTERNAL_SERVICE_1]`, `[EXTERNAL_SERVICE_2]`, `[EXTERNAL_SERVICE_3]`).
-
----
-
-## 13. Deliverables checklist (final section)
-
-* Provide a compact checklist of the produced artifacts (schemas, queries, pseudocode, diagrams, cost estimates, monitoring plan).
 
 ---
 
@@ -175,59 +188,3 @@ For **every service** that persists data (`[SERVICE_1]`, `[SERVICE_2]`, `[SERVIC
 * **If multiple valid approaches exist**, compare them (pros/cons) and pick a recommended approach with reasoning.
 * **Keep the answer structured** so an engineer can copy-paste schema snippets and `[CACHE_SYSTEM]`/`[MESSAGING_SYSTEM]` commands into a scratch implementation.
 * **Limit verbosity**: keep each section focused and use bullet lists/tables for clarity. But be thorough — produce depth where it matters (DB schemas, queries, sharding, flows).
-
----
-
-## Template Variables to Replace Before Using:
-
-### System-Specific Variables:
-- `[INSERT YOUR SYSTEM REQUIREMENTS HERE]` - The specific system you want to design
-- `[DOMAIN_SPECIFIC_METRICS]` - Metrics relevant to your domain (posts/day, orders/hour, etc.)
-- `[PRIMARY_WRITE_OPERATION]` - Main write operation (Post creation, Order placement, etc.)
-- `[PRIMARY_READ_OPERATION]` - Main read operation (Feed generation, Search, etc.)
-- `[CRITICAL_WRITE_OPERATION]` - Most critical write flow to detail
-- `[CRITICAL_READ_OPERATION]` - Most critical read flow to detail
-- `[CRITICAL_DATA_STRUCTURES]` - Key data relationships to detail
-- `[RELATIONSHIP_TYPE]` - Type of relationships in your system
-- `[HOTSPOT_SCENARIO]` - Common hotspot scenario for your domain
-
-### Technology Variables:
-- `[LANGUAGE]` - Preferred programming language (Java, Python, Go, etc.)
-- `[PREFERRED_LANGUAGE]` - Same as above for consistency
-- `[MESSAGING_SYSTEM]` - Kafka, RabbitMQ, SQS, etc.
-- `[CACHE_SYSTEM]` - Redis, Memcached, etc.
-- `[EVENT_NAME]` - Specific event names for your domain
-
-### Service Variables:
-- `[SERVICE_1]`, `[SERVICE_2]`, `[SERVICE_3]` - Your specific services
-- `[SERVICE_TYPE]` - Type of services in your architecture
-- `[FEATURE_1]`, `[FEATURE_2]`, `[FEATURE_3]` - Your core features
-
-### Parameter Variables:
-- `[PARAMETER_NAME]` - Tunable parameters specific to your system
-- `[VALUE]` - Corresponding values
-- `[CACHE_SIZE_1]`, `[CACHE_SIZE_2]` - Cache size parameters
-- `[TIME_VALUE]` - TTL or time-based values
-
-### Compliance & Integration Variables:
-- `[COMPLIANCE_REQUIREMENTS]` - GDPR, HIPAA, PCI-DSS, etc.
-- `[SECURITY_SCANNING_NEEDS]` - AV scanning, content moderation, etc.
-- `[EXTERNAL_SERVICE_1]`, `[EXTERNAL_SERVICE_2]`, `[EXTERNAL_SERVICE_3]` - Third-party services
-- `[FUTURE_FEATURE_1]`, `[FUTURE_FEATURE_2]` - Planned future features
-- `[INTEGRATION_OPPORTUNITIES]` - Future integration possibilities
-
-### Usage Instructions:
-
-1. Copy this template
-2. Replace all `[BRACKETED_VARIABLES]` with your specific requirements
-3. Remove this variables section before using
-4. Provide the customized prompt to get a comprehensive system design
-
-### Example Customization:
-For a social media feed system, you might replace:
-- `[INSERT YOUR SYSTEM REQUIREMENTS HERE]` → "a social media news feed system"
-- `[LANGUAGE]` → "Java"
-- `[MESSAGING_SYSTEM]` → "Kafka"
-- `[CACHE_SYSTEM]` → "Redis"
-- `[PRIMARY_WRITE_OPERATION]` → "Post creation"
-- `[PRIMARY_READ_OPERATION]` → "Feed generation"

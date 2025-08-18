@@ -1,151 +1,94 @@
-**Task:** Design a scalable system for `[Your HLSD Question Here]`.
+**Task:** Design a scalable system for `[SYSTEM_NAME / PROBLEM_STATEMENT]`.
 
-Provide a detailed **High-Level System Design (HLSD)** plan, following the structure below:
+**Instructions for LLM:**
 
----
-
-## 1. Functional and Non-Functional Requirements
-
-### Functional Requirements:
-
-* List all core features of the system.
-* Define each feature as a specific, actionable task.
-* Prioritize requirements (P0/P1/P2) if applicable.
-* Define user personas and their needs.
-* For each feature, highlight potential **technical or business complexities**.
-
-### Non-Functional Requirements:
-
-* **Performance:** Latency targets, throughput, peak vs. average load.
-* **Scalability:** Expected growth patterns, max concurrent users, QPS.
-* **Reliability & Availability:** Uptime targets (e.g., 99.9% or 99.99%), fault tolerance.
-* **Consistency:** Strong vs. eventual consistency requirements.
-* **Security:** Authentication, authorization, encryption, data protection.
-* **Compliance:** Regulatory or industry standards.
-* **Maintainability:** Ease of updates, monitoring, and debugging.
-
-### Assumptions & Scope:
-
-* Clarify assumptions (scope, user base, data model).
-* Define what is explicitly **out of scope**.
-* Mention constraints (budget, timeline, existing infrastructure).
+* Produce fully structured **Markdown output**.
+* Focus **heavily on Functional Requirement Deep Dives (point 5)**.
+* Include **stepwise flows, DB schemas, cache commands, messaging events, pseudocode, cursors, and multi-device/offline handling** for every critical requirement.
+* Integrate **NFRs, DB/storage, caching, messaging, scalability, HA, security** within the deep dive where relevant.
+* Use ASCII diagrams, tables, and examples.
+* Make output **copy-paste ready**.
 
 ---
 
-## 2. Back-of-the-Envelope Estimation
+## 1. Functional & Non-Functional Requirements (Brief)
 
-* **User Metrics:** Total users, daily active users, peak concurrent users.
-* **Request Metrics:** QPS for reads/writes, seasonal variations, read/write ratios.
-* **Data Metrics:** Storage per user, retention policies, expected growth.
-* **Network Metrics:** Bandwidth requirements, upload/download patterns.
-* **Resource Estimates:** Memory (for caching), CPU, storage, network utilization.
-* **Justification:** Explain assumptions behind all estimates.
-* **Cost Considerations:** Approximate infrastructure and operational costs.
+* List core features, prioritized P0/P1/P2.
+* Define user personas & goals.
+* Highlight technical/business complexities.
+* Include short NFRs summary: performance, scalability, reliability, consistency, security, maintainability.
+* Assumptions & scope (brief).
 
 ---
 
-## 3. API Design
+## 2. Back-of-the-Envelope Estimation (Optional)
 
-* Define RESTful endpoints, GraphQL schema, or gRPC services.
-* Specify request/response formats, including data types and error codes.
-* Map each API to the **functional requirement** it satisfies.
-* Include authentication, rate-limiting, versioning, and error handling strategies.
+* Scenario: MAU, DAU, CCU, data size, QPS.
+* Rough cache/messaging sizing & cost estimation.
 
 ---
 
-## 4. High-Level Architecture
+## 3. Functional Requirement Deep Dives (P0 + critical P1) — **MAIN FOCUS**
 
-* **Block Diagram:** Show main components (Load Balancer, API Gateway, Web/Service Servers, Databases, Caches, Queues, Storage).
-* **Component Roles:** Explain responsibilities of each component.
-* **Communication Protocols:** HTTP/HTTPS, gRPC, WebSockets, message queues.
-* **Data Flow:** Trace how requests flow through the system.
-* **Functional Requirement Flow:** For each major requirement:
+For **each feature**, produce a **full, stepwise implementation blueprint**:
 
-  * Which components are involved
-  * How they interact
-  * Challenges and design choices
-  * Alternative approaches and trade-offs
+### 3.1 Client → Server Flow
 
----
+* Exact request flow (HTTP/REST/gRPC/WebSocket).
+* Step-by-step server handling (validation, auth, routing).
+* Multi-device scenarios & offline handling.
 
-## 5. Functional Requirements Deep Dive ⭐
+### 3.2 Data Storage & Retrieval
 
-For **each functional requirement**:
+* DB choice & justification (SQL vs NoSQL).
+* Tables/collections with PKs, indexes, secondary indexes.
+* Example read/write queries (SQL/CQL/pseudocode).
+* Cache keys, TTLs, structure, eviction policy.
+* Sharding/partitioning and cross-shard query strategy.
 
-### Requirement: \[Name]
+### 3.3 Server → Recipient Flow
 
-* **Components Involved:** All system components participating.
-* **Data Flow:** Step-by-step request-to-response process.
-* **Implementation Approaches:**
+* Push data to recipients (WebSocket, push notifications, polling).
+* Multi-device, offline, group messaging.
+* Optional features: presence, typing indicators, read receipts.
 
-  * **Approach 1:** Description, pros/cons.
-  * **Approach 2:** Alternative method, trade-offs.
-  * **Recommended Approach:** Justification.
-* **Complexities & Challenges:** Technical, business, integration issues.
-* **Edge Cases & Error Handling:** Failure scenarios and mitigation.
-* **Performance Considerations:** Latency, throughput, resource usage.
-* **Scalability Challenges:** Hotspots, bottlenecks.
-* **Variations & Future Extensions:** Alternative designs, future scaling.
+### 3.4 Messaging & Eventing
 
----
+* `[MESSAGING_SYSTEM]` topics, partition keys, retention, schema.
+* Event flow: API → DB → Messaging → Worker → Cache → Clients.
+* Async vs sync handling, retries, DLQ, idempotency.
 
-## 6. Component Deep Dive
+### 3.5 Edge Cases & Failure Handling
 
-### Data Storage:
+* Offline users, partial failures, cache misses, DB errors.
+* Reconciliation, retries, deduplication strategies (Bloom filters, seen sets).
 
-* SQL vs. NoSQL justification.
-* Schema/data model, indexing, relationships.
-* Partitioning/sharding strategy and cross-shard query handling.
-* Multi-database or polyglot persistence if applicable.
+### 3.6 Pagination & Cursor Handling
 
-### Caching Strategy:
+* Cursor-building algorithm, opaque JSON/base64 example.
+* Step-by-step read/merge logic from DB + cache.
 
-* Cache layers: Browser, CDN, application, database.
-* Cache patterns: Cache-aside, write-through, write-behind.
-* Eviction policies, TTL, cache consistency, stampede handling.
+### 3.7 Performance & Scalability Considerations
 
-### Load Balancing:
+* Bottlenecks, autoscaling, multi-AZ/multi-region replication.
+* Cache hit/miss ratios, messaging throughput, worker scaling.
 
-* Placement (L4/L7, geographic distribution).
-* Algorithms: Round-robin, least connections, consistent hashing.
-* Health checks, session affinity.
+### 3.8 Instrumentation & Monitoring
 
-### Messaging / Eventing:
+* Metrics: RED, cache hit ratio, messaging lag, latency per endpoint.
+* Logging & tracing points in the data path.
 
-* When to use queues (Kafka, RabbitMQ).
-* Asynchronous vs. synchronous tasks.
-* Event-driven patterns for decoupling services.
+### 3.9 Summary Table
+
+\| Feature | Client→Server | Server→DB/Cache | Server→Recipient | Messaging Events | Notes / Multi-device / Offline Handling |
 
 ---
 
-## 7. Scalability & Availability
+## 4. Additional Guidance for LLM Output
 
-* **Horizontal Scaling:** Stateless services, auto-scaling, microservices boundaries.
-* **High Availability:** Redundancy (active-active/passive), failover, disaster recovery.
-* **Monitoring & Observability:** Metrics, logging, distributed tracing, alerts.
-* **Circuit Breakers & Rate Limiting:** Prevent cascading failures.
-
----
-
-## 8. Advanced Considerations
-
-* **Security:** Auth, encryption, network security, input validation.
-* **Performance Optimization:** DB queries, network, CPU/memory, caching.
-* **Operational Excellence:** Deployment strategies, configuration management, capacity planning.
-
----
-
-## 9. Bottlenecks, Trade-offs, and Future Considerations
-
-* Identify performance, scalability, and operational bottlenecks.
-* Discuss trade-offs: consistency vs. availability, performance vs. cost, complexity vs. maintainability.
-* Suggest future improvements, technology evolution, and scaling strategies.
-
----
-
-## 10. Technology Stack Recommendations
-
-* Programming languages and frameworks.
-* Infrastructure: Cloud provider, managed services.
-* DevOps tools: CI/CD, monitoring, deployment tools.
-* Third-party integrations (payment, notifications, etc.).
+* **Prioritize depth over breadth:** every P0/P1 feature should have full blueprint.
+* Integrate **DB, cache, messaging, HA, security, scalability considerations** inside the deep dive.
+* Use **tables, ASCII diagrams, pseudocode, cache commands, DB queries, messaging payloads**.
+* Show **multiple approaches when relevant** and recommend one with reasoning.
+* Include **cursor examples** for paginated reads, **idempotency keys**, **deduplication strategies**.
+* Optional sections like cost, back-of-envelope estimation, minor NFRs can be summarized briefly.
