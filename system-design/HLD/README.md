@@ -19,7 +19,7 @@
 | Day   | System                                       | ✅ Status | Prompt                                                                                                                               |
 | ----- | -------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Day 1 | News Feed System (Twitter/Facebook)          | \[ ]     | `Design a news feed system like Facebook. Include fan-out vs pull model, ranking, deduplication, and real-time updates.`             |
-| Day 2 | Chat System (WhatsApp)                       | \[ ]     | `   .` |
+| Day 2 | Chat System (WhatsApp)                       | \[ ]     | `Design a scalable chat system like WhatsApp. Include message delivery, real-time sync, storage, groups, and end-to-end encryption.` |
 | Day 3 | Real-Time Collaborative Editor (Google Docs) | \[ ]     | `Design a collaborative document editing tool like Google Docs. Support real-time edits, consistency, operational transforms.`       |
 | Day 4 | Search Autocomplete                          | \[ ]     | `Design a search autocomplete system. Support prefix search, ranking by popularity, and incremental updates.`                        |
 | Day 5 | Review & Scale Plan                          | \[ ]     | `Compare fan-out vs fan-in feed systems, discuss consistency in collaborative editors, and sketch scaling plan for chat backend.`    |
