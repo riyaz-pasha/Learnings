@@ -1,6 +1,6 @@
 # High-Level System Design (HLSD)
 
-**Task:** Design a scalable system for `[]`.
+**Task:** Design a scalable system for `[Design a video streaming service like YouTube. Include upload, transcoding, CDN usage, metadata indexing, and playback.]`.
 
 ---
 
