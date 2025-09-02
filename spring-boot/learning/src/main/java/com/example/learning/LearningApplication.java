@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication(
         scanBasePackages = {
-                "com.example.learning.customizebean"
+                "com.example.learning.qualifier"
         },
         exclude = {
                 org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration.class,
