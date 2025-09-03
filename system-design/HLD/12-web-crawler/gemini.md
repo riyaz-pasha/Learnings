@@ -641,3 +641,67 @@ You need to persist the data in the database because it serves as the **single s
 * **Cost**: While a database adds cost, it is a necessary part of the system's resilience and flexibility. The cost of storage has fallen significantly, making this a very feasible approach. The benefits in terms of reliability and ease of maintenance far outweigh the storage costs.
 
 ---
+
+TF-IDF (Term Frequency-Inverse Document Frequency) is a statistical measure used to evaluate how important a word is to a document in a collection of documents. Its core idea is that a word's importance increases proportionally to the number of times it appears in a document, but is offset by the frequency of that word in the entire set of documents. This helps to filter out common words that are not very useful for distinguishing one document from another.
+
+***
+
+### The Components of TF-IDF
+
+The TF-IDF score is the product of two components:
+
+1.  **Term Frequency (TF)**: This measures how often a word appears in a specific document. The more a word appears, the higher its TF score. A common way to calculate TF is by dividing the number of times a word appears in a document by the total number of words in that document.
+    * **Formula**: $$TF(t,d) = \frac{\text{Number of times term } t \text{ appears in document } d}{\text{Total number of terms in document } d}$$
+
+2.  **Inverse Document Frequency (IDF)**: This measures how rare or unique a word is across all documents in a collection. Words that appear in many documents (like "the" or "is") are given a lower score, while words that are rare and appear in only a few documents are given a higher score.
+    * **Formula**: $$IDF(t,D) = \log\left(\frac{\text{Total number of documents in the corpus } D}{\text{Number of documents containing term } t}\right)$$
+
+The final **TF-IDF score** is simply the product of these two values: $$TF-IDF = TF \times IDF$$
+
+***
+
+### Real-World Example
+
+Let's imagine you are building a simple search engine for three news articles.
+
+* **Document 1**: "The president discussed the new space mission."
+* **Document 2**: "Space exploration is a priority, and the government is funding a new space mission."
+* **Document 3**: "A new government initiative was announced."
+
+We want to find the most important words in each document. Let's calculate the TF-IDF for the words "space" and "government".
+
+**Step 1: Calculate TF (Term Frequency)**
+
+* **For "space"**:
+    * **Doc 1**: The word "space" appears 1 time out of 7 total words. TF = 1/7 ≈ 0.14
+    * **Doc 2**: The word "space" appears 2 times out of 11 total words. TF = 2/11 ≈ 0.18
+    * **Doc 3**: The word "space" appears 0 times. TF = 0/6 = 0
+* **For "government"**:
+    * **Doc 1**: The word "government" appears 0 times. TF = 0/7 = 0
+    * **Doc 2**: The word "government" appears 1 time out of 11 total words. TF = 1/11 ≈ 0.09
+    * **Doc 3**: The word "government" appears 1 time out of 6 total words. TF = 1/6 ≈ 0.17
+
+**Step 2: Calculate IDF (Inverse Document Frequency)**
+
+* The total number of documents in our corpus is 3.
+* **For "space"**: The word "space" appears in 2 documents (Doc 1 and Doc 2).
+    * IDF("space") = $\log(3/2) \approx \log(1.5) \approx 0.176$
+* **For "government"**: The word "government" appears in 2 documents (Doc 2 and Doc 3).
+    * IDF("government") = $\log(3/2) \approx \log(1.5) \approx 0.176$
+* **For "the"**: The word "the" appears in all 3 documents.
+    * IDF("the") = $\log(3/3) = \log(1) = 0$. This is why common words get a score of 0, making them less important.
+
+**Step 3: Calculate TF-IDF Score**
+
+* **For "space"**:
+    * **Doc 1**: TF-IDF = TF × IDF = 0.14 × 0.176 ≈ **0.024**
+    * **Doc 2**: TF-IDF = TF × IDF = 0.18 × 0.176 ≈ **0.032**
+    * **Doc 3**: TF-IDF = TF × IDF = 0 × 0.176 = **0**
+* **For "government"**:
+    * **Doc 1**: TF-IDF = TF × IDF = 0 × 0.176 = **0**
+    * **Doc 2**: TF-IDF = TF × IDF = 0.09 × 0.176 ≈ **0.015**
+    * **Doc 3**: TF-IDF = TF × IDF = 0.17 × 0.176 ≈ **0.03**
+
+**Conclusion**: When a user searches for "space mission," the search engine would calculate the combined TF-IDF scores for the query terms. Document 2 would likely be ranked highest because the word "space" has a high TF-IDF score, indicating it is both frequent in that document and unique across the collection. In contrast, "the" would be ignored entirely. TF-IDF effectively identifies the most relevant terms that define the unique topic of a document within a larger group. 
+
+---

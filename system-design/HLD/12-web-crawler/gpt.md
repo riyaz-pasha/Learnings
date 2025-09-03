@@ -1523,3 +1523,322 @@ Scheduler ----> Domain Politeness Check (Redis/DB)
 
 ---
 ---
+
+
+## 🔄 Detailed Indexing Flow
+
+### 1. Event Consumption
+
+* **Source:** `crawl.parsed` event → `{ url, documentId }`
+* **Service:** Indexer Service subscribes to this topic.
+
+---
+
+### 2. Document Retrieval
+
+* Fetch document text + metadata from the **Document Store** using `documentId`.
+  Example:
+
+  ```json
+  {
+    "documentId": "doc1",
+    "url": "https://example.com/page",
+    "title": "Running fast and slow",
+    "content": "Running is great. Some people run fast, others run slow."
+  }
+  ```
+
+---
+
+### 3. Text Processing Pipeline
+
+Each stage is modular → easy to extend later:
+
+1. **Tokenization**
+
+   ```
+   ["Running", "is", "great", "Some", "people", "run", "fast", "others", "run", "slow"]
+   ```
+
+2. **Normalization**
+
+   * Lowercasing
+   * Replace symbols: `& → and`, etc.
+
+   ```
+   ["running", "is", "great", "some", "people", "run", "fast", "others", "run", "slow"]
+   ```
+
+3. **Stop-word Removal**
+
+   * Remove common words: `is, some, and, the, a`
+
+   ```
+   ["running", "great", "people", "run", "fast", "others", "run", "slow"]
+   ```
+
+4. **Stemming / Lemmatization**
+
+   * Convert to root forms:
+
+   ```
+   ["run", "great", "people", "run", "fast", "others", "run", "slow"]
+   ```
+
+5. **Position Tracking + Frequency Counting**
+
+   * Build per-document term stats:
+
+   ```json
+   {
+     "run": { "freq": 3, "positions": [0, 3, 5] },
+     "great": { "freq": 1, "positions": [1] },
+     "people": { "freq": 1, "positions": [2] },
+     "fast": { "freq": 1, "positions": [4] },
+     "others": { "freq": 1, "positions": [6] },
+     "slow": { "freq": 1, "positions": [7] }
+   }
+   ```
+
+---
+
+### 4. Index Update
+
+Now we **merge per-document stats into the global inverted index**.
+
+**Global Inverted Index Structure**:
+
+```
+term → { docId → {freq, positions[]} }
+```
+
+Example after adding `doc1` and `doc3`:
+
+```json
+"run": {
+   "doc1": { "freq": 3, "positions": [0,3,5] },
+   "doc3": { "freq": 1, "positions": [21] }
+},
+"slow": {
+   "doc1": { "freq": 1, "positions": [7] }
+}
+```
+
+---
+
+### 5. Storage Options
+
+* **In-memory prototype:** HashMap/dictionary
+* **Production:**
+
+  * **Elasticsearch / OpenSearch** – handles inverted index, sharding, query ranking out-of-the-box
+  * **Custom storage:**
+
+    * Key-Value store (RocksDB, LevelDB, Cassandra)
+    * Schema:
+
+      ```
+      Key = term
+      Value = postings list → [(docId, freq, positions[])]
+      ```
+
+---
+
+### 6. Metadata & Ranking Stats
+
+Along with postings list, store:
+
+* Document Length (for normalization in BM25)
+* Global Document Frequency (for IDF computation)
+* PageRank / URL Score
+
+---
+
+### 7. Event Publication
+
+* After updating index, emit `index.updated` event:
+
+  ```json
+  {
+    "documentId": "doc1",
+    "url": "https://example.com/page",
+    "status": "indexed"
+  }
+  ```
+* Downstream consumers: Search API, Analytics, Ranking Service.
+
+---
+
+## 📊 Data Flow Recap
+
+```
+[crawl.parsed] event → [Indexer Service] 
+   → [Document Store lookup] 
+   → [Tokenization → Normalization → Stopwords → Stemming] 
+   → [Term frequencies + positions] 
+   → [Update Inverted Index Store] 
+   → [Emit index.updated]
+```
+
+---
+
+## 🛠️ Example: Search-time Flow (quick preview)
+
+When a user searches `"running slow"`:
+
+1. Query is normalized → `"run slow"`
+2. Index lookup:
+
+   * `run → {doc1, doc3}`
+   * `slow → {doc1}`
+3. Candidate documents = `{doc1, doc3}`
+4. Rank by TF-IDF/BM25 → return top results
+
+---
+
+
+---
+
+💯 That’s exactly the **core Search Service flow** — you’ve nailed it!
+Let’s refine and extend your flow into a **production-ready design**, adding the missing details around ranking, snippet generation, and response formatting.
+
+---
+
+# 🔍 Search Service Flow (Detailed)
+
+### 1. Query Submission
+
+* **Frontend → Search API**
+  User types `"running slow"` into the frontend app.
+  Request hits:
+
+  ```
+  GET /search?q=running+slow&page=1&size=10
+  ```
+
+---
+
+### 2. Query Processing
+
+The Search Service applies **same pipeline as Indexer** (to ensure consistency):
+
+* **Tokenization**: `"running slow"` → `["running", "slow"]`
+* **Lowercasing**: → `["running", "slow"]`
+* **Normalization**: remove punctuation, symbols
+* **Stop-word Removal**: (none here, but removes things like `"the", "is", "a"`)
+* **Stemming/Lemmatization**: `"running" → "run"`
+  → Final query tokens: `["run", "slow"]`
+
+---
+
+### 3. Index Lookup
+
+Look up tokens in the **Inverted Index**:
+
+```
+"run"  → {doc1: freq=3, doc3: freq=1}
+"slow" → {doc1: freq=1}
+```
+
+Candidate set = {doc1, doc3}
+
+---
+
+### 4. Ranking Engine
+
+**Step A: Compute TF (Term Frequency per document)**
+
+* `run` appears **3 times** in `doc1`, **1 time** in `doc3`
+* `slow` appears **1 time** in `doc1`
+
+**Step B: Compute IDF (Inverse Document Frequency)**
+
+* Formula:
+
+  $$
+  idf(t) = \log \frac{N}{1 + df(t)}
+  $$
+
+  * `N = total docs`
+  * `df(t) = number of docs containing t`
+
+If `N=1000`:
+
+* `df(run)=200` → `idf(run) = log(1000/201) ≈ 1.6`
+* `df(slow)=10`  → `idf(slow) = log(1000/11) ≈ 4.5`
+
+**Step C: Final Score (TF-IDF per doc)**
+
+$$
+score(q,d) = \sum_{t \in q} tf(t,d) \times idf(t)
+$$
+
+* For `doc1`:
+
+  * run: `3 * 1.6 = 4.8`
+  * slow: `1 * 4.5 = 4.5`
+  * **Total = 9.3**
+
+* For `doc3`:
+
+  * run: `1 * 1.6 = 1.6`
+  * **Total = 1.6**
+
+✅ Ranking → `doc1` ranked higher than `doc3`
+
+---
+
+### 5. Fetch Metadata & Snippets
+
+From the **Document Store**:
+
+* Title
+* URL
+* Extract snippet text around matched terms, highlight tokens.
+
+Example:
+
+```
+doc1 snippet → "… people <b>run</b> fast, others <b>run</b> <b>slow</b> …"
+```
+
+---
+
+### 6. Return Results
+
+JSON response to user:
+
+```json
+{
+  "query": "running slow",
+  "results": [
+    {
+      "docId": "doc1",
+      "title": "Running fast and slow",
+      "url": "https://example.com/page",
+      "score": 9.3,
+      "snippet": "... people <b>run</b> fast, others <b>run</b> <b>slow</b> ..."
+    },
+    {
+      "docId": "doc3",
+      "title": "Benefits of daily runs",
+      "url": "https://example.com/runs",
+      "score": 1.6,
+      "snippet": "... best time to <b>run</b> every day ..."
+    }
+  ]
+}
+```
+
+---
+
+# ⚙️ Search Service – Responsibilities Recap
+
+* ✅ Receive queries from frontend
+* ✅ Apply **same text analysis as indexer**
+* ✅ Look up tokens in **inverted index**
+* ✅ Rank using **TF-IDF (or BM25 for better results)**
+* ✅ Fetch snippets from Document Store
+* ✅ Return ranked JSON results
+
+---
