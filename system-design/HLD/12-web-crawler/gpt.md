@@ -1340,3 +1340,186 @@ Let me polish this into a **complete, structured, step-by-step flow** with extra
 ---
 
 ---
+
+Spot on ✅ — **Crawl Politeness** is critical because without it, crawlers can look like an **unintentional DDoS**. Let’s expand your notes into a complete, production-style strategy.
+
+---
+
+# 🤝 Load on Websites (Crawl Politeness)
+
+---
+
+## 1. The Problem
+
+* Crawlers can easily overload a site by making **hundreds/thousands of requests per second**.
+* This can:
+
+  * Violate **robots.txt** rules.
+  * Cause sites to **block crawler IPs**.
+  * Look like a DDoS attack.
+
+---
+
+## 2. Core Politeness Rules
+
+* **Respect robots.txt** (allow/disallow rules + optional `Crawl-delay`).
+* **Throttle requests per domain** (don’t exceed allowed rate).
+* **Back off on errors** (especially 429 Too Many Requests, 503 Service Unavailable).
+* **Avoid parallel fetches** to same domain.
+
+---
+
+## 3. Solutions in Detail
+
+### 🔹 1. Robots.txt Fetch & Storage
+
+* When crawler first encounters a domain → fetch `https://domain.com/robots.txt`.
+* Parse disallowed paths + crawl-delay.
+* Store in **Robots DB** (keyed by domain).
+
+**Table: `robots_rules`**
+
+| domain      | disallowed\_paths | crawl\_delay | last\_fetched |
+| ----------- | ----------------- | ------------ | ------------- |
+| example.com | \["/private/\*"]  | 5 sec        | 2025-09-02    |
+
+* TTL: refresh every 24h.
+* If robots.txt missing/unreachable → assume default policy (allow all, crawl-delay = N seconds, e.g., 1s).
+
+---
+
+### 🔹 2. Per-Domain Crawl Delay Enforcement
+
+* Maintain a **per-domain queue** with lastFetchedTimestamp.
+* Before fetching a URL:
+
+  ```python
+  if now - lastFetchedTimestamp < crawl_delay:
+      requeue(url)
+      continue
+  ```
+* This ensures only **one request per domain** at a time.
+* Crawl delay can come from:
+
+  * Robots.txt
+  * Default config (e.g., 1s/domain)
+
+---
+
+### 🔹 3. Error Response Handling
+
+* If **429 Too Many Requests**:
+
+  * Exponential backoff (retry after 2s, 4s, 8s...).
+  * Respect `Retry-After` header if present.
+* If **503 Service Unavailable**:
+
+  * Similar backoff.
+* If **5xx persists** for N retries:
+
+  * Mark domain temporarily inactive.
+
+---
+
+### 🔹 4. Adaptive Rate Control
+
+* Track success/error rate per domain.
+* If error rate > threshold → slow down crawl rate.
+* If fast responses and no errors → cautiously increase crawl rate.
+
+---
+
+### 🔹 5. Distributed Crawlers
+
+* Even with politeness rules, central IP ranges can get blocked.
+* Use:
+
+  * Multiple IP pools / subnets.
+  * Geographic distribution (closer to sites, less latency).
+* Still enforce **per-domain rate limit across the whole system** (global coordination).
+
+---
+
+## 4. Implementation Approach
+
+### Redis Example (per-domain crawl scheduling)
+
+```redis
+HSET crawl:domain:example.com lastFetchedTimestamp 1693650000 crawlDelay 5
+```
+
+Crawler logic:
+
+```python
+def can_crawl(domain):
+    record = redis.hgetall(f"crawl:domain:{domain}")
+    if not record:  # robots.txt not fetched yet
+        fetch_and_store_robots(domain)
+        return False
+
+    delay = record.get("crawlDelay", DEFAULT_DELAY)
+    last = record.get("lastFetchedTimestamp", 0)
+
+    if time.time() - last < delay:
+        return False
+
+    redis.hset(f"crawl:domain:{domain}", "lastFetchedTimestamp", time.time())
+    return True
+```
+
+---
+
+## 5. Example Flow
+
+1. Scheduler assigns `https://example.com/page1`.
+2. Crawler checks Redis → `lastFetchedTimestamp=1693650000`, `crawlDelay=5`.
+3. If <5s since last fetch → requeue.
+4. Otherwise:
+
+   * Fetch URL.
+   * Store content in S3.
+   * Update timestamp.
+   * If 429 received → backoff and reschedule.
+
+---
+
+## 6. ASCII Diagram
+
+```
+Crawl Queue
+    |
+    v
+Scheduler ----> Domain Politeness Check (Redis/DB)
+                   |
+                   | allowed
+                   v
+              Crawler Worker
+                   |
+            [Robots.txt Policy]
+                   |
+                Fetch HTML
+                   |
+                   v
+              Object Storage
+```
+
+---
+
+## 7. Key Optimizations
+
+* **Robots.txt Cache:** Don’t fetch for every URL, cache per domain.
+* **Per-Domain Queues:** Avoid simultaneous requests.
+* **Exponential Backoff:** On 429/503.
+* **Distributed Crawler Coordination:** Use global state store (Redis/ZooKeeper) to enforce limits across datacenters.
+* **Heuristic crawl delay:** If no crawl-delay in robots.txt, assume safe default (1–2s).
+
+---
+
+✅ With these rules:
+
+* We **don’t hammer websites**.
+* We stay **compliant** with robots.txt.
+* Crawling scales without looking like an attack.
+
+---
+---

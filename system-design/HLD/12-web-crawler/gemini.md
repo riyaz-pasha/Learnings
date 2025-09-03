@@ -457,3 +457,187 @@ To summarize the refined process:
  
 
 ---
+
+---
+***
+
+### 1. DNS Lookup Load on Crawlers
+
+For a web crawler dealing with billions of URLs, the number of DNS lookups is staggering. A large-scale crawl can perform thousands or even millions of lookups per second. This poses two main problems:
+* **High Latency:** Each DNS lookup adds a significant delay to the fetch process, slowing down the overall crawl rate.
+* **Resolver Overload:** The immense volume of requests can overwhelm standard DNS resolvers, leading to timeouts or outright failures.
+
+***
+
+### 2. Solutions and Optimizations
+
+Your proposed solutions—caching and using multiple resolvers—are fundamental. Here's a deeper look at them, along with other optimizations:
+
+#### **DNS Caching**
+
+Caching is the most effective way to mitigate this load. A well-implemented DNS cache can have a hit ratio of over 90%, meaning the crawler needs to perform a live DNS lookup for only a small fraction of its requests.
+
+* **Cache Structure:** You correctly identified that a cache stores a mapping from a domain to an IP address. The cache key would be the **domain name** (e.g., `google.com`), and the value would be the **IP address** along with its **Time-To-Live (TTL)**.
+* **Cache Location:** The DNS cache should be **local to each crawler worker** in memory. This provides the fastest possible access. However, for a distributed system, you can use a shared, centralized cache like **Redis**, as you suggested.
+* **Memory Estimation Refinement:** Your calculation is a good start. For a more accurate estimate, consider the number of *unique domains*, not total URLs. The number of domains is far smaller than the number of URLs. If there are 100 million unique domains, the storage would be:
+    $100 \times 10^6 \text{ domains} \times (100 \text{ bytes per domain} + 16 \text{ bytes for IPv6}) \approx 11.6 \text{ GB}$.
+    This is a manageable size for a distributed cache.
+
+#### **Using Multiple DNS Resolvers**
+
+Relying on a single DNS resolver is a single point of failure and a performance bottleneck.
+
+* **Round Robin:** Your suggestion to use a round-robin approach is a valid strategy. This distributes the query load evenly across a list of trusted resolvers, such as Google's Public DNS (`8.8.8.8`) or Cloudflare's (`1.1.1.1`).
+* **Asynchronous Lookups:** Instead of blocking for each DNS request, the crawler should perform lookups asynchronously. This allows a single worker to initiate multiple lookups in parallel while waiting for responses, significantly improving efficiency.
+
+#### **Additional Optimizations**
+
+* **HTTP/2 Multiplexing:** When a crawler has to fetch many pages from the same host, it should use **HTTP/2**. This protocol allows multiple requests to be sent over a single TCP connection, eliminating the need to re-establish a connection (and a DNS lookup) for each page.
+* **IP-Based Crawling:** Once the crawler has the IP address for a domain, it can store this in a "host table" and perform subsequent crawls of that domain using the IP address directly, completely bypassing the DNS lookup for every request.
+* **Negative Caching:** It's also important to cache negative responses, such as a "domain not found" error. This prevents the crawler from repeatedly trying to resolve a non-existent domain.
+* **Time-to-Live (TTL) Management:** The TTL of a DNS record determines how long a response can be cached. The crawler's cache should honor this TTL to ensure it's not using stale data. Some crawlers might even use a shorter TTL to get fresh data more often, but this is a trade-off between freshness and performance.
+
+---
+
+---
+
+***
+
+### 1. The Importance of Politeness 🤝
+
+Crawl politeness is a fundamental ethical and practical concern for any web search engine. Without it, a crawler could easily overload a website's server, making it unavailable for regular users. This is not only bad for the website owner but can also get the crawler's IP address blocked, harming the entire operation.
+
+### 2. Solutions and Refinements
+
+Your proposed solutions are the core of a polite crawling strategy. Let's expand on them.
+
+* **`robots.txt` and Crawl Delays:**
+    * This is the first and most important step. A crawler must first fetch and parse a website's **`robots.txt`** file.
+    * The `robots.txt` file specifies which paths on the site are disallowed for crawling and, crucially, a **`Crawl-Delay`** directive. This value tells the crawler how many seconds to wait between requests to the same domain.
+    * **Implementation:** The crawler should store this information in a persistent key-value store or a database. The key would be the domain (e.g., `example.com`), and the value would be the allowed crawl delay and a list of disallowed paths.
+
+* **Rate Limiting per Domain:**
+    * Your idea of checking `lastFetchedTimestamp` is the correct approach for implementing the crawl delay. This check should happen **before** a URL is added to the crawl queue or before a worker attempts a fetch.
+    * A dedicated service, like your **URL Manager**, can manage this state. It would store the last fetch time for each domain.
+    * When a new URL for a domain arrives, the manager compares the current time with the last fetch time. If the difference is less than the `Crawl-Delay`, the URL is put in a separate, lower-priority queue or delayed for later processing. 
+    * This domain-specific rate-limiting ensures that the crawler never sends too many requests to a single website in a short period.
+
+* **Handling HTTP Status Codes:**
+    * Your mention of the **`429 Too Many Requests`** status code is vital. This is an explicit signal from a web server that the crawler is being too aggressive.
+    * **Response:** Upon receiving a 429, the crawler should immediately stop requesting from that domain and implement a significant **exponential backoff**. The delay should increase with each subsequent 429, giving the server time to recover.
+    * **Other Status Codes:** The crawler should also handle other common status codes gracefully:
+        * **`404 Not Found`:** The URL should be removed from the crawl queue.
+        * **`5xx Server Error`:** A temporary failure. The crawler should retry later with backoff.
+
+### 3. Additional Optimizations
+
+* **Distributed Politeness:** In a distributed crawling system, simply checking a local cache is not enough. You must ensure that **all** crawler workers respect the same crawl delay for a given domain. This is best achieved by assigning all URLs for a single domain to the same worker or by using a shared, atomic counter in a distributed cache like Redis to manage the last access time for each domain.
+* **Prioritization:** Not all URLs are equally important. A crawler can prioritize URLs based on factors like PageRank, a domain's popularity, or the number of backlinks pointing to it. This allows the crawler to focus on the most valuable pages first while still being polite to all websites.
+
+---
+
+### 1\. Batching and Message Size
+
+To reduce the load on your message queue (like Kafka), you should **batch messages**. Instead of sending one message per URL to crawl, group multiple URLs into a single, larger message. This significantly reduces the overhead of network calls and disk I/O, as the system handles one large transaction instead of many small ones. For example, a single message containing 1,000 URLs is far more efficient than 1,000 individual messages.
+
+\<br\>
+
+-----
+
+\<br\>
+
+### 2\. Partitioning
+
+**Partitioning** is a key strategy for load balancing in a distributed queue. For a web crawler, a smart way to partition is by the **domain name**. By using a hash of the domain as the partition key, all URLs from a specific website will land in the same partition. This has two major benefits:
+
+  * **Ordered Processing:** It allows a single consumer (a crawler worker) to process all requests for a given domain in order, which is crucial for implementing crawl politeness rules.
+  * **Reduced Load:** It prevents a single partition from becoming a hotspot and allows you to scale up by adding more partitions and consumers as needed.
+
+\<br\>
+
+-----
+
+\<br\>
+
+### 3\. Backpressure and Flow Control
+
+**Backpressure** is a mechanism to handle situations where a consumer can't keep up with the producer. A queue system should have a way to signal to the producer (the URL Manager) to slow down if the consumers (the crawler workers) are falling behind. Without backpressure, a fast producer could fill up the queue, leading to high latency and potential system instability. Implement a feedback loop where consumers report their processing rate. If a consumer's lag exceeds a certain threshold, the producer can temporarily reduce its message output.
+
+\<br\>
+
+-----
+
+\<br\>
+
+### 4\. Separate Queues
+
+You can further optimize the system by using different queues for different types of work. For a crawler, consider having:
+
+  * A **high-priority queue** for urgent, frequently updated websites.
+  * A **low-priority queue** for less important, static websites.
+  * A **dead-letter queue (DLQ)** for messages that have failed processing after multiple retries. This isolates failed messages and prevents them from clogging up the main queue.
+
+---
+While the approach you've outlined for queue management and crawl processing is generally correct, there are a few important details to refine for a production-level system. The key is to **decouple** the different stages and handle tasks like DNS lookups and politeness checks in a more distributed way.
+
+***
+
+### 1. Queue Partitioning and Worker Assignment
+
+Your idea of partitioning by domain name is excellent for ensuring politeness. However, it's not the worker itself that performs the DNS and politeness checks; these are often handled by dedicated services. The worker simply processes the task it receives.
+
+* **Refinement:** The URL Manager service, which you mentioned earlier, is the component that performs the DNS lookup and politeness check **before** the message is even published to the queue. This front-loads the work and ensures the message sent to the crawler worker is ready to be fetched. The worker's job is simply to fetch the URL, not to manage its politeness or DNS.
+
+* **Benefit:** This design separates concerns. The URL Manager handles the complex logic of politeness and DNS, while the crawler workers are kept as simple, stateless clients that can be scaled easily.
+
+***
+
+### 2. Batching and Message Publishing
+
+Batching is a great way to optimize queue throughput, but your suggestion to "club all single domain requests into one message after parsing" has a drawback. This could create a very large message for a popular domain, which can cause its own performance issues.
+
+* **Refinement:** The more common approach is to **batch messages from a variety of domains** into a single message. This balances the load more evenly across partitions and ensures that no single message is too large. For example, a single batch could contain 1,000 URLs from 500 different domains. The partitioning key for this batch would be a hash of the first URL in the batch, or a round-robin assignment, to distribute it evenly.
+
+* **Politeness:** Politeness is enforced at the URL Manager level by tracking each domain's last fetch time, as discussed previously.
+
+***
+
+### 3. Dead Letter Queue (DLQ)
+
+Your use of a DLQ is correct and is a best practice for handling failures.
+
+* **Refinement:** A key detail is to have a **clear policy** for what happens to messages in the DLQ. Are they manually inspected? Do they trigger an alert? This helps you understand why some crawls are failing. Possible reasons include:
+    * **Persistent `4xx` or `5xx` errors:** The website is down or the URL no longer exists.
+    * **Timeouts:** The website is too slow.
+    * **Unusual format:** The content is not standard HTML.
+
+The DLQ prevents these problematic URLs from clogging the main queue and ensures the crawler remains focused on successful fetches.
+
+
+---
+
+After parsing, you should **store the parsed data in a database and publish the database ID** or a link to the data in your message queue. Sending the entire parsed document through the message queue is inefficient and can lead to several problems.
+
+***
+
+### Why Not to Send the Entire Document
+
+* **Message Size Limits**: Message queues like Kafka or RabbitMQ have message size limits (e.g., Kafka's default is 1MB). Parsed documents, especially from large web pages, can easily exceed this limit.
+* **Performance Overhead**: Large messages consume more network bandwidth and storage in the queue. This can lead to increased latency and reduced throughput for the entire system.
+* **Consumer Flexibility**: By sending just an ID, different consumers can retrieve the document from the database and process it in different ways. For example, one service could build the search index while another could run analytics on the content, all without each having to store a large copy of the data.
+
+### The Recommended Approach: DB and ID
+
+1.  **Store the Data**: After parsing, the parser service stores the clean text, metadata, and extracted links into a **Document Store**. This is typically a NoSQL database optimized for document-based data, such as MongoDB or a custom-built distributed file system. . The key for this document would be the URL or a hash of the URL.
+2.  **Publish the ID**: The parser service then publishes a small message to the `crawler.parsed` topic. This message contains only the **document ID** and any other critical, small pieces of metadata, such as the URL itself.
+3.  **Consumer Retrieval**: The indexer worker consumes this small message, retrieves the full parsed document from the Document Store using the provided ID, and then processes the content to build the inverted index.
+
+### Data Persistence and Retention
+
+You need to persist the data in the database because it serves as the **single source of truth** for your search engine's content.
+
+* **Longevity**: The parsed documents should be persisted for a long time, often indefinitely. They are the raw material for your index. If you need to rebuild the index (e.g., due to a new ranking algorithm or to fix a bug), you can simply re-process the documents from the database without needing to recrawl the entire web.
+* **Index Updates**: When a page is updated, you can fetch it, re-parse it, and overwrite the old version in the Document Store. This ensures your index remains fresh.
+* **Cost**: While a database adds cost, it is a necessary part of the system's resilience and flexibility. The cost of storage has fallen significantly, making this a very feasible approach. The benefits in terms of reliability and ease of maintenance far outweigh the storage costs.
+
+---
