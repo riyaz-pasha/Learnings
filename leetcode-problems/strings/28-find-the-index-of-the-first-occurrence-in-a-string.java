@@ -14,6 +14,9 @@
  * Explanation: "leeto" did not occur in "leetcode", so we return -1.
  */
 
+import java.util.HashMap;
+import java.util.Map;
+
 class IndexOfFirstOccurrence {
 
     public int strStr(String haystack, String needle) {
@@ -64,6 +67,49 @@ class IndexOfFirstOccurrence {
         }
 
         return lps;
+    }
+
+}
+
+class IndexOfFirstOccurrenceBoyerMoore {
+
+    public int strStr(String haystack, String needle) {
+        int n = haystack.length();
+        int m = needle.length();
+        if (m == 0)
+            return 0; // Edge case: empty pattern
+        if (n < m)
+            return -1;
+
+        // Build last occurrence table
+        Map<Character, Integer> lastOccurrence = buildLastOccurrence(needle);
+
+        int shift = 0;
+        while (shift <= n - m) {
+            int j = m - 1;
+            // Compare from right to left
+            while (j >= 0 && needle.charAt(j) == haystack.charAt(shift + j)) {
+                j--;
+            }
+            if (j < 0) {
+                return shift; // found match
+            }
+            char badChar = haystack.charAt(shift + j);
+            int lastIndex = lastOccurrence.getOrDefault(badChar, -1);
+            int badCharShift = j - lastIndex;
+            if (badCharShift < 1)
+                badCharShift = 1; // must shift at least 1
+            shift += badCharShift;
+        }
+        return -1;
+    }
+
+    private Map<Character, Integer> buildLastOccurrence(String pattern) {
+        Map<Character, Integer> map = new HashMap<>();
+        for (int i = 0; i < pattern.length(); i++) {
+            map.put(pattern.charAt(i), i); // record last index of char
+        }
+        return map;
     }
 
 }
