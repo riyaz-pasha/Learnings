@@ -47,9 +47,9 @@
   * *Permutation in String*
 
 * [Longest Substring Without Repeating Characters](https://leetcode.com/problems/longest-substring-without-repeating-characters/) [Code](./3-longest-substring-without-repeating-characters.java)
-* [Minimum Window Substring](https://leetcode.com/problems/minimum-window-substring/)
-* [Permutation in String](https://leetcode.com/problems/permutation-in-string/)
-* [Find All Anagrams in a String](https://leetcode.com/problems/find-all-anagrams-in-a-string/)
+* [Minimum Window Substring](https://leetcode.com/problems/minimum-window-substring/) [Code](./76-minimum-window-substring.java)
+* [Permutation in String](https://leetcode.com/problems/permutation-in-string/) [Code](./567-permutation-in-string.java)
+* [Find All Anagrams in a String](https://leetcode.com/problems/find-all-anagrams-in-a-string/) [Code](./438-find-all-anagrams-in-a-string.java)
 
 
 ### 4. **Two Pointers on Strings**
