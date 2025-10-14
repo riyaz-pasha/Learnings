@@ -40,6 +40,48 @@ class CountSubsetsWithSumK {
 
 }
 
+class CountSubsetsWithSumKMemo {
+
+    private Integer[][] dp;
+
+    public int findWays(int[] nums, int target) {
+        int n = nums.length;
+        dp = new Integer[n][target + 1];
+        return count(n - 1, target, nums);
+    }
+
+    private int count(int idx, int target, int[] arr) {
+        if (idx == 0) {
+            if (target == 0 && arr[0] == 0)
+                return 2; // pick or not pick zero
+            if (target == 0 || target == arr[0])
+                return 1;
+            return 0;
+        }
+
+        if (dp[idx][target] != -1)
+            return dp[idx][target];
+
+        int notTaken = count(idx - 1, target, arr);
+        int taken = 0;
+        if (arr[idx] <= target)
+            taken = count(idx - 1, target - arr[idx], arr);
+
+        dp[idx][target] = notTaken + taken;
+        return dp[idx][target];
+    }
+
+    public static void main(String[] args) {
+        CountSubsetsWithSumKMemo solver = new CountSubsetsWithSumKMemo();
+
+        System.out.println(solver.findWays(new int[] { 1, 2, 3 }, 3)); // 2 -> {1,2}, {3}
+        System.out.println(solver.findWays(new int[] { 0, 1 }, 1)); // 2 -> {1}, {0,1}
+        System.out.println(solver.findWays(new int[] { 0, 0, 1 }, 1)); // 4
+        System.out.println(solver.findWays(new int[] { 0, 0, 0 }, 0)); // 8
+    }
+
+}
+
 class Solution {
     private static final int MOD = 1000000007;
 
