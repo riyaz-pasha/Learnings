@@ -95,6 +95,41 @@ class ReverseWords {
         return result.toString();
     }
 
+    public String reverseWords22(String s) {
+        StringBuilder result = new StringBuilder();
+        int i = s.length() - 1;
+
+        while (i >= 0) {
+            // Skip spaces
+            while (i >= 0 && s.charAt(i) == ' ') {
+                i--;
+            }
+
+            if (i < 0)
+                break;
+
+            // End of word
+            int end = i;
+
+            // Move to start of word
+            while (i >= 0 && s.charAt(i) != ' ') {
+                i--;
+            }
+
+            // Add space between words
+            if (result.length() > 0) {
+                result.append(' ');
+            }
+
+            // Append characters directly
+            for (int k = i + 1; k <= end; k++) {
+                result.append(s.charAt(k));
+            }
+        }
+
+        return result.toString();
+    }
+
     /**
      * Solution 3: Using Collections.reverse()
      * Time: O(n), Space: O(n)
