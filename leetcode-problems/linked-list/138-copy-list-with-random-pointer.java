@@ -52,7 +52,7 @@ class Node {
     }
 }
 
-class Solution {
+class CopyRandomListSolution {
 
     // Solution 1: HashMap approach (Most intuitive)
     // Time Complexity: O(n), Space Complexity: O(n)
@@ -312,7 +312,7 @@ class CopyRandomListTest {
     }
 
     public static void main(String[] args) {
-        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
+        CopyRandomListSolution solution = new CopyRandomListSolution();
 
         // Test Case 1: Complex list [[7,null],[13,0],[11,4],[10,2],[1,0]]
         System.out.println("=== Test Case 1 ===");
