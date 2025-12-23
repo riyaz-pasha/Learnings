@@ -137,7 +137,7 @@ class Solution {
 class CycleDetectionTest {
 
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
         
         // Test Case 1: [3,2,0,-4] with cycle at position 1
         ListNode head1 = new ListNode(3);

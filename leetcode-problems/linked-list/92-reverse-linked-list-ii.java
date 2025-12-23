@@ -282,7 +282,7 @@ class ReverseBetweenTest {
     }
 
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
 
         // Test Case 1: [1,2,3,4,5], left = 2, right = 4
         System.out.println("=== Test Case 1 ===");

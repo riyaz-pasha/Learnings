@@ -312,7 +312,7 @@ class CopyRandomListTest {
     }
 
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
 
         // Test Case 1: Complex list [[7,null],[13,0],[11,4],[10,2],[1,0]]
         System.out.println("=== Test Case 1 ===");

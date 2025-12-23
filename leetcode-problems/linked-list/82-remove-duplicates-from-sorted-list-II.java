@@ -32,7 +32,7 @@ class ListNode {
     }
 }
 
-class Solution {
+class MiddleOfTheLinkedListSolution {
     /**
      * One-pass solution using dummy node and two pointers
      * Time Complexity: O(n) where n is the number of nodes
@@ -215,7 +215,7 @@ class Solution {
      * Test the solution
      */
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
 
         // Test Case 1: [1,2,3,3,4,4,5]
         // Expected: [1,2,5]

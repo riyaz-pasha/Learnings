@@ -172,7 +172,7 @@ class AddTwoNumbersTest {
     }
 
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
 
         // Test Case 1: [2,4,3] + [5,6,4] = [7,0,8]
         // Represents: 342 + 465 = 807

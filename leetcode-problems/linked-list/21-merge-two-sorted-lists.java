@@ -225,7 +225,7 @@ class MergeSortedListsTest {
     }
 
     public static void main(String[] args) {
-        Solution solution = new Solution();
+        MiddleOfTheLinkedListSolution solution = new MiddleOfTheLinkedListSolution();
 
         // Test Case 1: [1,2,4] + [1,3,4] = [1,1,2,3,4,4]
         ListNode list1 = createList(new int[] { 1, 2, 4 });
