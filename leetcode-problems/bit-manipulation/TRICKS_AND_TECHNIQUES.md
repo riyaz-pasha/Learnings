@@ -596,3 +596,113 @@ boolean isPowerOfTwo = num > 0 && (num & (num - 1)) == 0;
 > A number is a power of 2 if it has only one set bit, which can be checked using `(n & (n - 1)) == 0`.
 
 </details>
+
+---
+
+<details>
+<summary><strong>8️⃣ Count the Number of Set Bits (1s)</strong></summary>
+
+Counting set bits means finding how many `1`s are present in the **binary representation** of a number.
+
+---
+
+## Method 1: Brian Kernighan’s Algorithm (Most Important)
+
+### Formula
+```java
+n = n & (n - 1)
+````
+
+### Idea
+
+* Each operation **removes the rightmost set bit**
+* Loop runs exactly **number of set bits** times
+
+---
+
+### Example
+
+```java
+int n = 13;   // 1101
+```
+
+Step-by-step:
+
+```
+1101 & 1100 = 1100
+1100 & 1011 = 1000
+1000 & 0111 = 0000
+```
+
+✔ Set bits count = **3**
+
+---
+
+### Java Code
+
+```java
+int count = 0;
+while (n != 0) {
+    n = n & (n - 1);
+    count++;
+}
+```
+
+---
+
+## Method 2: Right Shift + AND (Simple)
+
+### Formula
+
+```java
+(n & 1)
+```
+
+---
+
+### Java Code
+
+```java
+int count = 0;
+while (n != 0) {
+    count += (n & 1);
+    n >>= 1;
+}
+```
+
+---
+
+## Method 3: Built-in Java Method
+
+```java
+int count = Integer.bitCount(n);
+```
+
+✔ Most readable
+✔ Internally optimized
+
+---
+
+## Comparison
+
+| Method      | Time Complexity       | Notes               |
+| ----------- | --------------------- | ------------------- |
+| Kernighan’s | O(number of set bits) | Best for interviews |
+| Shift & AND | O(total bits)         | Easy to understand  |
+| `bitCount`  | O(1)                  | Best in production  |
+
+---
+
+## Important Notes ⭐
+
+* Works for positive and negative numbers
+* For negative numbers, Java uses **2’s complement**
+* `bitCount` counts bits in full 32-bit representation
+
+---
+
+## Interview One-Liner 💡
+
+> To count set bits efficiently, repeatedly remove the rightmost set bit using `n & (n - 1)`.
+
+</details>
