@@ -433,3 +433,166 @@ int i = 1;
 > To toggle the i-th bit, XOR the number with `(1 << i)`.
 
 </details>
+
+---
+
+<details>
+<summary><strong>6️⃣ Check if a Number is Odd Using Bit Manipulation</strong></summary>
+
+A number is **odd** if its **least significant bit (LSB)** is `1`.
+
+---
+
+## Formula
+
+```java
+(num & 1) == 1
+````
+
+---
+
+## Why This Works
+
+* The **rightmost bit** represents `2⁰`
+* Even numbers → LSB = `0`
+* Odd numbers  → LSB = `1`
+* AND (`&`) with `1` extracts only the LSB
+
+---
+
+## Example (Odd Number)
+
+```java
+int num = 7;   // 0111
+```
+
+```
+0111 & 0001
+-----------
+0001  → odd
+```
+
+✔ Result is `1` → number is **odd**
+
+---
+
+## Example (Even Number)
+
+```java
+int num = 10;  // 1010
+```
+
+```
+1010 & 0001
+-----------
+0000  → even
+```
+
+✔ Result is `0` → number is **even**
+
+---
+
+## Java Code
+
+```java
+boolean isOdd = (num & 1) == 1;
+```
+
+---
+
+## Key Properties
+
+* Works for **positive and negative numbers**
+* Constant time: **O(1)**
+* Faster than `% 2`
+
+---
+
+## Interview One-Liner 💡
+
+> A number is odd if `(num & 1) == 1` because the LSB represents oddness.
+
+</details>
+
+---
+
+<details>
+<summary><strong>7️⃣ Check if a Number is a Power of 2 (Using Bit Manipulation)</strong></summary>
+
+A number is a **power of 2** if it has **exactly one bit set** in its binary representation.
+
+---
+
+## Formula
+
+```java
+num > 0 && (num & (num - 1)) == 0
+````
+
+---
+
+## Why This Works
+
+* A power of 2 has binary form: `1000...000`
+* Subtracting `1` flips all bits after the only `1`
+
+Example:
+
+```
+num      = 1000
+num - 1  = 0111
+----------------
+AND      = 0000
+```
+
+✔ Result is `0` only for powers of 2
+
+---
+
+## Example (Power of 2)
+
+```java
+int num = 8;   // 1000
+```
+
+```
+1000 & 0111 = 0000 → power of 2
+```
+
+---
+
+## Example (Not a Power of 2)
+
+```java
+int num = 10;  // 1010
+```
+
+```
+1010 & 1001 = 1000 ≠ 0 → not power of 2
+```
+
+---
+
+## Java Code
+
+```java
+boolean isPowerOfTwo = num > 0 && (num & (num - 1)) == 0;
+```
+
+---
+
+## Important Notes ⭐
+
+* `num > 0` is required
+
+  * `0` and negative numbers are **not** powers of 2
+* Works for `int` and `long`
+* Time complexity: **O(1)**
+
+---
+
+## Interview One-Liner 💡
+
+> A number is a power of 2 if it has only one set bit, which can be checked using `(n & (n - 1)) == 0`.
+
+</details>
