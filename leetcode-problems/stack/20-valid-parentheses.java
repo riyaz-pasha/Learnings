@@ -1,4 +1,8 @@
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Stack;
 /*
  * Given a string s containing just the characters '(', ')', '{', '}', '[' and
  * ']', determine if the input string is valid.
