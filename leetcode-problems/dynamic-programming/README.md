@@ -20,7 +20,7 @@
 ### On Strings
 1. [5-LongestPalindromicSubstring](./5-LongestPalindromicSubstring.java)
 2. [139-word-break](./139-word-break.java)
-3. [516-longest-palindromic-subsequence](./516-longest-palindromic-subsequence.java)
+3. [516-longest-palindromic-subsequence](./516-longest-palindromic-subsequence.java) (⭐⭐⭐⭐⭐)
 4. [72-edit-distance](./72-edit-distance.java)
 5. [712-min-delete-ASCII-sum](./712-min-delete-ASCII-sum.java)
 6. [115-distinct-subsequences](./115-distinct-subsequences.java)
@@ -31,8 +31,8 @@
 2. [673-number-of-lis](./673-number-of-lis.java)
 3. [646-max-len-of-pair-chain](./646-max-len-of-pair-chain.java)
 4. [1218-longest-arithmetic-subsequence-of-given-diff](./1218-longest-arithmetic-subsequence-of-given-diff.java)
-5. [1027-longest-arithmetic-subsequence](./1027-longest-arithmetic-subsequence.java)
-6. [354-russian-doll-envelopes](./354-russian-doll-envelopes.java)
+5. [1027-longest-arithmetic-subsequence](./1027-longest-arithmetic-subsequence.java) (⭐⭐⭐⭐⭐)
+6. [354-russian-doll-envelopes](./354-russian-doll-envelopes.java) (⭐⭐⭐⭐⭐)
 7. [1964-longest-obstacle-course-at-each-position](./1964-longest-obstacle-course-at-each-position.java)
 
 ### Longest Common Subsequence

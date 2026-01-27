@@ -112,7 +112,7 @@ class LongestIncreasingSubsequence3 {
 
 }
 
-public class LongestIncreasingSubsequence4 {
+class LongestIncreasingSubsequence4 {
 
     /**
      * LONGEST INCREASING SUBSEQUENCE - BINARY SEARCH + GREEDY APPROACH
