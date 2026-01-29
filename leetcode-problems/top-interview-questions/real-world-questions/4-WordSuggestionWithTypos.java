@@ -6,8 +6,10 @@
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 class WordSuggestionWithTypos {
 
@@ -292,4 +294,156 @@ class EditDistanceBottomUp {
         return dp[m][n];
     }
 
+}
+
+class WordSuggestionWithTypos2 {
+
+    /**
+     * Trie node structure.
+     * Each node represents a prefix of dictionary words.
+     * If 'word' is non-null, this node marks the end of a valid dictionary word.
+     */
+    class TrieNode {
+        Map<Character, TrieNode> children = new HashMap<>();
+        String word; // full word if this node is terminal
+    }
+
+    private final TrieNode root = new TrieNode();
+
+    /**
+     * Build the Trie from the dictionary.
+     */
+    public WordSuggestionWithTypos2(List<String> dict) {
+        for (String word : dict) {
+            insert(word);
+        }
+    }
+
+    /**
+     * Insert a word into the Trie.
+     */
+    private void insert(String word) {
+        TrieNode node = root;
+        for (char ch : word.toCharArray()) {
+            node = node.children.computeIfAbsent(ch, _ -> new TrieNode());
+        }
+        node.word = word; // mark end of word
+    }
+
+    /**
+     * Returns all dictionary words whose edit distance from the input
+     * is less than or equal to maxDistance.
+     */
+    public List<String> getSuggestions(String input, int maxDistance) {
+        Set<String> result = new HashSet<>(); // avoid duplicates
+        dfs(input, root, 0, maxDistance, result);
+        return new ArrayList<>(result);
+    }
+
+    /**
+     * DFS over the Trie while tracking edit distance.
+     *
+     * @param input           User-typed string
+     * @param node            Current Trie node
+     * @param index           Current index in input string
+     * @param remainingEdits  How many edits are still allowed
+     * @param result          Collected valid dictionary words
+     */
+    private void dfs(
+            String input,
+            TrieNode node,
+            int index,
+            int remainingEdits,
+            Set<String> result
+    ) {
+
+        // If we used up all allowed edits, stop exploring this path
+        if (remainingEdits < 0) return;
+
+        /**
+         * BASE CASE:
+         * Input string is fully consumed.
+         *
+         * Example:
+         * input = "hel"
+         * dictionary word = "hello"
+         *
+         * Remaining characters in Trie can be deleted
+         * if remainingEdits allows it.
+         */
+        if (index == input.length()) {
+
+            // If current Trie node is a complete word, add it
+            if (node.word != null) {
+                result.add(node.word);
+            }
+
+            // Try deleting remaining Trie characters
+            // (i.e., dictionary word is longer than input)
+            for (TrieNode child : node.children.values()) {
+                dfs(input, child, index, remainingEdits - 1, result);
+            }
+            return;
+        }
+
+        char currentChar = input.charAt(index);
+
+        /**
+         * CASE 1: Exact Match (no edit)
+         *
+         * Example:
+         * input = "hello"
+         * trie path = 'h' → 'e' → 'l'
+         * currentChar = 'l'
+         *
+         * We consume both input and Trie character.
+         */
+        TrieNode matchChild = node.children.get(currentChar);
+        if (matchChild != null) {
+            dfs(input, matchChild, index + 1, remainingEdits, result);
+        }
+
+        /**
+         * CASE 2: Substitution (replace one character)
+         *
+         * Example:
+         * input = "helo"
+         * dictionary word = "hello"
+         * currentChar = 'o'
+         * trie expects = 'l'
+         *
+         * Replace 'o' → 'l' (cost = 1)
+         */
+        for (Map.Entry<Character, TrieNode> entry : node.children.entrySet()) {
+            if (entry.getKey() != currentChar) {
+                dfs(input, entry.getValue(), index + 1, remainingEdits - 1, result);
+            }
+        }
+
+        /**
+         * CASE 3: Insertion (extra character in input)
+         *
+         * Example:
+         * input = "heallo"
+         * dictionary word = "hello"
+         *
+         * We skip the extra 'a' in input.
+         * Move input index forward, stay on same Trie node.
+         */
+        dfs(input, node, index + 1, remainingEdits - 1, result);
+
+        /**
+         * CASE 4: Deletion (missing character in input)
+         *
+         * Example:
+         * input = "helo"
+         * dictionary word = "hello"
+         *
+         * Input is missing one 'l'.
+         * We move forward in Trie without consuming input.
+         */
+        for (TrieNode child : node.children.values()) {
+            dfs(input, child, index, remainingEdits - 1, result);
+        }
+    }
 }

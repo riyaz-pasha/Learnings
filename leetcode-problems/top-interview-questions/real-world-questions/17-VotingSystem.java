@@ -1,8 +1,10 @@
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -235,4 +237,42 @@ class VotingSystemOneVotePerPersonTreeMap {
      * 
      */
 
+}
+
+
+class VotingSystem4 {
+    // Candidate -> Current Votes
+    private final Map<String, Integer> votes = new HashMap<>();
+    
+    // Votes -> Set of Candidates with that many votes
+    // We use TreeMap to keep the vote counts sorted
+    private final TreeMap<Integer, Set<String>> leaderboard = new TreeMap<>();
+
+    public void vote(String candidateId) {
+        int oldCount = votes.getOrDefault(candidateId, 0);
+        int newCount = oldCount + 1;
+        
+        // 1. Update Candidate Map
+        votes.put(candidateId, newCount);
+        
+        // 2. Update Leaderboard (TreeMap)
+        if (oldCount > 0) {
+            leaderboard.get(oldCount).remove(candidateId);
+            if (leaderboard.get(oldCount).isEmpty()) {
+                leaderboard.remove(oldCount);
+            }
+        }
+        
+        leaderboard.computeIfAbsent(newCount, k -> new HashSet<>()).add(candidateId);
+    }
+
+    public String getLeadingCandidate() {
+        if (leaderboard.isEmpty()) return null;
+        
+        // Get the highest vote count (last entry in TreeMap)
+        Map.Entry<Integer, Set<String>> topEntry = leaderboard.lastEntry();
+        
+        // Return any candidate from the set of leaders
+        return topEntry.getValue().iterator().next();
+    }
 }

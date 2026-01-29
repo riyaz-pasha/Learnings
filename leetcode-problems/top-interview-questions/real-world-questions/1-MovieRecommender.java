@@ -153,3 +153,62 @@ class MovieRecommender {
     }
 
 }
+
+class MovieRecommender2 {
+
+    public List<String> getTopNSimilarMovies(Movie source, int n) {
+        if (source == null || n <= 0) return Collections.emptyList();
+
+        // Visited set to avoid cycles
+        Set<Movie> visited = new HashSet<>();
+
+        // Max heap → expand most similar movie first
+        PriorityQueue<SimilarMovie> traversalPQ =
+                new PriorityQueue<>((a, b) -> Double.compare(b.score, a.score));
+
+        // Min heap → keep top N results
+        PriorityQueue<SimilarMovie> topN =
+                new PriorityQueue<>(Comparator.comparingDouble(sm -> sm.score));
+
+        visited.add(source);
+
+        // Seed traversal with direct neighbors
+        for (SimilarMovie sm : source.similarMovies) {
+            traversalPQ.offer(sm);
+        }
+
+        while (!traversalPQ.isEmpty()) {
+            SimilarMovie current = traversalPQ.poll();
+            Movie currentMovie = current.movie;
+
+            if (visited.contains(currentMovie)) {
+                continue;
+            }
+            visited.add(currentMovie);
+
+            // Maintain top N
+            if (topN.size() < n) {
+                topN.offer(current);
+            } else if (current.score > topN.peek().score) {
+                topN.poll();
+                topN.offer(current);
+            }
+
+            // Expand neighbors
+            for (SimilarMovie neighbor : currentMovie.similarMovies) {
+                if (!visited.contains(neighbor.movie)) {
+                    traversalPQ.offer(neighbor);
+                }
+            }
+        }
+
+        // Extract results in descending order
+        List<String> result = new ArrayList<>();
+        while (!topN.isEmpty()) {
+            result.add(topN.poll().movie.name);
+        }
+        Collections.reverse(result);
+
+        return result;
+    }
+}

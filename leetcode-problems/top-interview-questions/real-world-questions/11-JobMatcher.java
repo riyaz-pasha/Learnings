@@ -103,7 +103,7 @@ class OptimizedJobMatcher {
                     double preferenceScore = seeker.preferenceScores.getOrDefault(job.jobId, 0.0);
                     double totalScore = alpha * skillMatchScore + beta * preferenceScore;
 
-                    if (matchedSkills.size() > 0) {
+                    if (!matchedSkills.isEmpty()) {
                         results.add(new MatchResult(seeker.id, job.jobId, totalScore));
                     }
                 }
