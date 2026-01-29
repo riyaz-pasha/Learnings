@@ -1,63 +1,141 @@
-That's a great request! Understanding the complexity of Prim's algorithm is crucial for evaluating its efficiency.
+# Prim’s Algorithm – Time & Space Complexity (Min-Heap / Priority Queue)
 
-Here are the detailed time and space complexities for your Java implementation of Prim's algorithm, which uses a standard **Min-Priority Queue** (Min-Heap).
+Understanding the complexity of **Prim’s algorithm** is crucial for evaluating its efficiency.
+Below is a **cleaned-up and well-structured** explanation for a Java implementation that uses a **Min-Priority Queue (Min-Heap)**.
 
 ---
 
 ## ⏰ Time Complexity Analysis
 
-The time complexity is primarily determined by the operations on the Priority Queue ($\text{add}$/$\text{offer}$ and $\text{extract-min}$/$\text{poll}$).
+Let:
 
-* Let $V$ be the number of vertices (nodes, $n$).
-* Let $E$ be the number of edges in the graph.
+* `V` = number of vertices (nodes)
+* `E` = number of edges
 
-### 1. Initialization
-* The array `inMST` is initialized in $O(V)$ time.
-* The edges connected to the starting node are added to the Priority Queue. In the worst case, the starting node has a high degree, leading to $O(V)$ insertions.
-* **Time:** $O(V \log V)$ (Each of the $V$ insertions takes $O(\log Q)$, where $Q$ is the PQ size, which is at most $E$).
+The overall complexity is dominated by **Priority Queue operations** (`offer` and `poll`).
 
-### 2. Main Loop (`while (!pq.isEmpty())`)
-The loop runs until the MST is formed, which involves adding $V-1$ edges.
+---
 
-* **Edge Extraction ($\text{pq.poll()}$):** This operation, which extracts the minimum weight edge, happens at most **$E$ times** (once for every edge that gets added to the PQ). Since the PQ size is at most $E$, each extraction takes $O(\log E)$.
-    * **Total Time for Extractions:** $O(E \log E)$.
+### 1️⃣ Initialization
 
-* **Edge Insertion ($\text{pq.offer()}$):** Every edge in the entire graph is considered for insertion into the PQ **at most once** (when its source node is added to the MST). Therefore, there are at most $E$ insertions in total. Each insertion takes $O(\log E)$.
-    * **Total Time for Insertions:** $O(E \log E)$.
+* Initialize `inMST` array → **O(V)**
+* Insert edges connected to the starting node into the Priority Queue
 
-### 3. Final Complexity
+  * In the worst case, the starting node can have degree `O(V)`
+  * Each insertion costs `O(log Q)` where `Q ≤ E`
 
-Combining the steps, the total time complexity is:
-$$O(V \log V) + O(E \log E) + O(E \log E)$$
+**Time:**
 
-Since for a connected graph $E \ge V-1$, the $O(E \log E)$ term usually dominates.
+```
+O(V log V)
+```
 
-$$\text{Time Complexity: } \mathbf{O(E \log E)}$$
+---
 
-***Note on $\mathbf{\log E}$ vs. $\mathbf{\log V}$:** Since $E$ is at most $V^2$ (for a complete graph), $\log E$ is $O(\log V^2) = O(2 \log V) = O(\log V)$. Therefore, the complexity is often cited as $\mathbf{O(E \log V)}$ for consistency with other graph algorithms.*
+### 2️⃣ Main Loop (`while (!pq.isEmpty())`)
+
+The loop continues until the MST has `V - 1` edges.
+
+#### a) Extract-Min (`pq.poll()`)
+
+* Each edge inserted into the PQ can be removed at most once
+* At most `E` extractions
+* Each extraction costs `O(log E)`
+
+**Total extraction cost:**
+
+```
+O(E log E)
+```
+
+---
+
+#### b) Insertions (`pq.offer()`)
+
+* Each edge is inserted into the PQ **at most once**
+
+  * When its source vertex is added to the MST
+* At most `E` insertions
+* Each insertion costs `O(log E)`
+
+**Total insertion cost:**
+
+```
+O(E log E)
+```
+
+---
+
+### 3️⃣ Final Time Complexity
+
+Combining all steps:
+
+```
+O(V log V) + O(E log E) + O(E log E)
+```
+
+Since for a connected graph `E ≥ V - 1`, the dominant term is:
+
+```
+✅ Time Complexity = O(E log E)
+```
+
+---
+
+### 🔎 Why `O(E log V)` Is Also Correct
+
+* In the worst case, `E ≤ V²`
+* Therefore:
+
+  ```
+  log E = log(V²) = 2 log V = O(log V)
+  ```
+
+So the time complexity is often written as:
+
+```
+✅ O(E log V)
+```
+
+Both are correct; **`O(E log V)` is the standard interview-friendly form**.
 
 ---
 
 ## 💾 Space Complexity Analysis
 
-The space complexity is determined by the auxiliary data structures used to store the graph and the algorithm's state.
+Space usage comes from the graph representation and auxiliary data structures.
 
-* **`graph` (Adjacency List):** The input itself requires space proportional to the number of nodes plus the number of edges.
-    * **Space:** $O(V + E)$
+---
 
-* **`inMST` (boolean array):** Stores a boolean value for every vertex.
-    * **Space:** $O(V)$
+### Data Structures Used
 
-* **`mstEdges` (result list):** The final MST has exactly $V-1$ edges.
-    * **Space:** $O(V)$
+| Structure                | Space      |
+| ------------------------ | ---------- |
+| Adjacency List (`graph`) | `O(V + E)` |
+| `inMST` boolean array    | `O(V)`     |
+| `mstEdges` (result list) | `O(V)`     |
+| Priority Queue (`pq`)    | `O(E)`     |
 
-* **`pq` (PriorityQueue):** In the worst-case scenario (a highly connected graph), the PQ can store all edges that connect the growing MST to the unvisited nodes. This maximum size is bounded by $E$.
-    * **Space:** $O(E)$
+---
 
-### Final Complexity
-The total space complexity is the sum of the space required for the input and the auxiliary structures:
-$$O(V + E) + O(V) + O(V) + O(E)$$
+### Final Space Complexity
 
-$$\text{Space Complexity: } \mathbf{O(V + E)}$$
+```
+O(V + E) + O(V) + O(V) + O(E)
+```
 
-This is an excellent result, as it means the algorithm only requires space linearly proportional to the size of the input graph.
+Simplifies to:
+
+```
+✅ Space Complexity = O(V + E)
+```
+
+---
+
+## ✅ Final Summary
+
+| Metric    | Complexity   |
+| --------- | ------------ |
+| **Time**  | `O(E log V)` |
+| **Space** | `O(V + E)`   |
+
