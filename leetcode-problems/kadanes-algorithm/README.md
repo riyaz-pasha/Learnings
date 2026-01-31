@@ -157,35 +157,120 @@ Let’s now **spoon-feed** the whole approach with examples 👇
 
 ## 🪜 Step-by-Step Plan (with examples)
 
-### 🔢 Step 1: Find normal max subarray (Kadane)
 
-**Array:** `[1, -2, 3, -2]`
-Kadane gives `3` (`[3]`)
+Example input:
 
----
-
-### ➕ Step 2: Find total sum
-
-`1 + (-2) + 3 + (-2) = 0`
+    [1, -2, 3, -2]
 
 ---
 
-### 🔻 Step 3: Find min subarray sum
+## 🔑 Key Insight
 
-Min subarray = `[-2, 3, -2]` → sum = `-1`
+The maximum circular subarray sum is one of two cases:
+
+1. **Non-circular subarray** → Standard Kadane’s Algorithm
+2. **Circular subarray** → Total array sum minus minimum subarray sum
+
+Final formula:
+
+    max(normalMax, circularMax)
 
 ---
 
-### 🔁 Step 4: Calculate circular sum
+## 🔢 Step 1: Find the Maximum Subarray Sum (Kadane’s Algorithm)
 
-`circular sum = total sum - min subarray = 0 - (-1) = 1`
+Array:
+
+    [1, -2, 3, -2]
+
+Using Kadane’s algorithm:
+- The maximum subarray sum is `3`
+- Achieved by the subarray `[3]`
+
+Result:
+
+    maxKadane = 3
 
 ---
 
-### ✅ Step 5: Final result = max(normal sum, circular sum)
+## ➕ Step 2: Compute the Total Sum of the Array
 
-`max(3, 1) = 3`
-✔ Answer: `3`
+Calculation:
+
+    1 + (-2) + 3 + (-2) = 0
+
+Result:
+
+    totalSum = 0
+
+---
+
+## 🔻 Step 3: Find the Minimum Subarray Sum
+
+To handle the circular case, we compute the **minimum subarray sum**
+using a modified Kadane’s algorithm.
+
+- The minimum subarray sum is `-2`
+- Achieved by the subarray `[-2]`
+- (There are two such positions; only the value matters)
+
+Result:
+
+    minKadane = -2
+
+---
+
+## 🔁 Step 4: Compute the Circular Subarray Sum
+
+A circular maximum subarray can be interpreted as:
+taking the total sum of the array and excluding the minimum subarray.
+
+Calculation:
+
+    circularSum = totalSum - minKadane
+                 = 0 - (-2)
+                 = 2
+
+---
+
+## ✅ Step 5: Compute the Final Result
+
+The maximum circular subarray sum is the maximum of:
+- the non-circular maximum subarray sum
+- the circular subarray sum
+
+Calculation:
+
+    max(maxKadane, circularSum)
+    = max(3, 2)
+    = 3
+
+Final Answer:
+
+    3
+
+---
+
+## 🧠 Intuition Summary
+
+- **Normal max subarray:** What we want to keep
+- **Minimum subarray:** What we want to remove
+- **Circular max:** Total sum minus the worst contiguous part
+- Non-circular subarray can still be optimal
+
+---
+
+## ⏱️ Time and Space Complexity
+
+Time Complexity:
+
+    O(n)
+
+Space Complexity:
+
+    O(1)
+
+---
 
 ---
 

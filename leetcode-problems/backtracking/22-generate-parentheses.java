@@ -1,4 +1,10 @@
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 /*
  * Given n pairs of parentheses, write a function to generate all combinations
  * of well-formed parentheses.
@@ -39,6 +45,13 @@ class Solution1 {
             backtrack(result, current + ")", open, close + 1, max);
         }
     }
+
+    /*
+     * “From the code, we can see that the recursion only builds valid prefixes.
+     * Each leaf corresponds to one valid parentheses string of length 2n.
+     * Constructing each string takes O(n) time, so the total time is proportional
+     * to O(n × number of valid strings). The recursion stack uses O(n) space.”
+     */
 
 }
 

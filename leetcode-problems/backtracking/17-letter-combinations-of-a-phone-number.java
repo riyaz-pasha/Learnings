@@ -1,4 +1,9 @@
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 /*
  * Given a string containing digits from 2-9 inclusive, return all possible
  * letter combinations that the number could represent. Return the answer in any
@@ -217,4 +222,10 @@ class LetterCombinations {
  * 3. HashMap: More readable mapping, slightly slower due to HashMap overhead
  * 4. Recursive: Elegant but uses more memory due to substring creation
  * 5. Char Array: Most memory efficient, avoids StringBuilder overhead
+ * 
+ * “Each digit contributes either 3 or 4 branches.
+ * If N digits map to 3 letters and M digits map to 4 letters,
+ * the total number of combinations is 3ⁿ × 4ᵐ.
+ * Constructing each string costs O(N+M), so total time is
+ * O((N+M) × 3ⁿ × 4ᵐ).”
  */
