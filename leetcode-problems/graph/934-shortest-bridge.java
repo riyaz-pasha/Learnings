@@ -17,6 +17,28 @@ import java.util.Queue;
  */
 
 class ShortestBridge {
+
+    /*
+    ============================================================
+    LeetCode 934: Shortest Bridge
+    ============================================================
+
+    Problem Summary:
+    ----------------
+    - Given a binary grid with exactly two islands (groups of 1s)
+    - You can flip 0s to 1s
+    - Return the minimum number of flips needed to connect the two islands
+
+    Strategy:
+    ---------
+    1) Use DFS to find and mark the first island
+    2) Use BFS to expand outward from the first island
+    3) The first time BFS touches the second island → answer
+
+    ============================================================
+    */
+
+
     int[][] directions = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
 
     public int shortestBridge(int[][] grid) {
@@ -83,7 +105,31 @@ class ShortestBridge {
             dfs(grid, i + dir[0], j + dir[1], visited, queue);
         }
     }
+    /*
+     ============================================================
+     Time & Space Complexity Analysis
+     ============================================================
 
+     Let n = grid dimension (n x n)
+
+     Time Complexity:
+     ----------------
+     - DFS visits each cell at most once → O(n²)
+     - BFS visits each cell at most once → O(n²)
+
+     Total Time: O(n²)
+
+     Space Complexity:
+     -----------------
+     - visited array → O(n²)
+     - BFS queue → O(n²) in worst case
+     - DFS recursion stack → O(n²) worst case
+
+     Total Space: O(n²)
+
+     This is optimal for grid traversal problems.
+     ============================================================
+     */
 }
 
 class Solution {

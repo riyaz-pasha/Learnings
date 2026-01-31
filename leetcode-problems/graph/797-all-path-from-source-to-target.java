@@ -12,33 +12,146 @@ import java.util.Stack;
  * from node i (i.e., there is a directed edge from node i to node graph[i][j]). 
  */
 
-class Solution {
+
+
+/*
+ ============================================================
+ LeetCode 797: All Paths From Source to Target
+ ============================================================
+
+ Problem Summary:
+ ----------------
+ - Given a DAG (Directed Acyclic Graph)
+ - Nodes are labeled from 0 to n - 1
+ - graph[i] contains nodes reachable from i
+ - Find ALL possible paths from node 0 to node n - 1
+
+ Graph Properties (IMPORTANT):
+ -----------------------------
+ - DAG (no cycles)
+ - n <= 15
+ - Small constraints → exponential number of paths is acceptable
+
+ ============================================================
+ Core Approach:
+ ============================================================
+
+ We use DFS + Backtracking.
+
+ Why DFS?
+ --------
+ - We must enumerate ALL paths (not shortest, not minimum, ALL)
+ - DFS naturally explores one path fully before backtracking
+ - DAG guarantees no cycles → no visited[] needed
+
+ Algorithm:
+ ----------
+ 1. Start DFS from node 0
+ 2. Maintain a list `path` representing the current path
+ 3. Add current node to path
+ 4. If current node == target (n - 1):
+      - Add a COPY of path to result
+ 5. Else:
+      - DFS into each neighbor
+ 6. Backtrack by removing last node
+
+ ============================================================
+ Time Complexity Analysis (VERY IMPORTANT):
+ ============================================================
+
+ Let:
+ - P = number of valid paths from source to target
+ - L = average length of each path (<= n)
+
+ Time Complexity:
+ ----------------
+ O(P * L)
+
+ Explanation:
+ - Every valid path must be fully constructed and copied
+ - Copying each path takes O(L)
+ - In the worst case (complete DAG), P can be exponential
+
+ This is OPTIMAL because:
+ - We are REQUIRED to output all P paths
+ - You cannot do better than output size
+
+ ============================================================
+ Space Complexity Analysis:
+ ============================================================
+
+ 1. Recursion stack:
+    - Max depth = path length ≤ n
+    - O(n)
+
+ 2. Path list:
+    - Stores current path → O(n)
+
+ 3. Result storage:
+    - Stores all paths → O(P * L)
+    - This is unavoidable (output requirement)
+
+ Overall Space Complexity:
+ -------------------------
+ O(P * L)   (dominated by output size)
+
+ ============================================================
+ */
+
+class AllPathsFromSourceToTarget {
 
     public List<List<Integer>> allPathsSourceTarget(int[][] graph) {
         List<List<Integer>> result = new ArrayList<>();
         List<Integer> path = new ArrayList<>();
-        dfs(graph, 0, path, result);
+
+        // Start DFS from source node (0)
+        dfs(0, graph, path, result);
+
         return result;
     }
 
-    private void dfs(int[][] graph, int node, List<Integer> path, List<List<Integer>> result) {
+    /*
+     ------------------------------------------------------------
+     DFS Helper Function
+     ------------------------------------------------------------
+
+     Parameters:
+     - node   : current node in DFS
+     - graph  : adjacency list representation
+     - path   : current path from source to this node
+     - result : list of all valid paths
+
+     Why no visited[]?
+     -----------------
+     The graph is a DAG → no cycles → safe to revisit nodes
+     across different paths.
+     ------------------------------------------------------------
+     */
+    private void dfs(int node,
+                            int[][] graph,
+                            List<Integer> path,
+                            List<List<Integer>> result) {
+
+        // Add current node to path
         path.add(node);
 
-        // If we reached the last node, add the current path to the result
+        // Base case: reached target node
         if (node == graph.length - 1) {
+            // Must add a COPY of path
             result.add(new ArrayList<>(path));
         } else {
-            // Continue DFS for all adjacent nodes
-            for (int neighbor : graph[node]) {
-                dfs(graph, neighbor, path, result);
+            // Explore all neighbors
+            for (int next : graph[node]) {
+                dfs(next, graph, path, result);
             }
         }
 
-        // Backtrack: remove the current node before returning to previous level
+        // Backtrack: remove current node before returning
         path.remove(path.size() - 1);
     }
 
 }
+
 
 class DAGAllPaths {
 

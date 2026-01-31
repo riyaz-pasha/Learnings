@@ -413,3 +413,148 @@ class TheSkylineProblem {
  * approach.
  * It handles all edge cases correctly and has optimal time complexity.
  */
+
+
+class TheSkylineProblem2 {
+
+    /**
+     * Returns the skyline formed by the given buildings.
+     *
+     * Each building is represented as [left, right, height].
+     */
+    public List<List<Integer>> getSkyline(int[][] buildings) {
+
+        // ===============================
+        // 1. Convert buildings into events
+        // ===============================
+
+        // Each building contributes two events:
+        //  - start event  -> building becomes active
+        //  - end event    -> building stops being active
+        List<Event> events = new ArrayList<>();
+
+        for (int[] building : buildings) {
+            int left = building[0];
+            int right = building[1];
+            int height = building[2];
+
+            events.add(new Event(left, height, true));   // building starts
+            events.add(new Event(right, height, false)); // building ends
+        }
+
+        // ==================================
+        // 2. Sort events for sweep line logic
+        // ==================================
+
+        // Sorting ensures we process events from left to right.
+        // Tie-breaking rules are handled inside Event.compareTo().
+        Collections.sort(events);
+
+        // ======================================================
+        // 3. TreeMap to act as a multiset of active building heights
+        // ======================================================
+
+        // Key   -> building height
+        // Value -> how many active buildings have this height
+        //
+        // Reverse order ensures:
+        //   - firstKey() always gives the current maximum height
+        TreeMap<Integer, Integer> activeHeights =
+                new TreeMap<>(Collections.reverseOrder());
+
+        // Ground level is always present to avoid empty map issues
+        activeHeights.put(0, 1);
+
+        // Result list storing key points of the skyline
+        List<List<Integer>> skyline = new ArrayList<>();
+
+        // Tracks the previous maximum height to detect skyline changes
+        int prevMaxHeight = 0;
+
+        // ======================
+        // 4. Sweep line traversal
+        // ======================
+
+        for (Event event : events) {
+
+            int height = event.height();
+
+            if (event.isStart()) {
+                // If a building starts:
+                // increase its height count in the multiset
+                activeHeights.put(
+                        height,
+                        activeHeights.getOrDefault(height, 0) + 1
+                );
+            } else {
+                // If a building ends:
+                // decrease its height count
+                int count = activeHeights.get(height);
+
+                if (count == 1) {
+                    // No more buildings of this height remain
+                    activeHeights.remove(height);
+                } else {
+                    // Reduce frequency
+                    activeHeights.put(height, count - 1);
+                }
+            }
+
+            // Current tallest active building
+            int currentMaxHeight = activeHeights.firstKey();
+
+            // ===============================
+            // 5. Detect skyline height change
+            // ===============================
+
+            // A skyline key point is formed only when
+            // the maximum height changes
+            if (currentMaxHeight != prevMaxHeight) {
+                skyline.add(List.of(event.x(), currentMaxHeight));
+                prevMaxHeight = currentMaxHeight;
+            }
+        }
+
+        return skyline;
+    }
+
+    /**
+     * Event represents either:
+     *  - start of a building
+     *  - end of a building
+     */
+    static record Event(int x, int height, boolean isStart)
+            implements Comparable<Event> {
+
+        @Override
+        public int compareTo(Event other) {
+
+            // -------------------------
+            // Primary sort: x-coordinate
+            // -------------------------
+            if (this.x != other.x) {
+                return Integer.compare(this.x, other.x);
+            }
+
+            // ------------------------------------------------
+            // Secondary sort: resolve events at the same x
+            // ------------------------------------------------
+
+            // Case 1: both are start events
+            // Higher building should come first
+            if (this.isStart && other.isStart) {
+                return Integer.compare(other.height, this.height);
+            }
+
+            // Case 2: both are end events
+            // Lower building should end first
+            if (!this.isStart && !other.isStart) {
+                return Integer.compare(this.height, other.height);
+            }
+
+            // Case 3: start vs end
+            // Start event should be processed before end event
+            return this.isStart ? -1 : 1;
+        }
+    }
+}

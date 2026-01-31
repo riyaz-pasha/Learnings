@@ -23,7 +23,324 @@
  * return -1.
  */
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.Set;
+
+/*
+ ============================================================
+ LeetCode 864: Shortest Path to Get All Keys
+ ============================================================
+
+ Problem Summary:
+ ----------------
+ - You are given a grid with:
+     '@'  → starting position
+     '.'  → empty cell
+     '#'  → wall
+     'a'–'f' → keys
+     'A'–'F' → locks
+ - You must collect ALL keys in the minimum number of steps.
+ - You can move in 4 directions.
+ - A lock can be passed only if you already have its key.
+
+ Key Insight:
+ ------------
+ This is a SHORTEST PATH problem → BFS.
+ However, the state is NOT just (row, col).
+
+ State = (row, col, keysCollected)
+
+ Since there are at most 6 keys, we use a BITMASK to represent
+ which keys have been collected.
+
+ ============================================================
+ */
+
+class Solution {
+
+    // Directions: down, up, right, left
+    private static final int[][] DIRS = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}
+    };
+
+    /*
+     ============================================================
+     KeyRing
+     ============================================================
+
+     Internally stores collected keys using a bitmask.
+
+     Bit-to-key mapping:
+     -------------------
+     bit 0 → 'a'
+     bit 1 → 'b'
+     bit 2 → 'c'
+     bit 3 → 'd'
+     bit 4 → 'e'
+     bit 5 → 'f'
+
+     Example:
+     --------
+     mask = 0b001011 (decimal 11)
+
+     bit:  5 4 3 2 1 0
+           0 0 1 0 1 1
+
+     Keys held:
+     - 'a' ✔
+     - 'b' ✔
+     - 'c' ✘
+     - 'd' ✔
+     - 'e' ✘
+     - 'f' ✘
+     ============================================================
+     */
+    static class KeyRing {
+        private final int mask;
+
+        // No keys initially
+        KeyRing() {
+            this.mask = 0; // 000000
+        }
+
+        private KeyRing(int mask) {
+            this.mask = mask;
+        }
+
+        /*
+         Adds a key to the key ring.
+
+         Example:
+         --------
+         Current mask = 0b000001  (key 'a')
+
+         Pick up key 'c':
+         - 'c' - 'a' = 2
+         - (1 << 2) = 0b000100
+
+         New mask:
+         0b000001
+       | 0b000100
+       ----------
+         0b000101  → keys 'a' and 'c'
+
+         OR (|) sets the bit without affecting others.
+         */
+        KeyRing addKey(char key) {
+            int bit = key - 'a';
+            return new KeyRing(mask | (1 << bit));
+        }
+
+        /*
+         Checks if we can open a lock.
+
+         Example:
+         --------
+         Lock = 'C' → bit = 2
+
+         mask = 0b000101 (keys 'a', 'c')
+
+         mask & (1 << 2)
+         0b000101
+       & 0b000100
+       ----------
+         0b000100 ≠ 0 → key exists → lock opens
+
+         AND (&) isolates the specific bit.
+         */
+        boolean canOpen(char lock) {
+            int bit = lock - 'A';
+            return (mask & (1 << bit)) != 0;
+        }
+
+        // Checks if all keys are collected
+        boolean hasAllKeys(int targetMask) {
+            return mask == targetMask;
+        }
+
+        int value() {
+            return mask;
+        }
+    }
+
+    /*
+     ============================================================
+     BFS State
+     ============================================================
+     Each BFS node stores:
+     - current row
+     - current column
+     - keys collected so far
+     ============================================================
+     */
+    static class State {
+        int r, c;
+        KeyRing keys;
+
+        State(int r, int c, KeyRing keys) {
+            this.r = r;
+            this.c = c;
+            this.keys = keys;
+        }
+    }
+
+    /*
+     ============================================================
+     Main BFS Solution
+     ============================================================
+     */
+    public int shortestPathAllKeys(String[] grid) {
+        int rows = grid.length;
+        int cols = grid[0].length();
+
+        int[] info = findStartAndCountKeys(grid);
+        int startR = info[0];
+        int startC = info[1];
+        int totalKeys = info[2];
+
+        int targetMask = (1 << totalKeys) - 1;
+
+        // visited[row][col][keysMask]
+        boolean[][][] visited = new boolean[rows][cols][1 << totalKeys];
+
+        Queue<State> queue = new ArrayDeque<>();
+        queue.offer(new State(startR, startC, new KeyRing()));
+        visited[startR][startC][0] = true;
+
+        int steps = 0;
+
+        while (!queue.isEmpty()) {
+            int levelSize = queue.size();
+
+            for (int i = 0; i < levelSize; i++) {
+                State cur = queue.poll();
+
+                if (cur.keys.hasAllKeys(targetMask)) {
+                    return steps;
+                }
+
+                exploreNeighbors(grid, cur, visited, queue);
+            }
+            steps++;
+        }
+
+        return -1;
+    }
+
+    /*
+     ============================================================
+     Explore neighboring cells for BFS
+     ============================================================
+     */
+    private void exploreNeighbors(String[] grid,
+                                  State cur,
+                                  boolean[][][] visited,
+                                  Queue<State> queue) {
+
+        int rows = grid.length;
+        int cols = grid[0].length();
+
+        for (int[] d : DIRS) {
+            int nr = cur.r + d[0];
+            int nc = cur.c + d[1];
+
+            if (!isInside(nr, nc, rows, cols)) continue;
+
+            char ch = grid[nr].charAt(nc);
+
+            if (ch == '#') continue; // wall
+
+            KeyRing nextKeys = cur.keys;
+
+            if (isKey(ch)) {
+                nextKeys = cur.keys.addKey(ch);
+            }
+
+            if (isLock(ch) && !nextKeys.canOpen(ch)) {
+                continue;
+            }
+
+            int mask = nextKeys.value();
+            if (!visited[nr][nc][mask]) {
+                visited[nr][nc][mask] = true;
+                queue.offer(new State(nr, nc, nextKeys));
+            }
+        }
+    }
+
+    /*
+     ============================================================
+     Helper Methods
+     ============================================================
+     */
+    private boolean isInside(int r, int c, int rows, int cols) {
+        return r >= 0 && r < rows && c >= 0 && c < cols;
+    }
+
+    private boolean isKey(char ch) {
+        return ch >= 'a' && ch <= 'f';
+    }
+
+    private boolean isLock(char ch) {
+        return ch >= 'A' && ch <= 'F';
+    }
+
+    private int[] findStartAndCountKeys(String[] grid) {
+        int startR = 0, startC = 0, totalKeys = 0;
+
+        for (int r = 0; r < grid.length; r++) {
+            for (int c = 0; c < grid[0].length(); c++) {
+                char ch = grid[r].charAt(c);
+                if (ch == '@') {
+                    startR = r;
+                    startC = c;
+                } else if (isKey(ch)) {
+                    totalKeys++;
+                }
+            }
+        }
+        return new int[]{startR, startC, totalKeys};
+    }
+
+    /*
+     ============================================================
+     Time & Space Complexity
+     ============================================================
+
+     Let:
+     - R = number of rows
+     - C = number of columns
+     - K = number of keys (K ≤ 6)
+
+     Total possible states:
+     ----------------------
+     R × C × 2^K
+
+     Time Complexity:
+     ----------------
+     O(R × C × 2^K)
+
+     Each state is visited once in BFS.
+
+     Space Complexity:
+     -----------------
+     O(R × C × 2^K)
+
+     For:
+     - visited array
+     - BFS queue
+
+     This is optimal and expected.
+     ============================================================
+     */
+}
+
 
 class ShortestPathAllKeys {
 

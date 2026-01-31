@@ -99,3 +99,159 @@ class FindBridgesTarjansAlgo {
  * - What v can reach beyond that is irrelevant to u's reachability
  * - This would give incorrect low-link values
  */
+
+
+
+/*
+ ============================================================
+ Tarjan's Algorithm to Find Bridges in an Undirected Graph
+ ============================================================
+
+ A BRIDGE is an edge whose removal increases the number
+ of connected components in the graph.
+
+ Core idea:
+ ----------
+ Use DFS + timestamps to detect whether a subtree can
+ reach an ancestor without using the parent edge.
+
+ Key arrays:
+ -----------
+ disc[u] → discovery time of node u (when DFS first visits it)
+ low[u]  → earliest discovery time reachable from u
+           (using tree edges + at most one back edge)
+
+ Bridge condition:
+ -----------------
+ For an edge (u, v) where u is parent of v in DFS:
+
+     if (low[v] > disc[u]) → (u, v) is a BRIDGE
+
+ ============================================================
+ */
+
+class FindBridgesTarjansAlgo2 {
+
+    // Global DFS timer
+    private int time = 0;
+
+    // Stores all bridges found
+    private final List<List<Integer>> bridges = new ArrayList<>();
+
+    /*
+     ------------------------------------------------------------
+     Public API
+     ------------------------------------------------------------
+     numVertices → number of vertices (0 to V-1)
+     adjList     → adjacency list of an UNDIRECTED graph
+     ------------------------------------------------------------
+     */
+    public List<List<Integer>> findBridgesUsingTarjansAlgorithm(
+            int numVertices,
+            List<List<Integer>> adjList) {
+
+        // discovery time of each vertex
+        int[] disc = new int[numVertices];
+
+        // low-link value of each vertex
+        int[] low = new int[numVertices];
+
+        // marks whether a vertex is visited in DFS
+        boolean[] visited = new boolean[numVertices];
+
+        // Initialize discovery times to "unvisited"
+        Arrays.fill(disc, -1);
+        Arrays.fill(low, -1);
+
+        // Graph may be disconnected → run DFS from every vertex
+        for (int v = 0; v < numVertices; v++) {
+            if (!visited[v]) {
+                dfs(v, -1, visited, disc, low, adjList);
+            }
+        }
+
+        return bridges;
+    }
+
+    /*
+     ------------------------------------------------------------
+     DFS helper
+     ------------------------------------------------------------
+     u      → current vertex
+     parent → vertex from which u was discovered
+     ------------------------------------------------------------
+     */
+    private void dfs(int u,
+                     int parent,
+                     boolean[] visited,
+                     int[] disc,
+                     int[] low,
+                     List<List<Integer>> adjList) {
+
+        // Mark current node as visited
+        visited[u] = true;
+
+        // Set discovery time and low-link value
+        disc[u] = low[u] = time++;
+
+        // Explore all neighbors
+        for (int v : adjList.get(u)) {
+
+            // Ignore the edge back to parent
+            if (v == parent) {
+                continue;
+            }
+
+            /*
+             ----------------------------------------------------
+             CASE 1: Tree Edge (v not visited)
+             ----------------------------------------------------
+             */
+            if (!visited[v]) {
+
+                // DFS deeper
+                dfs(v, u, visited, disc, low, adjList);
+
+                /*
+                 After returning from DFS(v),
+                 v's subtree might reach an ancestor of u.
+                 So we update low[u] using low[v].
+                 */
+                low[u] = Math.min(low[u], low[v]);
+
+                /*
+                 BRIDGE CHECK:
+                 -------------
+                 If v (and its subtree) cannot reach u or any
+                 ancestor of u, then the edge (u, v) is the
+                 ONLY connection → BRIDGE.
+                 */
+                if (low[v] > disc[u]) {
+                    bridges.add(Arrays.asList(u, v));
+                }
+
+            }
+            /*
+             ----------------------------------------------------
+             CASE 2: Back Edge (v already visited and not parent)
+             ----------------------------------------------------
+             */
+            else {
+
+                /*
+                 IMPORTANT LINE (you asked about this):
+                 -------------------------------------
+                 We use disc[v], NOT low[v].
+
+                 Why?
+                 - v is an ancestor of u
+                 - u can directly reach v via this edge
+                 - u CANNOT use paths that v's subtree uses
+                 - Therefore, the earliest u can reach via
+                   this back edge is disc[v]
+                 */
+                low[u] = Math.min(low[u], disc[v]);
+            }
+        }
+    }
+}
