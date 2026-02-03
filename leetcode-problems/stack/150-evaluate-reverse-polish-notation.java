@@ -1,4 +1,11 @@
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.Stack;
 /*
  * You are given an array of strings tokens that represents an arithmetic
  * expression in a Reverse Polish Notation.
@@ -77,18 +84,21 @@ class Solution {
 
     private int performOperation(int operand1, int operand2, String operator) {
         switch (operator) {
-            case "+":
+            case "+" -> {
                 return operand1 + operand2;
-            case "-":
+            }
+            case "-" -> {
                 return operand1 - operand2;
-            case "*":
+            }
+            case "*" -> {
                 return operand1 * operand2;
-            case "/":
+            }
+            case "/" -> {
                 // Java division truncates toward zero for positive results
                 // but we need to handle negative results carefully
                 return (int) ((double) operand1 / operand2);
-            default:
-                throw new IllegalArgumentException("Invalid operator: " + operator);
+            }
+            default -> throw new IllegalArgumentException("Invalid operator: " + operator);
         }
     }
 
@@ -106,25 +116,19 @@ class Solution {
 
         for (String token : tokens) {
             switch (token) {
-                case "+":
-                    deque.push(deque.pop() + deque.pop());
-                    break;
-                case "-":
+                case "+" -> deque.push(deque.pop() + deque.pop());
+                case "-" -> {
                     int subtrahend = deque.pop();
                     int minuend = deque.pop();
                     deque.push(minuend - subtrahend);
-                    break;
-                case "*":
-                    deque.push(deque.pop() * deque.pop());
-                    break;
-                case "/":
+                }
+                case "*" -> deque.push(deque.pop() * deque.pop());
+                case "/" -> {
                     int divisor = deque.pop();
                     int dividend = deque.pop();
                     deque.push(dividend / divisor);
-                    break;
-                default:
-                    deque.push(Integer.parseInt(token));
-                    break;
+                }
+                default -> deque.push(Integer.parseInt(token));
             }
         }
 

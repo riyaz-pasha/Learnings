@@ -17,7 +17,7 @@ class ValidateBST {
 
 }
 
-class ValidateBST {
+class ValidateBST2 {
 
     private Integer prev;
 

@@ -1,4 +1,8 @@
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Stack;
 /*
  * You are given an absolute path for a Unix-style file system, which always
  * begins with a slash '/'. Your task is to transform this absolute path into
@@ -115,7 +119,6 @@ class Solution {
 
         for (String component : components) {
             if (component.equals("") || component.equals(".")) {
-                continue;
             } else if (component.equals("..")) {
                 if (!deque.isEmpty()) {
                     deque.pollLast();
