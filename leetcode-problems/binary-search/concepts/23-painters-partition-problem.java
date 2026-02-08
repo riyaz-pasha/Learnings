@@ -64,62 +64,146 @@ class PaintersPartitionProblem {
 
 class PainterPartition {
 
-    public static boolean isPossible(int[] boards, int k, int maxTime) {
-        int painterCount = 1;
-        int currentTime = 0;
+    /**
+     * Problem:
+     * Given boards[] where boards[i] = length/time of board i.
+     * We have k painters.
+     *
+     * Rules:
+     * - Each painter paints contiguous boards only.
+     * - A board cannot be split between painters.
+     *
+     * Goal:
+     * Minimize the maximum time taken by any painter.
+     *
+     * Example:
+     * boards = [10, 20, 30, 40], k = 2
+     *
+     * Best partition:
+     *   Painter1: [10,20,30] -> 60
+     *   Painter2: [40]       -> 40
+     *
+     * Answer = 60
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We want the MINIMUM possible maxTime.
+     *
+     * If a maxTime = X is feasible (we can paint with k painters),
+     * then any larger maxTime (X+1, X+2, ...) is also feasible.
+     *
+     * Feasibility is monotonic:
+     *   false false false true true true ...
+     *
+     * So we binary search for the smallest feasible maxTime.
+     *
+     * ---------------------------------------------------------
+     * Search Space:
+     * low  = max(boards)  (a painter must at least paint the largest board)
+     * high = sum(boards)  (one painter paints everything)
+     *
+     * Time Complexity:
+     *   O(n log(sum(boards)))
+     *
+     * Space Complexity:
+     *   O(1)
+     */
+    public int findMinTime(int[] boards, int k) {
 
+        int low = 0;   // minimum possible answer
+        int high = 0;  // maximum possible answer
+
+        // Compute search boundaries
         for (int board : boards) {
-            if (board > maxTime)
-                return false;
-
-            if (currentTime + board > maxTime) {
-                painterCount++;
-                currentTime = board;
-
-                if (painterCount > k)
-                    return false;
-            } else {
-                currentTime += board;
-            }
-        }
-
-        return true;
-    }
-
-    public static int findMinTime(int[] boards, int k) {
-        int low = 0, high = 0;
-        for (int board : boards) {
-            low = Math.max(low, board);
-            high += board;
+            low = Math.max(low, board); // cannot be less than largest board
+            high += board;              // one painter paints everything
         }
 
         int result = -1;
 
+        // Binary search for FIRST feasible maxTime
         while (low <= high) {
+
             int mid = low + (high - low) / 2;
 
+            // Can we paint all boards with maxTime = mid?
             if (isPossible(boards, k, mid)) {
-                result = mid; // try to minimize
+
+                // mid works, store as candidate answer
+                result = mid;
+
+                // try smaller maxTime (minimize answer)
                 high = mid - 1;
             } else {
-                low = mid + 1; // need more time
+
+                // mid does not work, need more allowed time
+                low = mid + 1;
             }
         }
 
         return result;
     }
 
-    public static void main(String[] args) {
-        int[] boards1 = { 5, 5, 5, 5 };
-        int k1 = 2;
-        System.out.println(findMinTime(boards1, k1)); // Output: 10
+    /**
+     * Feasibility Check:
+     * Can we paint all boards using <= k painters such that
+     * no painter paints more than maxTime?
+     *
+     * Greedy Approach:
+     * - Assign boards in order to current painter.
+     * - If adding a board exceeds maxTime, assign it to next painter.
+     *
+     * This greedy strategy uses the minimum number of painters
+     * possible for the given maxTime.
+     *
+     * Example:
+     * boards = [10,20,30,40], maxTime = 50
+     *
+     * Painter1: 10+20 = 30
+     * add 30 -> would be 60 > 50 => new painter
+     * Painter2: 30
+     * add 40 -> would be 70 > 50 => new painter
+     * Painter3: 40
+     *
+     * painters needed = 3
+     *
+     * If k=2 => NOT possible.
+     *
+     * Time Complexity: O(n)
+     */
+    public boolean isPossible(int[] boards, int k, int maxTime) {
 
-        int[] boards2 = { 10, 20, 30, 40 };
-        int k2 = 2;
-        System.out.println(findMinTime(boards2, k2)); // Output: 60
+        int painterCount = 1; // start with first painter
+        int currentTime = 0;  // time assigned to current painter
+
+        for (int board : boards) {
+
+            // If a single board itself is bigger than maxTime,
+            // then it is impossible to assign.
+            if (board > maxTime) {
+                return false;
+            }
+
+            // If current painter cannot take this board, assign to next painter
+            if (currentTime + board > maxTime) {
+                painterCount++;
+                currentTime = board; // new painter starts with this board
+
+                // If painters exceed k, not feasible
+                if (painterCount > k) {
+                    return false;
+                }
+            } else {
+                // assign board to current painter
+                currentTime += board;
+            }
+        }
+
+        return true;
     }
-
 }
+
 
 /*
  * Time Complexity: O(N * log(sum(arr[])-max(arr[])+1)), where N = size of the

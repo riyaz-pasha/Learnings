@@ -6,63 +6,121 @@
 
 class MinimumInRotatedSortedArray {
 
-    public int binarySearch(int[] nums) {
-        int n = nums.length;
-        int low = 0, high = n - 1, result = Integer.MAX_VALUE;
+
+    /**
+     * Find Minimum in Rotated Sorted Array (NO duplicates) - LC 153
+     *
+     * Example rotated arrays:
+     *
+     * 1) nums = [4,5,6,7,0,1,2]
+     *              pivot(min=0)
+     *
+     * 2) nums = [2,3,4,5,6,7,1]
+     *                          pivot(min=1)
+     *
+     * Key Observations:
+     * ---------------------------------------------------------
+     * In a rotated sorted array, one half is always sorted.
+     *
+     * If a half is sorted, then its minimum element is simply
+     * its FIRST element.
+     *
+     * So whenever we identify a sorted half, we:
+     *   1) record its minimum candidate into result
+     *   2) discard that half
+     *   3) continue searching in the other half
+     *
+     * Time Complexity: O(log n)
+     * Space Complexity: O(1)
+     */
+    public int findMin(int[] nums) {
+
+        int low = 0;
+        int high = nums.length - 1;
+
+        // result will keep track of the smallest element seen so far
+        int result = Integer.MAX_VALUE;
 
         while (low <= high) {
-            int mid = low + (high - low) / 2;
 
-            // search space is already sorted
-            // then nums[low] will always be
-            // the minimum in that search space:
+            // ---------------------------------------------------------
+            // Case 1: Search space is already sorted
+            //
+            // Example:
+            //   nums = [0,1,2,3,4,5]
+            //   low points to 0, high points to 5
+            //
+            // Condition nums[low] <= nums[high] means:
+            //   the entire range [low..high] is sorted.
+            //
+            // If the range is sorted, then the smallest element in this
+            // range is nums[low].
+            //
+            // So we update result and stop.
+            // ---------------------------------------------------------
             if (nums[low] <= nums[high]) {
                 result = Math.min(result, nums[low]);
                 break;
             }
 
-            // if left part is sorted:
-            if (nums[low] <= nums[mid]) {
-                // keep the minimum:
-                result = Math.min(result, nums[low]);
-                // Eliminate left half:
-                low = mid + 1;
-            } else {// if right part is sorted:
-                // keep the minimum:
-                result = Math.min(result, nums[mid]);
-                // Eliminate right half:
-                high = mid - 1;
-            }
-        }
-
-        return result;
-    }
-
-    public int binarySearchWithDuplicates(int[] nums) {
-        int n = nums.length;
-        int low = 0, high = n - 1, result = Integer.MAX_VALUE;
-
-        while (low <= high) {
             int mid = low + (high - low) / 2;
 
-            // search space is already sorted
-            // then nums[low] will always be
-            // the minimum in that search space:
-            if (nums[low] == nums[mid] && nums[mid] == nums[high]) {
-                low++;
-                high--;
-                result = Math.min(result, nums[mid]);
-            }
-            // if left part is sorted:
-            else if (nums[low] <= nums[mid]) {
-                // keep the minimum:
+            // ---------------------------------------------------------
+            // Case 2: Left half [low..mid] is sorted
+            //
+            // Condition: nums[low] <= nums[mid]
+            //
+            // Example:
+            //   nums = [4,5,6,7,0,1,2]
+            //   low=0 (4), mid=3 (7), high=6 (2)
+            //
+            // Left half = [4,5,6,7] is sorted.
+            //
+            // If left half is sorted, the minimum in that half is nums[low].
+            //
+            // BUT the global minimum might still be in the right half
+            // because the pivot is there.
+            //
+            // So:
+            //   - record nums[low] into result
+            //   - discard left half (because we already extracted its min)
+            //   - search right half
+            // ---------------------------------------------------------
+            if (nums[low] <= nums[mid]) {
+
+                // Minimum of sorted left half is nums[low]
                 result = Math.min(result, nums[low]);
-                // Eliminate left half:
+
+                // Discard left half and move to right half
                 low = mid + 1;
-            } else {// if right part is sorted:
-                // keep the minimum:
+            }
+
+            // ---------------------------------------------------------
+            // Case 3: Right half [mid..high] is sorted
+            //
+            // If left half is NOT sorted, then rotation pivot lies in left half.
+            // That means right half must be sorted.
+            //
+            // Example:
+            //   nums = [7,0,1,2,3,4,5]
+            //   low=0 (7), mid=3 (2), high=6 (5)
+            //
+            // Right half = [2,3,4,5] is sorted.
+            //
+            // But what is the minimum of the right half?
+            // It's nums[mid], because mid is the first element of that sorted range.
+            //
+            // So:
+            //   - record nums[mid] into result
+            //   - discard right half
+            //   - search left half
+            // ---------------------------------------------------------
+            else {
+
+                // Minimum of sorted right half is nums[mid]
                 result = Math.min(result, nums[mid]);
-                // Eliminate right half:
+
+                // Discard right half and move to left half
                 high = mid - 1;
             }
         }
@@ -70,7 +128,64 @@ class MinimumInRotatedSortedArray {
         return result;
     }
 
+    /**
+     * Find minimum in rotated sorted array WITH duplicates - LC 154
+     *
+     * Key issue with duplicates:
+     * If nums[low] == nums[mid] == nums[high],
+     * we cannot decide which half is sorted.
+     *
+     * So we shrink the search space:
+     *   low++
+     *   high--
+     *
+     * Time Complexity:
+     *   Average: O(log n)
+     *   Worst:   O(n)   (when many duplicates exist)
+     *
+     * Space Complexity: O(1)
+     */
+    public int findMinWithDuplicates(int[] nums) {
+
+        int low = 0;
+        int high = nums.length - 1;
+
+        int result = Integer.MAX_VALUE;
+
+        while (low <= high) {
+
+            // If range is already sorted, nums[low] is minimum
+            if (nums[low] < nums[high]) {
+                result = Math.min(result, nums[low]);
+                break;
+            }
+
+            int mid = low + (high - low) / 2;
+
+            // Ambiguous case due to duplicates
+            if (nums[low] == nums[mid] && nums[mid] == nums[high]) {
+                result = Math.min(result, nums[mid]);
+                low++;
+                high--;
+                continue;
+            }
+
+            // Left half sorted
+            if (nums[low] <= nums[mid]) {
+                result = Math.min(result, nums[low]);
+                low = mid + 1;
+            }
+            // Right half sorted
+            else {
+                result = Math.min(result, nums[mid]);
+                high = mid - 1;
+            }
+        }
+
+        return result;
+    }
 }
+
 
 /*
  * Place the 2 pointers i.e. low and high: Initially, we will place the pointers
@@ -95,39 +210,85 @@ class MinimumInRotatedSortedArray {
  * minimum element.
  */
 
+
 class FindMinimumRotatedArray {
 
-    public static int findMin(int[] nums) {
-        int left = 0, right = nums.length - 1;
+    /**
+     * Find Minimum in Rotated Sorted Array (NO duplicates) - LC 153
+     *
+     * Example:
+     *   nums = [4,5,6,7,0,1,2]
+     *
+     * Key Idea:
+     *   - In a rotated sorted array, the minimum element is the pivot point.
+     *   - We can locate the pivot using binary search.
+     *
+     * Observation:
+     *   Compare nums[mid] with nums[high]:
+     *
+     *   1) If nums[mid] > nums[high]:
+     *        - mid is in the LEFT sorted part (bigger values)
+     *        - minimum must be in RIGHT side
+     *        - so move low = mid + 1
+     *
+     *   2) If nums[mid] <= nums[high]:
+     *        - mid is in the RIGHT sorted part (smaller values)
+     *        - minimum could be at mid or on LEFT side
+     *        - so move high = mid
+     *
+     * Time Complexity: O(log n)
+     * Space Complexity: O(1)
+     */
+    public int findMin(int[] nums) {
 
-        // If array is not rotated
-        if (nums[left] <= nums[right]) {
-            return nums[left];
-        }
+        int low = 0;
+        int high = nums.length - 1;
 
-        while (left < right) {
-            int mid = left + (right - left) / 2;
+        // We shrink the search space until low == high
+        // That position will contain the minimum element.
+        while (low < high) {
 
-            // If mid element is greater than right,
-            // minimum lies in the right half
-            if (nums[mid] > nums[right]) {
-                left = mid + 1;
-            } else {
-                // Else the minimum lies in the left half including mid
-                right = mid;
+            int mid = low + (high - low) / 2;
+
+            // --------------------------------------------------
+            // If nums[mid] is greater than nums[high],
+            // that means mid is in the LEFT sorted part.
+            //
+            // Example:
+            //   [4,5,6,7,0,1,2]
+            //            mid   high
+            //
+            // Here nums[mid]=7 > nums[high]=2
+            // So minimum must be to the RIGHT of mid.
+            // --------------------------------------------------
+            if (nums[mid] > nums[high]) {
+                low = mid + 1;
+            }
+
+            // --------------------------------------------------
+            // Otherwise nums[mid] <= nums[high],
+            // which means mid is in the RIGHT sorted part
+            // where the minimum exists.
+            //
+            // Example:
+            //   [4,5,6,7,0,1,2]
+            //              mid high
+            //
+            // nums[mid]=1 <= nums[high]=2
+            //
+            // The minimum could be mid OR somewhere to the left.
+            // So we move high = mid (not mid-1).
+            // --------------------------------------------------
+            else {
+                high = mid;
             }
         }
 
-        // At the end of loop, left == right pointing to the smallest element
-        return nums[left];
+        // When low == high, it points to the minimum element
+        return nums[low];
     }
-
-    public static void main(String[] args) {
-        int[] nums = { 4, 5, 6, 7, 0, 1, 2 };
-        System.out.println("Minimum element is: " + findMin(nums)); // Output: 0
-    }
-
 }
+
 
 class MinInRotatedWithDuplicates {
 

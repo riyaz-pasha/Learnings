@@ -12,37 +12,84 @@
 
 class SearchElementInARotatedSortedArray {
 
+    /**
+     * Searches for target in a rotated sorted array.
+     *
+     * Example rotated array:
+     *   [4,5,6,7,0,1,2]
+     *
+     * Key Property:
+     *   At any index mid, at least one side (left half or right half)
+     *   must be sorted.
+     *
+     * Time Complexity: O(log n)
+     * Space Complexity: O(1)
+     */
     public int binarySearch(int[] nums, int target) {
-        int n = nums.length;
-        int low = 0, high = n - 1;
 
+        int n = nums.length;
+        int low = 0;
+        int high = n - 1;
+
+        // Standard binary search loop
         while (low <= high) {
+
             int mid = low + (high - low) / 2;
 
-            // if mid points to the target
+            // ------------------------------
+            // Case 1: Found target directly
+            // ------------------------------
             if (nums[mid] == target) {
                 return mid;
             }
-            // if left part is sorted
+
+            // ---------------------------------------------------------
+            // Now decide which half is sorted:
+            //
+            // If nums[low] <= nums[mid], then left half [low..mid] is sorted.
+            // Otherwise, right half [mid..high] is sorted.
+            // ---------------------------------------------------------
+
+            // ------------------------------
+            // Case 2: Left half is sorted
+            // ------------------------------
             if (nums[low] <= nums[mid]) {
-                if (nums[low] <= target && target <= nums[mid]) {
-                    high = mid - 1; // search in left half
-                } else {
-                    low = mid + 1; // search in right half
+
+                // If target lies inside sorted left half range,
+                // we shrink search to left side.
+                //
+                // Sorted left half range is: nums[low] ... nums[mid]
+                if (nums[low] <= target && target < nums[mid]) {
+                    high = mid - 1;
                 }
-            } else { // if right part is sorted
-                if (nums[mid] <= target && target <= nums[high]) {
-                    low = mid + 1; // search in right half
-                } else {
-                    high = mid - 1; // search in left half
+                // Otherwise target must be in right half
+                else {
+                    low = mid + 1;
+                }
+
+            }
+            // ------------------------------
+            // Case 3: Right half is sorted
+            // ------------------------------
+            else {
+
+                // Sorted right half range is: nums[mid] ... nums[high]
+                // If target lies in this range, search right.
+                if (nums[mid] < target && target <= nums[high]) {
+                    low = mid + 1;
+                }
+                // Otherwise search left.
+                else {
+                    high = mid - 1;
                 }
             }
         }
 
+        // Target not found
         return -1;
     }
-
 }
+
 
 /*
  * Place the 2 pointers i.e. low and high: Initially, we will place the pointers
@@ -71,48 +118,87 @@ class SearchElementInARotatedSortedArray {
 
 class RotatedArrayWithDuplicates {
 
+    /**
+     * Search in Rotated Sorted Array with Duplicates (LC 81)
+     *
+     * Array is originally sorted but rotated at some pivot.
+     * Duplicates make it hard to identify which half is sorted.
+     *
+     * Example:
+     *   [2,5,6,0,0,1,2]
+     *
+     * Time Complexity:
+     *   Average: O(log n)
+     *   Worst case: O(n)  (when many duplicates exist, like [1,1,1,1,1])
+     *
+     * Space Complexity:
+     *   O(1)
+     */
     public static boolean search(int[] nums, int target) {
-        int left = 0, right = nums.length - 1;
+
+        int left = 0;
+        int right = nums.length - 1;
 
         while (left <= right) {
+
             int mid = left + (right - left) / 2;
 
-            if (nums[mid] == target)
+            // --------------------------
+            // Case 1: Found target
+            // --------------------------
+            if (nums[mid] == target) {
                 return true;
+            }
 
-            // If we can't decide which half is sorted (due to duplicates)
+            // ---------------------------------------------------------
+            // Case 2: Ambiguous situation due to duplicates
+            //
+            // Example:
+            //   nums[left] = nums[mid] = nums[right] = 2
+            //
+            // We cannot determine which half is sorted.
+            // So we shrink the search space by moving inward.
+            //
+            // This is why worst-case becomes O(n).
+            // ---------------------------------------------------------
             if (nums[left] == nums[mid] && nums[mid] == nums[right]) {
                 left++;
                 right--;
             }
 
-            // Left half is sorted
+            // ---------------------------------------------------------
+            // Case 3: Left half is sorted
+            //
+            // Condition: nums[left] <= nums[mid]
+            // Then range [left..mid] is sorted.
+            // ---------------------------------------------------------
             else if (nums[left] <= nums[mid]) {
+
+                // Check if target lies in the sorted left half
                 if (nums[left] <= target && target < nums[mid]) {
-                    right = mid - 1; // Search left half
+                    right = mid - 1; // Search inside left half
                 } else {
-                    left = mid + 1; // Search right half
+                    left = mid + 1;  // Search in right half
                 }
             }
 
-            // Right half is sorted
+            // ---------------------------------------------------------
+            // Case 4: Right half is sorted
+            //
+            // Otherwise, range [mid..right] is sorted.
+            // ---------------------------------------------------------
             else {
+
+                // Check if target lies in the sorted right half
                 if (nums[mid] < target && target <= nums[right]) {
-                    left = mid + 1; // Search right half
+                    left = mid + 1; // Search inside right half
                 } else {
-                    right = mid - 1; // Search left half
+                    right = mid - 1; // Search in left half
                 }
             }
         }
 
+        // Target not found
         return false;
     }
-
-    public static void main(String[] args) {
-        int[] nums = { 2, 5, 6, 0, 0, 1, 2 };
-        int target = 0;
-
-        System.out.println("Found target? " + search(nums, target)); // Output: true
-    }
-
 }

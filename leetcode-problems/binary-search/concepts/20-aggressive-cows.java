@@ -27,41 +27,129 @@ import java.util.Arrays;
  * be 5 when 2 cows are placed at positions {1, 6}.
  */
 
+
 class AggressiveCows {
 
+    /**
+     * Problem:
+     * We have stall positions on a line.
+     * Place k cows in stalls such that the MINIMUM distance between any two cows
+     * is maximized.
+     *
+     * Example:
+     * stalls = [1,2,4,8,9], k = 3
+     * Best placement: 1,4,8 -> min distance = 3
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We are asked to MAXIMIZE the minimum distance.
+     *
+     * If we can place k cows with minimum distance = D,
+     * then we can also place them with any smaller distance:
+     *
+     *     D works => (D-1) works => (D-2) works ...
+     *
+     * So feasibility is monotonic:
+     *
+     *   true true true true false false false
+     *
+     * (When distance becomes too large, placement becomes impossible.)
+     *
+     * That monotonic behavior means we can binary search on distance.
+     *
+     * ---------------------------------------------------------
+     * Search Space:
+     * low = 1 (minimum possible distance)
+     * high = stalls[n-1] - stalls[0] (max possible distance)
+     *
+     * ---------------------------------------------------------
+     * Time Complexity:
+     * Sorting: O(n log n)
+     * Binary search: O(log(maxDistance))
+     * Feasibility check each time: O(n)
+     *
+     * Total: O(n log n + n log(maxDistance))
+     *
+     * Space Complexity: O(1) (ignoring sorting internals)
+     */
     public int aggressiveCows(int[] stalls, int k) {
-        Arrays.sort(stalls);
-        int n = stalls.length;
-        int low = 1, high = stalls[n - 1] - stalls[0];
 
+        Arrays.sort(stalls);
+
+        int n = stalls.length;
+
+        int low = 1;
+        int high = stalls[n - 1] - stalls[0];
+
+        // We want the maximum distance that is feasible.
+        // This is "last true" binary search.
         while (low <= high) {
+
             int mid = low + (high - low) / 2;
-            if (this.canWePlace(stalls, mid, k) == true) {
+
+            // Check if we can place k cows with minimum distance = mid
+            if (canWePlace(stalls, mid, k)) {
+
+                // mid is possible, so try for a bigger distance
                 low = mid + 1;
             } else {
+
+                // mid is too large, reduce distance
                 high = mid - 1;
             }
         }
 
+        // high will be the largest feasible distance
         return high;
     }
 
+    /**
+     * Feasibility function:
+     * Can we place "cows" cows such that each cow is at least "distance" apart?
+     *
+     * Greedy placement strategy:
+     * - Place first cow at the first stall.
+     * - For each next stall, place cow only if it is at least "distance"
+     *   away from the last placed cow.
+     *
+     * This greedy method works because:
+     * placing cows as early as possible maximizes the chance of placing more cows.
+     *
+     * Example:
+     * stalls = [1,2,4,8,9], distance = 3
+     *
+     * place at 1
+     * skip 2 (too close)
+     * place at 4 (4-1 >= 3)
+     * place at 8 (8-4 >= 3)
+     * => 3 cows placed -> possible
+     *
+     * Time Complexity: O(n)
+     */
     private boolean canWePlace(int[] stalls, int distance, int cows) {
-        int n = stalls.length;
-        int cowsCount = 1;
-        int lastPosition = stalls[0];
-        for (int i = 1; i < n; i++) {
+
+        int cowsPlaced = 1;           // place first cow at first stall
+        int lastPosition = stalls[0]; // position of last placed cow
+
+        for (int i = 1; i < stalls.length; i++) {
+
+            // If current stall is far enough, place cow here
             if (stalls[i] - lastPosition >= distance) {
-                cowsCount++;
+                cowsPlaced++;
                 lastPosition = stalls[i];
             }
-            if (cowsCount >= cows)
+
+            // If we placed all cows successfully, return true
+            if (cowsPlaced >= cows) {
                 return true;
+            }
         }
+
         return false;
     }
-
 }
+
 
 class AggressiveCowsCount {
 

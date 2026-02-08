@@ -114,60 +114,112 @@ class CapacityToShipPackagesWithinDDays {
 
 class ShipPackages {
 
-    public static int shipWithinDays(int[] weights, int d) {
+    /**
+     * Problem:
+     * Ship all packages within <= d days.
+     * Each day, total shipped weight cannot exceed capacity.
+     *
+     * Return the MINIMUM capacity required.
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We are minimizing capacity.
+     *
+     * If capacity C is enough to ship within d days,
+     * then any capacity > C will also work.
+     *
+     * So feasibility is monotonic:
+     *    false false false true true true ...
+     *
+     * Hence we binary search the smallest capacity that works.
+     *
+     * ---------------------------------------------------------
+     * Search space:
+     * low  = max(weights)  (must carry the heaviest package)
+     * high = sum(weights)  (can carry everything in one day)
+     *
+     * Time Complexity: O(n log(sum(weights)))
+     * Space Complexity: O(1)
+     */
+    public int shipWithinDays(int[] weights, int d) {
+
         int low = getMax(weights);
         int high = getSum(weights);
+
+        // result stores the best valid capacity found so far
         int result = high;
 
         while (low <= high) {
+
             int mid = low + (high - low) / 2;
 
+            // Check if we can ship with capacity = mid
             if (canShip(weights, d, mid)) {
+
+                // mid is a valid capacity
                 result = mid;
-                high = mid - 1; // try smaller capacity
+
+                // try to find smaller valid capacity
+                high = mid - 1;
             } else {
-                low = mid + 1; // need more capacity
+                // mid is too small (need more capacity)
+                low = mid + 1;
             }
         }
 
         return result;
     }
 
-    // Helper: Can we ship in d days with given capacity?
-    private static boolean canShip(int[] weights, int d, int capacity) {
-        int days = 1, currentWeight = 0;
+    /**
+     * Feasibility check:
+     * Can we ship all packages within <= d days with given capacity?
+     *
+     * Greedy Strategy:
+     * - Keep loading packages in current day until capacity exceeds.
+     * - Then start a new day.
+     *
+     * This greedy approach uses minimum possible days for this capacity.
+     *
+     * Time: O(n)
+     */
+    private boolean canShip(int[] weights, int d, int capacity) {
+
+        int days = 1;            // start with day 1
+        int currentWeight = 0;   // current day's total weight
 
         for (int w : weights) {
+
+            // If adding this package exceeds capacity, ship next day
             if (currentWeight + w > capacity) {
                 days++;
                 currentWeight = 0;
             }
+
             currentWeight += w;
+
+            // If days already exceeded d, no need to continue
+            if (days > d) {
+                return false;
+            }
         }
 
-        return days <= d;
+        return true;
     }
 
-    private static int getMax(int[] weights) {
-        int max = Integer.MIN_VALUE;
+    private int getMax(int[] weights) {
+        int max = 0;
         for (int w : weights) {
             max = Math.max(max, w);
         }
         return max;
     }
 
-    private static int getSum(int[] weights) {
+    private int getSum(int[] weights) {
         int total = 0;
         for (int w : weights) {
             total += w;
         }
         return total;
     }
-
-    public static void main(String[] args) {
-        int[] weights = { 1, 2, 3, 1, 1 };
-        int d = 4;
-        System.out.println(shipWithinDays(weights, d)); // Output: 3
-    }
-
 }

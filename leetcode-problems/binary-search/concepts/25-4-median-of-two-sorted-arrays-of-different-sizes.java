@@ -137,39 +137,159 @@ class MedianOfTwoSortedArraysOfDifferentSizes {
      * Space Complexity: O(1) as no extra space is used.
      */
     public double medianOptimalSolution(List<Integer> first, List<Integer> second) {
-        int n1 = first.size(), n2 = second.size();
+
+        int n1 = first.size();
+        int n2 = second.size();
+
+        // ---------------------------------------------------------
+        // IMPORTANT:
+        // Always binary search on the smaller array.
+        // This ensures log(min(n1,n2)) complexity and avoids invalid mid2.
+        // ---------------------------------------------------------
         if (n1 > n2) {
-            // smaller array comes first always
-            return this.medianOptimalSolution(second, first);
+            return medianOptimalSolution(second, first);
         }
 
-        int n = n1 + n2;
-        int left = (n1 + n2 + 1) / 2; // length of left half
+        int total = n1 + n2;
 
-        int low = 0, high = n1; // n1 not n1-1 because it's a count of elements in first array , not indexes
+        // ---------------------------------------------------------
+        // We want to split both arrays into:
+        //
+        // left part  = (total+1)/2 elements
+        // right part = remaining
+        //
+        // Why (total+1)/2?
+        // - Works for both even and odd total lengths.
+        // - If total is odd, left part contains one extra element.
+        //
+        // Example:
+        // total = 5 -> left = 3
+        // total = 6 -> left = 3
+        // ---------------------------------------------------------
+        int leftSize = (total + 1) / 2;
+
+        // ---------------------------------------------------------
+        // Binary search space:
+        //
+        // mid1 = how many elements we take from array "first" into left half
+        // mid2 = how many elements we take from array "second" into left half
+        //
+        // mid1 ranges from 0 to n1 (count, not index)
+        //
+        // mid2 is derived:
+        // mid2 = leftSize - mid1
+        // ---------------------------------------------------------
+        int low = 0;
+        int high = n1;
+
         while (low <= high) {
-            int mid1 = low + (high - low) / 2; // count of elements included from first array, not index
-            int mid2 = left - mid1;  // count of elements included from second array, not index
 
-            int left1 = mid1 > 0 ? first.get(mid1 - 1) : Integer.MIN_VALUE;
-            int left2 = mid2 > 0 ? second.get(mid2 - 1) : Integer.MIN_VALUE;
-            int right1 = mid1 < n1 ? first.get(mid1) : Integer.MAX_VALUE;
-            int right2 = mid2 < n2 ? second.get(mid2) : Integer.MAX_VALUE;
+            // mid1 = number of elements taken from first array into left partition
+            int mid1 = low + (high - low) / 2;
 
+            // mid2 = number of elements taken from second array into left partition
+            int mid2 = leftSize - mid1;
+
+            // ---------------------------------------------------------
+            // Now we define boundary values around the partition:
+            //
+            // left1  = last element in first's left partition
+            // right1 = first element in first's right partition
+            //
+            // left2  = last element in second's left partition
+            // right2 = first element in second's right partition
+            //
+            // Example:
+            // first  = [1,3,8,9]
+            // second = [7,11,18,19]
+            //
+            // Suppose mid1=2 => left part takes [1,3]
+            // then left1=3, right1=8
+            //
+            // Suppose mid2=2 => left part takes [7,11]
+            // then left2=11, right2=18
+            // ---------------------------------------------------------
+
+            // If mid1 == 0, first contributes nothing to left side,
+            // so left1 is -infinity
+            int left1 = (mid1 > 0) ? first.get(mid1 - 1) : Integer.MIN_VALUE;
+
+            // If mid2 == 0, second contributes nothing to left side,
+            // so left2 is -infinity
+            int left2 = (mid2 > 0) ? second.get(mid2 - 1) : Integer.MIN_VALUE;
+
+            // If mid1 == n1, first contributes everything to left side,
+            // so right1 is +infinity
+            int right1 = (mid1 < n1) ? first.get(mid1) : Integer.MAX_VALUE;
+
+            // If mid2 == n2, second contributes everything to left side,
+            // so right2 is +infinity
+            int right2 = (mid2 < n2) ? second.get(mid2) : Integer.MAX_VALUE;
+
+            // ---------------------------------------------------------
+            // Correct partition condition:
+            //
+            // Every element in left half must be <= every element in right half.
+            //
+            // That means:
+            // left1 <= right2
+            // left2 <= right1
+            //
+            // If both conditions hold -> partition is correct.
+            // ---------------------------------------------------------
             if (left1 <= right2 && left2 <= right1) {
-                if (n % 2 == 1) {
+
+                // ---------------------------------------------------------
+                // If total length is odd:
+                // median is the maximum element in the left half.
+                //
+                // Example:
+                // merged = [1,3,7,8,9]
+                // left half has 3 elements -> median is max(left half)
+                // ---------------------------------------------------------
+                if (total % 2 == 1) {
                     return Math.max(left1, left2);
                 }
+
+                // ---------------------------------------------------------
+                // If total length is even:
+                // median is average of:
+                // max(left half) and min(right half)
+                //
+                // Example:
+                // merged = [1,3,7,8,9,11]
+                // median = (7+8)/2
+                // ---------------------------------------------------------
                 return (Math.max(left1, left2) + Math.min(right1, right2)) / 2.0;
-            } else if (left1 > right2) {
+            }
+
+            // ---------------------------------------------------------
+            // If partition is NOT correct:
+            //
+            // Case 1: left1 > right2
+            // That means we took too many elements from first array.
+            // So move left in first array:
+            // high = mid1 - 1
+            // ---------------------------------------------------------
+            else if (left1 > right2) {
                 high = mid1 - 1;
-            } else {
+            }
+
+            // ---------------------------------------------------------
+            // Case 2: left2 > right1
+            // That means we took too few elements from first array.
+            // So move right in first array:
+            // low = mid1 + 1
+            // ---------------------------------------------------------
+            else {
                 low = mid1 + 1;
             }
         }
 
+        // For valid sorted inputs, we should never reach here
         return 0;
     }
+
 
 }
 

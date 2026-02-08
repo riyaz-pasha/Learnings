@@ -8,37 +8,73 @@ import java.util.List;
 
 class KthElementOfTwoSortedArrays {
 
+    /**
+     * Find kth smallest element in two sorted arrays.
+     *
+     * Same partition logic as Median of Two Sorted Arrays.
+     *
+     * We want:
+     *   left part size = k
+     *
+     * Then kth element = max(left1, left2)
+     *
+     * Time Complexity: O(log(min(n1, n2)))
+     * Space Complexity: O(1)
+     */
     public int kthElement(List<Integer> first, List<Integer> second, int k) {
-        int n1 = first.size(), n2 = second.size();
+
+        int n1 = first.size();
+        int n2 = second.size();
+
+        // Always binary search on smaller array
         if (n1 > n2) {
-            return this.kthElement(second, first, k);
+            return kthElement(second, first, k);
         }
 
-        int left = k; // length of left half
+        // left partition must contain exactly k elements
+        int left = k;
 
-        int low = Math.max(0, k - n2), high = Math.min(k, n1);
+        // mid1 can range:
+        // minimum: take at least (k - n2) from first
+        // maximum: take at most k from first
+        int low = Math.max(0, k - n2);
+        int high = Math.min(k, n1);
+
         while (low <= high) {
+
+            // mid1 = number of elements taken from first into left partition
             int mid1 = low + (high - low) / 2;
+
+            // mid2 = remaining elements taken from second into left partition
             int mid2 = left - mid1;
 
-            int left1 = mid1 > 0 ? first.get(mid1 - 1) : Integer.MIN_VALUE;
-            int left2 = mid2 > 0 ? second.get(mid2 - 2) : Integer.MIN_VALUE;
-            int right1 = mid1 < n1 ? first.get(mid1) : Integer.MAX_VALUE;
-            int right2 = mid2 < n1 ? second.get(mid2) : Integer.MAX_VALUE;
+            // Boundary values around partition
+            int left1  = (mid1 > 0) ? first.get(mid1 - 1) : Integer.MIN_VALUE;
+            int left2  = (mid2 > 0) ? second.get(mid2 - 1) : Integer.MIN_VALUE;
 
+            int right1 = (mid1 < n1) ? first.get(mid1) : Integer.MAX_VALUE;
+            int right2 = (mid2 < n2) ? second.get(mid2) : Integer.MAX_VALUE;
+
+            // Correct partition condition
             if (left1 <= right2 && left2 <= right1) {
-                return Math.max(left1, left2);
-            } else if (left1 > right2) {
+                return Math.max(left1, left2); // kth element
+            }
+
+            // Took too many from first
+            else if (left1 > right2) {
                 high = mid1 - 1;
-            } else {
+            }
+
+            // Took too few from first
+            else {
                 low = mid1 + 1;
             }
         }
 
-        return 0;
+        return 0; // should never happen if input valid
     }
-
 }
+
 
 class KthElementTwoSortedArrays {
 

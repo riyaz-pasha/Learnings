@@ -35,6 +35,101 @@ import java.util.PriorityQueue;
  * ‘dist’ is lower than this.
  */
 
+
+class MinimiseMaximumDistanceBetweenGasStations4 {
+
+    /**
+     * We store each gap segment info:
+     *
+     * gapIndex represents the gap between:
+     *   arr[gapIndex] and arr[gapIndex + 1]
+     *
+     * maxSegmentLength = current maximum segment length for this gap
+     * after inserting some extra stations in this gap.
+     */
+    static class Gap implements Comparable<Gap> {
+
+        double maxSegmentLength;
+        int gapIndex;
+
+        Gap(double maxSegmentLength, int gapIndex) {
+            this.maxSegmentLength = maxSegmentLength;
+            this.gapIndex = gapIndex;
+        }
+
+        /**
+         * MaxHeap based on maxSegmentLength.
+         * We always want to pick the gap that currently has the largest segment,
+         * because that is the bottleneck.
+         */
+        @Override
+        public int compareTo(Gap other) {
+            return Double.compare(other.maxSegmentLength, this.maxSegmentLength);
+        }
+    }
+
+    /**
+     * Heap-based greedy solution:
+     *
+     * Idea:
+     * Always insert the next gas station into the gap that currently has
+     * the largest maximum segment length.
+     *
+     * Example:
+     * arr = [1, 10], k = 2
+     *
+     * gap = 9
+     * insert 1 station -> segments = 2 -> max segment = 9/2 = 4.5
+     * insert 2 station -> segments = 3 -> max segment = 9/3 = 3.0
+     *
+     * Time Complexity:
+     *   O((n + k) log n)
+     *
+     * Space Complexity:
+     *   O(n)
+     */
+    public double minimizeMaxDistanceBetter(int[] arr, int k) {
+
+        int n = arr.length;
+
+        // how many extra stations inserted in each gap
+        int[] inserted = new int[n - 1];
+
+        PriorityQueue<Gap> pq = new PriorityQueue<>();
+
+        // Initially, each gap has 0 inserted stations,
+        // so max segment length = full gap length
+        for (int i = 0; i < n - 1; i++) {
+            double gapLength = arr[i + 1] - arr[i];
+            pq.offer(new Gap(gapLength, i));
+        }
+
+        // Insert k new gas stations
+        for (int station = 1; station <= k; station++) {
+
+            // Pick the gap with largest current segment
+            Gap worstGap = pq.poll();
+            int idx = worstGap.gapIndex;
+
+            // Insert one station into this gap
+            inserted[idx]++;
+
+            // Original gap length remains same
+            double gapLength = arr[idx + 1] - arr[idx];
+
+            // If inserted[idx] = x, gap is split into (x+1) segments
+            double newMaxSegment = gapLength / (inserted[idx] + 1);
+
+            // Push updated gap back
+            pq.offer(new Gap(newMaxSegment, idx));
+        }
+
+        // After k insertions, the answer is the maximum segment length among all gaps
+        return pq.peek().maxSegmentLength;
+    }
+}
+
+
 class MinimiseMaximumDistanceBetweenGasStations {
 
     class DistanceBetweenStations implements Comparable<DistanceBetweenStations> {
@@ -123,6 +218,100 @@ class MinimiseMaximumDistanceBetweenGasStations2 {
     }
 
 }
+
+class MinimiseMaximumDistanceBetweenGasStations3 {
+
+    /**
+     * Problem:
+     * Given positions of gas stations (sorted array arr),
+     * add k more stations such that the maximum distance between
+     * adjacent stations is minimized.
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We want to MINIMIZE the maximum distance.
+     *
+     * If a distance D is possible (can place <= k stations),
+     * then any bigger distance also works.
+     *
+     * So feasibility is monotonic:
+     *    false false false true true true ...
+     *
+     * Hence binary search on distance.
+     *
+     * ---------------------------------------------------------
+     * Time Complexity:
+     *   O(n log(maxGap / precision))
+     *
+     * Space Complexity:
+     *   O(1)
+     */
+    public static double minimizeMaxDistanceOptimal(int[] arr, int k) {
+
+        int n = arr.length;
+
+        double low = 0.0;
+        double high = 0.0;
+
+        // maximum gap is the upper bound
+        for (int i = 0; i < n - 1; i++) {
+            high = Math.max(high, arr[i + 1] - arr[i]);
+        }
+
+        double precision = 1e-6;
+
+        while (high - low > precision) {
+
+            double mid = (low + high) / 2.0;
+
+            int requiredStations = numberOfGasStationsRequired(arr, mid);
+
+            // If we need more than k stations, mid is too small (too strict)
+            if (requiredStations > k) {
+                low = mid;
+            }
+            // Otherwise mid is feasible, try smaller distance
+            else {
+                high = mid;
+            }
+        }
+
+        return high;
+    }
+
+    /**
+     * Returns how many extra stations are needed so that
+     * no adjacent distance exceeds "dist".
+     *
+     * For each gap = arr[i] - arr[i-1]:
+     *
+     * segments needed = ceil(gap / dist)
+     * stations needed = segments - 1
+     *
+     * Example:
+     * gap = 10, dist = 3
+     * ceil(10/3) = 4 segments
+     * stations = 4 - 1 = 3
+     */
+    private static int numberOfGasStationsRequired(int[] arr, double dist) {
+
+        int count = 0;
+
+        for (int i = 1; i < arr.length; i++) {
+
+            double gap = arr[i] - arr[i - 1];
+
+            // ceil(gap / dist) - 1
+            int stationsNeeded = (int) Math.ceil(gap / dist) - 1;
+
+            count += stationsNeeded;
+        }
+
+        return count;
+    }
+}
+
 
 class MinimizeMaxDistance {
 

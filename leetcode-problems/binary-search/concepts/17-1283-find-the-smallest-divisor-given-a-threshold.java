@@ -98,3 +98,82 @@ class FindTheSmallestDivisor {
  * Space Complexity: O(1) as we are not using any extra space to solve this
  * problem.
  */
+
+
+class FindTheSmallestDivisor2 {
+
+    /**
+     * Problem:
+     * Find the smallest divisor d such that:
+     *
+     *   ceil(nums[0] / d) + ceil(nums[1] / d) + ... <= limit
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We are asked to find the "smallest divisor" => minimum value.
+     *
+     * If divisor d works (sum <= limit),
+     * then any larger divisor (d+1, d+2, ...) will also work,
+     * because dividing by a larger number makes each term smaller.
+     *
+     * So feasibility is monotonic:
+     *   false false false true true true ...
+     *
+     * Hence we apply Binary Search on divisor.
+     *
+     * ---------------------------------------------------------
+     * Time Complexity:
+     *   O(n log(max(nums)))
+     *
+     * Space Complexity:
+     *   O(1)
+     */
+    public int smallestDivisor(int[] nums, int limit) {
+
+        int low = 1;
+        int high = Arrays.stream(nums).max().getAsInt();
+
+        // Binary search for the FIRST divisor that satisfies condition
+        while (low <= high) {
+
+            int mid = low + (high - low) / 2;
+
+            // if divisor mid is valid, try smaller
+            if (sum(nums, mid) <= limit) {
+                high = mid - 1;
+            }
+            // else divisor is too small, sum too large, try bigger
+            else {
+                low = mid + 1;
+            }
+        }
+
+        // low ends at the smallest valid divisor
+        return low;
+    }
+
+    /**
+     * Returns:
+     *   ceil(nums[0]/div) + ceil(nums[1]/div) + ...
+     *
+     * Important trick:
+     *   ceil(a / b) can be computed without floating point as:
+     *
+     *   (a + b - 1) / b
+     *
+     * Example:
+     *   ceil(10/3) = 4
+     *   (10 + 3 - 1) / 3 = 12/3 = 4
+     */
+    private long sum(int[] nums, int div) {
+
+        long total = 0;
+
+        for (int num : nums) {
+            total += (num + div - 1) / div; // integer ceil division
+        }
+
+        return total;
+    }
+}

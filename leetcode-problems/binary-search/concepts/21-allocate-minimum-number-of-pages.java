@@ -30,43 +30,142 @@ import java.util.List;
 
 class AllocateMinimumNumberOfPages {
 
+    /**
+     * Problem:
+     * Given an array/list "pages" where pages[i] = number of pages in i-th book.
+     * We must allocate books to "numberOfStudents" students such that:
+     *
+     * 1) Each student gets at least 1 book
+     * 2) Books must be assigned in contiguous order (no reordering)
+     * 3) We want to minimize the maximum pages assigned to any student
+     *
+     * Return the minimum possible value of the maximum pages.
+     *
+     * Example:
+     * pages = [10, 20, 30, 40], students = 2
+     *
+     * Possible allocation:
+     *   Student1: [10,20,30] -> 60 pages
+     *   Student2: [40]       -> 40 pages
+     *   max = 60
+     *
+     * Another:
+     *   Student1: [10,20] -> 30 pages
+     *   Student2: [30,40] -> 70 pages
+     *   max = 70
+     *
+     * Minimum max is 60.
+     *
+     * ---------------------------------------------------------
+     * Why Binary Search on Answer?
+     *
+     * We are asked to MINIMIZE the maximum pages.
+     *
+     * If we assume a limit X = maximum pages allowed per student,
+     * we can check feasibility:
+     *
+     *   "Can we allocate all books to students such that no student
+     *    gets more than X pages?"
+     *
+     * Feasibility is monotonic:
+     *   - If X works, then any larger value X+1, X+2 also works.
+     *   - If X does NOT work, then any smaller value also does not work.
+     *
+     * Pattern becomes:
+     *   false false false true true true ...
+     *
+     * So we binary search the smallest feasible X.
+     *
+     * ---------------------------------------------------------
+     * Search Space:
+     * low  = max(pages)    (at least one student must take the largest book)
+     * high = sum(pages)    (one student takes all books)
+     *
+     * Time Complexity:
+     *   O(n log(sum(pages)))
+     *
+     * Space Complexity:
+     *   O(1)
+     */
     public int findPages(List<Integer> pages, int numberOfStudents) {
+
+        // If students > books, impossible because each student needs at least 1 book
         if (numberOfStudents > pages.size()) {
             return -1;
         }
 
+        // Minimum possible maximum pages = largest single book
         int low = Collections.max(pages);
+
+        // Maximum possible maximum pages = sum of all books (one student reads all)
         int high = pages.stream().mapToInt(Integer::intValue).sum();
 
+        // Binary search for the FIRST feasible maxPages value
         while (low <= high) {
+
             int mid = low + (high - low) / 2;
-            int noOfStudentsNeeded = this.getNumberOfStudentsNeeded(pages, mid);
-            if (noOfStudentsNeeded > numberOfStudents) {
+
+            // If we set maxPagesAllowed = mid,
+            // compute how many students are required.
+            int studentsNeeded = getNumberOfStudentsNeeded(pages, mid);
+
+            // If we need more students than available,
+            // it means mid is too small (not enough capacity per student).
+            if (studentsNeeded > numberOfStudents) {
                 low = mid + 1;
-            } else {
+            }
+            // Otherwise mid is feasible, but we want minimum, so try smaller.
+            else {
                 high = mid - 1;
             }
         }
 
+        // low is the smallest feasible maximum pages allocation
         return low;
     }
 
+    /**
+     * Given a maximum limit "maxPages", calculate how many students are required
+     * if we allocate books in order.
+     *
+     * Greedy approach:
+     * - Keep adding books to current student until adding the next book exceeds maxPages.
+     * - Then assign next book to a new student.
+     *
+     * This greedy strategy gives the MINIMUM number of students needed
+     * for a given maxPages.
+     *
+     * Example:
+     * pages = [10,20,30,40], maxPages = 60
+     *
+     * Student1: 10 + 20 + 30 = 60
+     * Student2: 40
+     * studentsNeeded = 2
+     *
+     * Time Complexity: O(n)
+     */
     private int getNumberOfStudentsNeeded(List<Integer> pages, int maxPages) {
-        int noOfStudentsNeeded = 1;
-        int currentStudentPagesCount = 0;
+
+        int studentsNeeded = 1;   // start with first student
+        int currentSum = 0;       // pages allocated to current student
+
         for (int pagesCount : pages) {
-            if (currentStudentPagesCount + pagesCount <= maxPages) {
-                currentStudentPagesCount += pagesCount;
-            } else {
-                noOfStudentsNeeded++;
-                currentStudentPagesCount = pagesCount;
+
+            // If we can add this book without exceeding maxPages, allocate it
+            if (currentSum + pagesCount <= maxPages) {
+                currentSum += pagesCount;
+            }
+            // Otherwise allocate this book to a new student
+            else {
+                studentsNeeded++;
+                currentSum = pagesCount;
             }
         }
 
-        return noOfStudentsNeeded;
+        return studentsNeeded;
     }
-
 }
+
 
 class BookAllocation {
 
