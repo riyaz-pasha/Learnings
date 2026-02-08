@@ -501,3 +501,600 @@ class LargestRotatedRectangle {
     }
 
 }
+
+
+/**
+ * MINIMUM AREA RECTANGLE II - COMPREHENSIVE SOLUTION GUIDE
+ * 
+ * PROBLEM UNDERSTANDING:
+ * =====================
+ * Given points in 2D plane, find minimum area rectangle with ANY orientation.
+ * (Not necessarily axis-aligned!)
+ * 
+ * Example: points = [[1,2],[2,1],[1,0],[0,1]]
+ * 
+ *   2  •(1,2)
+ *   1     •(2,1)
+ *      •(0,1)
+ *   0  •(1,0)
+ *      0  1  2
+ * 
+ * Forms a square with area = 2.0
+ * 
+ * KEY INSIGHTS FOR INTERVIEWS:
+ * ============================
+ * 1. Rectangle has 4 vertices with specific geometric properties
+ * 2. Diagonals of rectangle:
+ *    - Bisect each other (same midpoint)
+ *    - Have equal length
+ *    - Are perpendicular (for rotated rectangles this is key!)
+ * 3. Strategy: Check all pairs of points as potential diagonals
+ * 4. For valid diagonal pair, can compute rectangle area directly
+ * 
+ * CRITICAL GEOMETRIC INSIGHTS:
+ * ============================
+ * 
+ * Rectangle Properties:
+ * - Opposite sides are parallel and equal
+ * - Diagonals bisect each other (same center)
+ * - Diagonals have same length
+ * - All angles are 90 degrees
+ * 
+ * Given diagonal endpoints (p1, p3) and (p2, p4):
+ * - Center: ((p1.x+p3.x)/2, (p1.y+p3.y)/2)
+ * - If (p2, p4) has same center and length, they form rectangle!
+ * - Area = 0.5 * d1 * d2 * sin(angle between diagonals)
+ * - For rectangle, angle = 90°, so: Area = 0.5 * d1 * d2
+ * 
+ * But we can compute area more directly:
+ * Area = |cross product of two adjacent sides|
+ * 
+ * APPROACHES:
+ * ===========
+ * 1. Check all diagonal pairs - O(n^3) time
+ * 2. Group by diagonal center - O(n^2) time (optimal)
+ * 3. Check all point quadruples - O(n^4) time (brute force)
+ */
+
+class MinAreaRectII {
+    
+    /**
+     * APPROACH 1: DIAGONAL CENTER GROUPING (OPTIMAL)
+     * ===============================================
+     * Time Complexity: O(n^2) where n = number of points
+     * Space Complexity: O(n^2) for storing diagonal pairs
+     * 
+     * ALGORITHM:
+     * ==========
+     * 1. For each pair of points, consider them as potential diagonal
+     * 2. Compute diagonal's center point and length
+     * 3. Group diagonals by their center point
+     * 4. For diagonals with same center:
+     *    - They could form a rectangle if lengths match
+     *    - Compute area using cross product
+     * 5. Track minimum area
+     * 
+     * WHY THIS WORKS:
+     * ==============
+     * Rectangle diagonals have the SAME center point.
+     * By grouping diagonals by center, we only check valid candidates.
+     * 
+     * GEOMETRIC FORMULA:
+     * ==================
+     * Given 4 points forming rectangle: A, B, C, D
+     * If diagonal AC and diagonal BD have same center,
+     * and we know coordinates of all 4 points:
+     * 
+     * Area = |AB × AD| where × is cross product
+     * 
+     * For 2D vectors v1=(x1,y1) and v2=(x2,y2):
+     * Cross product magnitude = |x1*y2 - x2*y1|
+     */
+    public double minAreaFreeRect(int[][] points) {
+        int n = points.length;
+        if (n < 4) return 0.0;
+        
+        double minArea = Double.MAX_VALUE;
+        
+        // Map: center point (as string) -> list of diagonal pairs
+        // Each diagonal pair stores: [point1_index, point2_index, squared_length]
+        Map<String, List<int[]>> diagonalsByCenter = new HashMap<>();
+        
+        // Consider all pairs of points as potential diagonals
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                // Compute center of diagonal (i, j)
+                // Use exact arithmetic: store as (2*cx, 2*cy) to avoid floating point
+                long cx = (long) points[i][0] + points[j][0];
+                long cy = (long) points[i][1] + points[j][1];
+                String center = cx + "," + cy;
+                
+                // Compute squared length of diagonal
+                long dx = points[i][0] - points[j][0];
+                long dy = points[i][1] - points[j][1];
+                long lenSquared = dx * dx + dy * dy;
+                
+                // Store this diagonal
+                diagonalsByCenter.putIfAbsent(center, new ArrayList<>());
+                diagonalsByCenter.get(center).add(new int[]{i, j, (int)lenSquared});
+            }
+        }
+        
+        // For each center point, check pairs of diagonals
+        for (List<int[]> diagonals : diagonalsByCenter.values()) {
+            if (diagonals.size() < 2) continue; // Need at least 2 diagonals
+            
+            // Check all pairs of diagonals with this center
+            for (int i = 0; i < diagonals.size(); i++) {
+                for (int j = i + 1; j < diagonals.size(); j++) {
+                    int[] diag1 = diagonals.get(i);
+                    int[] diag2 = diagonals.get(j);
+                    
+                    // Check if diagonals have equal length (rectangle property)
+                    if (diag1[2] != diag2[2]) continue;
+                    
+                    // Get the 4 points
+                    int[] p1 = points[diag1[0]];
+                    int[] p2 = points[diag1[1]];
+                    int[] p3 = points[diag2[0]];
+                    int[] p4 = points[diag2[1]];
+                    
+                    // Compute area using cross product
+                    // Vector from p1 to p3
+                    long v1x = p3[0] - p1[0];
+                    long v1y = p3[1] - p1[1];
+                    
+                    // Vector from p1 to p4
+                    long v2x = p4[0] - p1[0];
+                    long v2y = p4[1] - p1[1];
+                    
+                    // Area = |cross product|
+                    double area = Math.abs(v1x * v2y - v1y * v2x);
+                    
+                    minArea = Math.min(minArea, area);
+                }
+            }
+        }
+        
+        return minArea == Double.MAX_VALUE ? 0.0 : minArea;
+    }
+    
+    /**
+     * APPROACH 2: CLEANER VERSION WITH BETTER STRUCTURE
+     * ==================================================
+     * Same complexity, but cleaner code structure
+     */
+    public double minAreaFreeRectCleaner(int[][] points) {
+        int n = points.length;
+        if (n < 4) return 0.0;
+        
+        double minArea = Double.MAX_VALUE;
+        
+        // Group diagonals by their center point
+        Map<String, List<Diagonal>> centerMap = new HashMap<>();
+        
+        // Generate all possible diagonals
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                Diagonal diag = new Diagonal(points[i], points[j], i, j);
+                String key = diag.getCenterKey();
+                
+                centerMap.putIfAbsent(key, new ArrayList<>());
+                centerMap.get(key).add(diag);
+            }
+        }
+        
+        // Check each group of diagonals with same center
+        for (List<Diagonal> diagonals : centerMap.values()) {
+            if (diagonals.size() < 2) continue;
+            
+            // Try all pairs of diagonals
+            for (int i = 0; i < diagonals.size(); i++) {
+                for (int j = i + 1; j < diagonals.size(); j++) {
+                    Diagonal d1 = diagonals.get(i);
+                    Diagonal d2 = diagonals.get(j);
+                    
+                    // Rectangle diagonals must have equal length
+                    if (Math.abs(d1.lengthSquared - d2.lengthSquared) > 1e-9) {
+                        continue;
+                    }
+                    
+                    // Calculate area
+                    double area = calculateArea(d1.p1, d1.p2, d2.p1);
+                    minArea = Math.min(minArea, area);
+                }
+            }
+        }
+        
+        return minArea == Double.MAX_VALUE ? 0.0 : minArea;
+    }
+    
+    /**
+     * Helper class to represent a diagonal
+     */
+    static class Diagonal {
+        int[] p1, p2;
+        int idx1, idx2;
+        double centerX, centerY;
+        double lengthSquared;
+        
+        Diagonal(int[] point1, int[] point2, int i, int j) {
+            this.p1 = point1;
+            this.p2 = point2;
+            this.idx1 = i;
+            this.idx2 = j;
+            
+            // Calculate center (exact arithmetic using integer coordinates doubled)
+            this.centerX = (point1[0] + point2[0]) / 2.0;
+            this.centerY = (point1[1] + point2[1]) / 2.0;
+            
+            // Calculate squared length
+            long dx = point1[0] - point2[0];
+            long dy = point1[1] - point2[1];
+            this.lengthSquared = dx * dx + dy * dy;
+        }
+        
+        String getCenterKey() {
+            // Use integer arithmetic to avoid floating point issues
+            long cx2 = (long)p1[0] + p2[0]; // 2 * centerX
+            long cy2 = (long)p1[1] + p2[1]; // 2 * centerY
+            return cx2 + "," + cy2;
+        }
+    }
+    
+    /**
+     * Calculate area of rectangle given 3 of its vertices
+     * 
+     * Formula: Area = |AB × AC| where A, B, C are three vertices
+     * and × denotes cross product
+     */
+    private double calculateArea(int[] p1, int[] p2, int[] p3) {
+        // Vector from p1 to p2
+        long v1x = p2[0] - p1[0];
+        long v1y = p2[1] - p1[1];
+        
+        // Vector from p1 to p3
+        long v2x = p3[0] - p1[0];
+        long v2y = p3[1] - p1[1];
+        
+        // Cross product gives area of parallelogram
+        // Rectangle area = |cross product|
+        return Math.abs(v1x * v2y - v1y * v2x);
+    }
+    
+    /**
+     * APPROACH 3: BRUTE FORCE (FOR UNDERSTANDING)
+     * ============================================
+     * Time Complexity: O(n^4)
+     * Space Complexity: O(1)
+     * 
+     * Check all combinations of 4 points to see if they form a rectangle.
+     * This is too slow for n > 50, but good for understanding the problem.
+     */
+    public double minAreaFreeRectBruteForce(int[][] points) {
+        int n = points.length;
+        if (n < 4) return 0.0;
+        
+        double minArea = Double.MAX_VALUE;
+        
+        // Try all combinations of 4 points
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                for (int k = j + 1; k < n; k++) {
+                    for (int l = k + 1; l < n; l++) {
+                        double area = checkRectangle(
+                            points[i], points[j], points[k], points[l]
+                        );
+                        if (area > 0) {
+                            minArea = Math.min(minArea, area);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return minArea == Double.MAX_VALUE ? 0.0 : minArea;
+    }
+    
+    /**
+     * Check if 4 points form a rectangle and return area if yes
+     * 
+     * Rectangle conditions:
+     * 1. Diagonals have same length
+     * 2. Diagonals bisect each other (same midpoint)
+     */
+    private double checkRectangle(int[] p1, int[] p2, int[] p3, int[] p4) {
+        // Compute all 6 distances
+        long d12 = distSquared(p1, p2);
+        long d13 = distSquared(p1, p3);
+        long d14 = distSquared(p1, p4);
+        long d23 = distSquared(p2, p3);
+        long d24 = distSquared(p2, p4);
+        long d34 = distSquared(p3, p4);
+        
+        // Store distances in array and sort
+        long[] dists = {d12, d13, d14, d23, d24, d34};
+        Arrays.sort(dists);
+        
+        // For rectangle: 4 sides + 2 diagonals
+        // After sorting: [side1, side1, side2, side2, diag, diag]
+        // Check if this pattern holds
+        if (dists[0] != dists[1] || dists[2] != dists[3] || dists[4] != dists[5]) {
+            return 0;
+        }
+        
+        // Check diagonals are longer than sides (unless it's a square)
+        if (dists[4] < dists[0] || dists[4] < dists[2]) {
+            return 0;
+        }
+        
+        // Compute area: sqrt(side1^2) * sqrt(side2^2)
+        return Math.sqrt(dists[0]) * Math.sqrt(dists[2]);
+    }
+    
+    /**
+     * Helper: Squared distance between two points
+     */
+    private long distSquared(int[] p1, int[] p2) {
+        long dx = p1[0] - p2[0];
+        long dy = p1[1] - p2[1];
+        return dx * dx + dy * dy;
+    }
+    
+    // VISUALIZATION AND TESTING
+    public static void main(String[] args) {
+        MinAreaRectII solution = new MinAreaRectII();
+        
+        System.out.println("=== MINIMUM AREA RECTANGLE II - TEST CASES ===\n");
+        
+        // Test Case 1: Square rotated 45 degrees
+        System.out.println("Test 1: Rotated square");
+        int[][] points1 = {{1,2},{2,1},{1,0},{0,1}};
+        System.out.println("Points: " + Arrays.deepToString(points1));
+        visualizePoints(points1);
+        double result1 = solution.minAreaFreeRect(points1);
+        System.out.println("Output: " + result1);
+        System.out.println("Expected: 2.0 (diamond shape, side length √2)");
+        System.out.println();
+        
+        // Test Case 2: Axis-aligned rectangle
+        System.out.println("Test 2: Axis-aligned rectangle");
+        int[][] points2 = {{0,0},{0,3},{3,3},{3,0},{2,2}};
+        System.out.println("Points: " + Arrays.deepToString(points2));
+        double result2 = solution.minAreaFreeRect(points2);
+        System.out.println("Output: " + result2);
+        System.out.println("Expected: 9.0 (3×3 rectangle)");
+        System.out.println();
+        
+        // Test Case 3: No rectangle possible
+        System.out.println("Test 3: No rectangle");
+        int[][] points3 = {{0,0},{1,1},{2,2}};
+        System.out.println("Points: " + Arrays.deepToString(points3));
+        double result3 = solution.minAreaFreeRect(points3);
+        System.out.println("Output: " + result3);
+        System.out.println("Expected: 0.0");
+        System.out.println();
+        
+        // Test Case 4: Multiple rectangles
+        System.out.println("Test 4: Multiple rectangles");
+        int[][] points4 = {{0,0},{1,0},{2,0},{0,1},{2,1},{0,2},{1,2},{2,2}};
+        System.out.println("Points: Grid of 3×3 points");
+        visualizePoints(points4);
+        double result4 = solution.minAreaFreeRect(points4);
+        System.out.println("Output: " + result4);
+        System.out.println("Expected: 1.0 (smallest 1×1 rectangle)");
+        System.out.println();
+        
+        // Test Case 5: Exact from problem
+        System.out.println("Test 5: Complex case");
+        int[][] points5 = {{3,1},{1,1},{0,1},{2,1},{3,3},{3,2},{0,2},{2,3}};
+        double result5 = solution.minAreaFreeRect(points5);
+        System.out.println("Output: " + result5);
+        System.out.println("Expected: 2.0");
+        System.out.println();
+        
+        System.out.println("=== ALGORITHM EXPLANATION ===");
+        explainAlgorithm();
+        
+        System.out.println("\n=== COMPLEXITY ANALYSIS ===");
+        System.out.println("Approach                    | Time      | Space");
+        System.out.println("----------------------------|-----------|----------");
+        System.out.println("Diagonal Center Grouping    | O(n²)     | O(n²)");
+        System.out.println("Brute Force (4 points)      | O(n⁴)     | O(1)");
+        System.out.println();
+        System.out.println("Optimal approach: O(n²) time");
+        System.out.println("- Generate all diagonal pairs: O(n²)");
+        System.out.println("- For each center, check diagonal pairs: O(k²) where k ≤ n");
+        System.out.println("- Total: O(n²) average case");
+    }
+    
+    /**
+     * Visualize points on a grid
+     */
+    private static void visualizePoints(int[][] points) {
+        if (points.length == 0) return;
+        
+        // Find bounds
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        
+        for (int[] p : points) {
+            minX = Math.min(minX, p[0]);
+            maxX = Math.max(maxX, p[0]);
+            minY = Math.min(minY, p[1]);
+            maxY = Math.max(maxY, p[1]);
+        }
+        
+        // Create grid
+        Set<String> pointSet = new HashSet<>();
+        for (int[] p : points) {
+            pointSet.add(p[0] + "," + p[1]);
+        }
+        
+        System.out.println("Visual:");
+        for (int y = maxY; y >= minY; y--) {
+            System.out.printf("%2d ", y);
+            for (int x = minX; x <= maxX; x++) {
+                if (pointSet.contains(x + "," + y)) {
+                    System.out.print("● ");
+                } else {
+                    System.out.print("· ");
+                }
+            }
+            System.out.println();
+        }
+        System.out.print("   ");
+        for (int x = minX; x <= maxX; x++) {
+            System.out.printf("%d ", x);
+        }
+        System.out.println("\n");
+    }
+    
+    /**
+     * Explain the algorithm with example
+     */
+    private static void explainAlgorithm() {
+        System.out.println("Key Geometric Insight:");
+        System.out.println("---------------------");
+        System.out.println("Rectangle diagonals have TWO properties:");
+        System.out.println("1. Same center point (bisect each other)");
+        System.out.println("2. Equal length");
+        System.out.println();
+        System.out.println("Algorithm:");
+        System.out.println("1. Consider all pairs of points as diagonals");
+        System.out.println("2. Group diagonals by their center point");
+        System.out.println("3. Within each group, find pairs with equal length");
+        System.out.println("4. For such pairs, compute area using cross product");
+        System.out.println("5. Return minimum area found");
+        System.out.println();
+        System.out.println("Area Calculation:");
+        System.out.println("Given 4 rectangle vertices A, B, C, D");
+        System.out.println("Area = |AB⃗ × AC⃗| (cross product magnitude)");
+        System.out.println("For 2D: |x₁y₂ - x₂y₁|");
+    }
+}
+
+/**
+ * GEOMETRIC DERIVATIONS AND PROOFS
+ * =================================
+ * 
+ * WHY DIAGONAL CENTER WORKS:
+ * --------------------------
+ * Theorem: Four points form a rectangle if and only if:
+ * 1. They form a quadrilateral
+ * 2. Diagonals have equal length
+ * 3. Diagonals bisect each other
+ * 
+ * Proof sketch:
+ * - Equal diagonals + bisection → parallelogram
+ * - Parallelogram with equal diagonals → rectangle
+ * 
+ * AREA FORMULA:
+ * ------------
+ * Given rectangle with vertices A, B, C, D (in order):
+ * 
+ * Method 1: Side lengths
+ * Area = |AB| × |AD|
+ * 
+ * Method 2: Cross product
+ * AB⃗ = (B.x - A.x, B.y - A.y)
+ * AD⃗ = (D.x - A.x, D.y - A.y)
+ * Area = |AB⃗ × AD⃗| = |AB⃗.x × AD⃗.y - AB⃗.y × AD⃗.x|
+ * 
+ * Method 3: Diagonal-based (less direct)
+ * Area = 0.5 × d₁ × d₂ × sin(θ)
+ * For rectangle, θ = 90°, so Area = 0.5 × d₁ × d₂
+ * But we use Method 2 as it's more straightforward
+ * 
+ * FLOATING POINT PRECISION:
+ * ------------------------
+ * Problem states: "Answers within 10⁻⁵ of actual answer will be accepted"
+ * 
+ * Our approach:
+ * - Use integer arithmetic where possible (center coordinates)
+ * - Use long for squared distances
+ * - Only use double for final area calculation
+ * - Cross product with long intermediate values
+ * 
+ * This minimizes floating point errors!
+ */
+
+/**
+ * INTERVIEW STRATEGY GUIDE
+ * ========================
+ * 
+ * 1. CLARIFY THE PROBLEM (2 minutes)
+ *    Q: "Can rectangles be rotated?" A: Yes! Any orientation
+ *    Q: "What if no rectangle exists?" A: Return 0
+ *    Q: "What about precision?" A: Within 10⁻⁵ is acceptable
+ *    Q: "Can points be duplicates?" A: Usually assume all distinct
+ *    
+ * 2. EXPLAIN KEY INSIGHT (3 minutes)
+ *    "Rectangle diagonals have special properties:"
+ *    - Same center point (bisect each other)
+ *    - Equal length
+ *    "So I'll group point pairs by their center and check for matching lengths"
+ *    
+ * 3. DRAW EXAMPLE (5 minutes)
+ *    Draw rotated square: (1,2), (2,1), (1,0), (0,1)
+ *    Show diagonals cross at (1,1)
+ *    Show both diagonals have length 2√2
+ *    
+ * 4. DISCUSS APPROACH (5 minutes)
+ *    "Generate all possible diagonals: O(n²)"
+ *    "Group by center point"
+ *    "For each center, check pairs of diagonals"
+ *    "If equal length, they form rectangle"
+ *    "Calculate area using cross product"
+ *    
+ * 5. CODE THE SOLUTION (15 minutes)
+ *    Start with diagonal generation
+ *    Use HashMap for grouping
+ *    Implement area calculation
+ *    Handle edge cases
+ *    
+ * 6. ANALYZE COMPLEXITY (2 minutes)
+ *    Time: O(n²) for diagonal generation + checking
+ *    Space: O(n²) for storing diagonals
+ *    
+ * 7. TEST (3 minutes)
+ *    Rotated square
+ *    Axis-aligned rectangle
+ *    No rectangle possible
+ *    Multiple rectangles
+ * 
+ * COMMON MISTAKES TO AVOID
+ * ========================
+ * 
+ * 1. FLOATING POINT COMPARISON
+ *    ❌ if (center1 == center2)
+ *    ✓  Use string keys or epsilon comparison
+ *    
+ * 2. FORGETTING ROTATION
+ *    ❌ Only checking axis-aligned rectangles
+ *    ✓  Use diagonal approach (works for any orientation)
+ *    
+ * 3. WRONG AREA FORMULA
+ *    ❌ Just multiplying diagonal lengths
+ *    ✓  Use cross product or compute side lengths
+ *    
+ * 4. INTEGER OVERFLOW
+ *    ❌ Using int for squared distances
+ *    ✓  Use long for intermediate calculations
+ *    
+ * 5. NOT HANDLING "NO RECTANGLE"
+ *    ❌ Returning Double.MAX_VALUE
+ *    ✓  Return 0.0 when no rectangle found
+ * 
+ * KEY TAKEAWAYS
+ * =============
+ * 
+ * 1. Rotated rectangles → use diagonal properties
+ * 2. Group by center point to find candidates
+ * 3. Cross product for area calculation
+ * 4. O(n²) is optimal for this problem
+ * 5. Integer arithmetic prevents floating point errors
+ * 6. Drawing examples helps immensely!
+ * 
+ * Good luck! 📐
+ */
