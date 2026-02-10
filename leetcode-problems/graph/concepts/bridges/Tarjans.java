@@ -255,3 +255,90 @@ class FindBridgesTarjansAlgo2 {
         }
     }
 }
+
+/*
+ * WHY low[u] = min(low[u], disc[v])  (and NOT low[v]) ?
+ *
+ * This line happens in the "back edge" case:
+ *
+ *      u -----> v
+ *
+ * where v is already visited and v is NOT parent of u.
+ * That means (u -> v) is a BACK EDGE and v is an ANCESTOR of u.
+ *
+ * ------------------------------------------------------------
+ * EXAMPLE GRAPH:
+ * ------------------------------------------------------------
+ *
+ *          0
+ *         / \
+ *        1   2
+ *       /
+ *      3
+ *     / \
+ *    4   5
+ *
+ * plus one back edge: 4 ----> 1
+ *
+ * DFS path could be:
+ * 0 -> 1 -> 3 -> 4
+ *
+ * So:
+ * disc[0]=0
+ * disc[1]=1
+ * disc[3]=2
+ * disc[4]=3
+ *
+ * Now at node u = 4:
+ * we see an edge (4 -> 1)
+ *
+ * - node 1 is already visited
+ * - node 1 is NOT parent of 4
+ * => this is a BACK EDGE to ancestor 1
+ *
+ * ------------------------------------------------------------
+ * What does this back edge mean?
+ * ------------------------------------------------------------
+ *
+ * From node 4, we can directly jump to node 1.
+ *
+ * So the earliest ancestor reachable from 4 is exactly:
+ * disc[1] = 1
+ *
+ * Therefore:
+ * low[4] = min(low[4], disc[1])
+ *
+ * ------------------------------------------------------------
+ * Why NOT low[1] ?
+ * ------------------------------------------------------------
+ *
+ * Suppose node 1 has another back edge somewhere in its subtree
+ * that reaches node 0, so low[1] could become 0.
+ *
+ * Example: if 1's subtree had an edge reaching 0, then:
+ * low[1] = 0
+ *
+ * If we incorrectly do:
+ * low[4] = min(low[4], low[1])
+ *
+ * then we would be saying:
+ * "Node 4 can reach node 0"
+ *
+ * BUT THAT IS WRONG because:
+ * - The back edge we have is ONLY (4 -> 1)
+ * - From 4 we can reach 1, but we cannot magically use
+ *   1's subtree paths to reach 0.
+ *
+ * low[1] includes information about paths reachable from
+ * node 1's subtree, which node 4 cannot directly access
+ * through the single back edge (4 -> 1).
+ *
+ * ------------------------------------------------------------
+ * Conclusion:
+ * ------------------------------------------------------------
+ *
+ * For a back edge (u -> v):
+ * - u can reach v directly
+ * - so the earliest reachable ancestor is disc[v]
+ * - not low[v] (which includes v's subtree reachability)
+ */

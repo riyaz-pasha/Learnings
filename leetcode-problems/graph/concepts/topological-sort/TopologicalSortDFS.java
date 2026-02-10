@@ -1,6 +1,102 @@
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Stack;
+
+/**
+ * Topological Sort using DFS (with Cycle Detection)
+ *
+ * Topological ordering exists ONLY if the graph is a DAG (Directed Acyclic Graph).
+ *
+ * DFS Logic:
+ * - Do DFS for each node
+ * - After visiting all neighbors, push the node into stack
+ * - Final answer is reverse of finishing time order
+ *
+ * Cycle Detection:
+ * - We maintain an extra array inPath[] (recursion stack)
+ * - If we revisit a node that is currently inPath, we found a cycle.
+ *
+ * Time Complexity: O(V + E)
+ * Space Complexity: O(V + E)
+ */
+class TopologicalSortDFS2 {
+
+    public List<Integer> topoSort(int V, List<List<Integer>> adjList) {
+
+        boolean[] visited = new boolean[V];
+
+        // inPath[node] = true means node is currently in recursion stack
+        boolean[] inPath = new boolean[V];
+
+        // Using deque as stack (better than java.util.Stack)
+        Deque<Integer> stack = new ArrayDeque<>();
+
+        for (int node = 0; node < V; node++) {
+            if (!visited[node]) {
+                if (dfs(node, adjList, visited, inPath, stack)) {
+                    throw new IllegalStateException("Cycle detected! Topological sort not possible.");
+                }
+            }
+        }
+
+        // stack already contains nodes in reverse order, pop to get topo order
+        List<Integer> topoOrder = new ArrayList<>();
+        while (!stack.isEmpty()) {
+            topoOrder.add(stack.pop());
+        }
+
+        return topoOrder;
+    }
+
+    /**
+     * Returns true if a cycle is detected.
+     */
+    private boolean dfs(int node,
+                        List<List<Integer>> adjList,
+                        boolean[] visited,
+                        boolean[] inPath,
+                        Deque<Integer> stack) {
+
+        visited[node] = true;
+        inPath[node] = true; // mark node as part of current DFS path
+
+        for (int neighbor : adjList.get(node)) {
+
+            // If neighbor not visited, DFS deeper
+            if (!visited[neighbor]) {
+                if (dfs(neighbor, adjList, visited, inPath, stack)) {
+                    return true; // cycle found below
+                }
+            }
+
+            // If neighbor is already in recursion path => cycle exists
+            else if (inPath[neighbor]) {
+                return true;
+            }
+        }
+
+        // DFS finished for this node, remove from current path
+        inPath[node] = false;
+
+        // Push after processing all neighbors (postorder)
+        stack.push(node);
+
+        return false;
+    }
+}
+
+/*
+ * Why do we need inPath[]?
+ *
+ * visited[] only tells if a node was processed before.
+ * But in directed graphs, visiting an already visited node does NOT always mean cycle.
+ *
+ * A cycle exists only when we reach a node that is still part of the CURRENT DFS recursion path.
+ * That is why we track inPath[] (recursion stack).
+ */
+
 
 public class TopologicalSortDFS {
 

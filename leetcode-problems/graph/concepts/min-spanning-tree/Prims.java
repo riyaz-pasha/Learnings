@@ -2,51 +2,93 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.PriorityQueue;
 
+/**
+ * Prim's Algorithm (Lazy Version) - Minimum Spanning Tree (MST)
+ *
+ * Goal:
+ * Build MST of a connected, undirected, weighted graph.
+ *
+ * Greedy Rule:
+ * Always pick the minimum weight edge that connects:
+ *   (already selected MST nodes) -> (new node outside MST)
+ *
+ * ---------------------------------------------------------
+ * Why PriorityQueue?
+ * We need to always pick the smallest edge among all edges
+ * that connect MST to non-MST vertices.
+ *
+ * ---------------------------------------------------------
+ * Time Complexity: O(E log E) ~ O(E log V)
+ * Space Complexity: O(V + E)
+ */
 class Prims {
 
     static List<Edge> primMST(List<List<Edge>> graph, int n) {
+
         List<Edge> mst = new ArrayList<>();
-        boolean[] visited = new boolean[n];
+        boolean[] inMST = new boolean[n];
+
         int totalWeight = 0;
+
+        // MinHeap based on edge weight
         PriorityQueue<Edge> minHeap = new PriorityQueue<>();
 
-        visited[0] = true;
+        // ---------------------------------------------------------
+        // Step 1: Start from node 0 (can start from any node)
+        // ---------------------------------------------------------
+        inMST[0] = true;
+
+        // Add all edges from node 0 into heap
         for (Edge edge : graph.get(0)) {
             minHeap.offer(edge);
         }
 
-        while (!minHeap.isEmpty()) {
+        // ---------------------------------------------------------
+        // Step 2: Expand MST until we have (n-1) edges
+        // MST always has exactly (V - 1) edges
+        // ---------------------------------------------------------
+        while (!minHeap.isEmpty() && mst.size() < n - 1) {
+
             Edge edge = minHeap.poll();
-            if (visited[edge.destination]) {
+
+            // If destination is already inside MST, this edge is useless (cycle edge)
+            if (inMST[edge.destination]) {
                 continue;
             }
-            visited[edge.destination] = true;
+
+            // Take this edge into MST
             mst.add(edge);
             totalWeight += edge.weight;
+
+            // Mark the new vertex as included
+            inMST[edge.destination] = true;
+
+            // Add all outgoing edges from the new node
             for (Edge neighborEdge : graph.get(edge.destination)) {
-                if (!visited[neighborEdge.destination]) {
+                if (!inMST[neighborEdge.destination]) {
                     minHeap.offer(neighborEdge);
                 }
             }
         }
-        System.out.println("Total weight : " + totalWeight);
+
+        System.out.println("Total weight of MST: " + totalWeight);
         return mst;
     }
-
 }
 
 class PrimStepByStep {
 
     public static void main(String[] args) {
-        int V = 5; // Number of vertices
 
-        // Step 1: Create an adjacency list to represent the undirected graph
+        int V = 5;
+
+        // Adjacency list representation
         List<List<Edge>> graph = new ArrayList<>();
         for (int i = 0; i < V; i++) {
             graph.add(new ArrayList<>());
         }
 
-        // Add undirected edges
+        // Undirected edges
         addEdge(graph, 0, 1, 2);
         addEdge(graph, 0, 3, 6);
         addEdge(graph, 1, 2, 3);
@@ -55,21 +97,26 @@ class PrimStepByStep {
         addEdge(graph, 2, 4, 7);
         addEdge(graph, 3, 4, 9);
 
-        // Run Prim's Algorithm
-        Prims.primMST(graph, V);
+        List<Edge> mst = Prims.primMST(graph, V);
+
+        System.out.println("Edges in MST:");
+        for (Edge e : mst) {
+            System.out.println(e.source + " -- " + e.destination + " : " + e.weight);
+        }
     }
 
-    // Utility function to add an undirected edge
+    // Add undirected edge u <-> v
     static void addEdge(List<List<Edge>> graph, int source, int destination, int weight) {
         graph.get(source).add(new Edge(source, destination, weight));
         graph.get(destination).add(new Edge(destination, source, weight));
     }
-
 }
 
 class Edge implements Comparable<Edge> {
 
-    final int source, destination, weight;
+    final int source;
+    final int destination;
+    final int weight;
 
     public Edge(int source, int destination, int weight) {
         this.source = source;
@@ -77,12 +124,23 @@ class Edge implements Comparable<Edge> {
         this.weight = weight;
     }
 
+    // MinHeap ordering by weight
     @Override
-    public int compareTo(Edge o) {
-        return this.weight - o.weight;
+    public int compareTo(Edge other) {
+        return Integer.compare(this.weight, other.weight);
     }
-
 }
+
+/*
+ * Why Prim’s algorithm works?
+ *
+ * At any point, we have a set of vertices already in MST.
+ * The minimum weight edge that connects MST to a new vertex
+ * is always safe to include (Cut Property).
+ *
+ * This greedy step never breaks optimality.
+ */
+
 
 /*
  * Prim’s Algorithm - Step-by-Step Explanation

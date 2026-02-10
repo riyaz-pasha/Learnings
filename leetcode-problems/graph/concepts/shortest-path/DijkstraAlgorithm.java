@@ -91,41 +91,126 @@ class Dijkstras {
 
 }
 
-class Dijkstra1 {
-    class Pair {
-        int vertex, distance;
+/*
+ * Dijkstra's Algorithm (Shortest Path from a Source)
+ *
+ * Works for:
+ *  - Directed / Undirected graphs
+ *  - Non-negative weights only (0 allowed, but NOT negative)
+ *
+ * Goal:
+ *  dist[v] = shortest distance from source -> v
+ *
+ * Core Idea (Greedy):
+ *  Always expand the node that currently has the smallest known distance.
+ *
+ * Important Interview Note:
+ *  PriorityQueue can contain multiple entries for the same node.
+ *  We skip outdated entries using:
+ *      if (currDist > dist[node]) continue;
+ *
+ * Time Complexity:
+ *  - Each edge relaxation can push into PQ => O(E log V)
+ *  - Each PQ poll is log V => O(V log V)
+ *  => Total: O((V + E) log V)
+ *
+ * Space Complexity:
+ *  - dist[] = O(V)
+ *  - adjacency list = O(V + E)
+ *  - PQ can hold up to O(E) states in worst case
+ *  => Total: O(V + E)
+ */
+class DijkstraAlgorithm1 {
 
-        Pair(int v, int d) {
-            vertex = v;
-            distance = d;
+    // Edge: u -> to (with weight)
+    static class Edge {
+        int to;
+        int weight;
+
+        Edge(int to, int weight) {
+            this.to = to;
+            this.weight = weight;
         }
     }
 
-    void dijkstra(int V, List<List<Pair>> graph, int source) {
+    // State used in PQ: (node, shortestDistanceSoFar)
+    static class State {
+        int node;
+        int dist;
+
+        State(int node, int dist) {
+            this.node = node;
+            this.dist = dist;
+        }
+    }
+
+    public int[] dijkstra(int V, List<List<Edge>> graph, int source) {
+
+        // dist[v] = shortest distance from source to v
         int[] dist = new int[V];
         Arrays.fill(dist, Integer.MAX_VALUE);
+
+        // distance to source is always 0
         dist[source] = 0;
 
-        PriorityQueue<Pair> pq = new PriorityQueue<>(Comparator.comparingInt(p -> p.distance));
-        pq.add(new Pair(source, 0));
+        // MinHeap: always gives node with smallest distance first
+        PriorityQueue<State> pq =
+                new PriorityQueue<>(Comparator.comparingInt(s -> s.dist));
 
+        // start from source
+        pq.offer(new State(source, 0));
+
+        // Main loop
         while (!pq.isEmpty()) {
-            Pair current = pq.poll();
-            int u = current.vertex;
 
-            for (Pair neighbor : graph.get(u)) {
-                int v = neighbor.vertex;
-                int weight = neighbor.distance;
+            State curr = pq.poll();
+            int node = curr.node;
+            int currDist = curr.dist;
 
-                if (dist[u] + weight < dist[v]) {
-                    dist[v] = dist[u] + weight;
-                    pq.add(new Pair(v, dist[v]));
+            /*
+             * IMPORTANT (most common interview confusion):
+             *
+             * PQ may contain outdated entries.
+             *
+             * Example:
+             *   First we found dist[5] = 20, so we pushed (5,20)
+             *   Later we found dist[5] = 10, so we pushed (5,10)
+             *
+             * PQ now contains both (5,20) and (5,10)
+             * When (5,20) comes out, we must ignore it.
+             */
+            if (currDist > dist[node]) {
+                continue;
+            }
+
+            // Relax all outgoing edges from this node
+            for (Edge edge : graph.get(node)) {
+
+                int neighbor = edge.to;
+                int weight = edge.weight;
+
+                /*
+                 * Relaxation condition:
+                 *
+                 * If we can reach neighbor with a smaller cost,
+                 * update dist[neighbor].
+                 */
+                if (dist[node] != Integer.MAX_VALUE &&
+                        dist[node] + weight < dist[neighbor]) {
+
+                    dist[neighbor] = dist[node] + weight;
+
+                    // Push the updated best distance into PQ
+                    pq.offer(new State(neighbor, dist[neighbor]));
                 }
             }
         }
+
+        return dist;
     }
 
 }
+
 
 /**
  * Dijkstra's Algorithm Implementation with Time Complexity Analysis

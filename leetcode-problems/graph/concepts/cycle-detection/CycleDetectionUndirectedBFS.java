@@ -1,17 +1,33 @@
-import java.util.LinkedList;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
 
+/**
+ * Cycle Detection in Undirected Graph using BFS
+ *
+ * Key Idea:
+ * - BFS normally visits nodes level by level.
+ * - In an undirected graph, we detect a cycle if:
+ *      we find an already visited neighbor that is NOT the parent.
+ *
+ * Why parent is needed?
+ * - Because in undirected graph, edge u--v exists both ways.
+ * - So when we go from u -> v, later v will see u again.
+ * - That should not be considered a cycle.
+ *
+ * Time Complexity: O(V + E)
+ * Space Complexity: O(V)
+ */
 public class CycleDetectionUndirectedBFS {
 
-    /*
-     * Time: O(V + E) – Standard BFS traversal
-     * Space: O(V) for visited array and queue
-     */
+    // Helper record to store (node, parent) in queue
+    record Pair(int node, int parent) {}
+
     public boolean hasCycle(int V, List<List<Integer>> adj) {
+
         boolean[] visited = new boolean[V];
 
-        // Check for cycle in each connected component
+        // Graph may have multiple connected components
         for (int i = 0; i < V; i++) {
             if (!visited[i]) {
                 if (bfsHasCycle(i, adj, visited)) {
@@ -24,21 +40,28 @@ public class CycleDetectionUndirectedBFS {
     }
 
     private boolean bfsHasCycle(int start, List<List<Integer>> adj, boolean[] visited) {
-        Queue<int[]> queue = new LinkedList<>(); // [node, parent]
+
+        Queue<Pair> queue = new ArrayDeque<>();
+
         visited[start] = true;
-        queue.offer(new int[] { start, -1 }); // start node has no parent
+        queue.offer(new Pair(start, -1));
 
         while (!queue.isEmpty()) {
-            int[] current = queue.poll();
-            int node = current[0];
-            int parent = current[1];
+
+            Pair curr = queue.poll();
+            int node = curr.node();
+            int parent = curr.parent();
 
             for (int neighbor : adj.get(node)) {
+
+                // If neighbor not visited -> normal BFS visit
                 if (!visited[neighbor]) {
                     visited[neighbor] = true;
-                    queue.offer(new int[] { neighbor, node });
-                } else if (neighbor != parent) {
-                    // Visited neighbor not equal to parent => cycle
+                    queue.offer(new Pair(neighbor, node));
+                }
+
+                // If neighbor visited and it is NOT parent -> cycle exists
+                else if (neighbor != parent) {
                     return true;
                 }
             }
@@ -46,14 +69,8 @@ public class CycleDetectionUndirectedBFS {
 
         return false;
     }
-
 }
 
-/*
- * Time Complexity: O(N + 2E) + O(N), Where N = Nodes, 2E is for total degrees
- * as we traverse all adjacent nodes. In the case of connected components of a
- * graph, it will take another O(N) time.
- * 
- * Space Complexity: O(N) + O(N) ~ O(N), Space for queue data structure and
- * visited array.
- */
+// Cycle condition in undirected graph:
+// If we see an already visited neighbor that is NOT the parent,
+// it means there is another path reaching that node -> cycle exists.

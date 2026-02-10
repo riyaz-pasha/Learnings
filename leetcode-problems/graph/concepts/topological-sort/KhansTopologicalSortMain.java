@@ -3,6 +3,103 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 
+/**
+ * Kahn's Algorithm (Topological Sort using BFS)
+ *
+ * Topological Sort:
+ * - Ordering of vertices in a Directed Acyclic Graph (DAG)
+ * - For every directed edge u -> v, u must come before v in the ordering.
+ *
+ * Key Idea:
+ * - inDegree[v] = number of incoming edges into v
+ * - Nodes with inDegree = 0 have NO prerequisites, so they can be processed first.
+ *
+ * If we cannot process all vertices => Cycle exists.
+ *
+ * Time Complexity: O(V + E)
+ * Space Complexity: O(V + E)
+ */
+class KhansTopologicalSort {
+
+    public List<Integer> topologicalSort(int V, List<List<Integer>> adjList) {
+
+        // --------------------------------------
+        // Step 1: Calculate indegree of each node
+        // --------------------------------------
+        int[] inDegree = new int[V];
+
+        for (int u = 0; u < V; u++) {
+            for (int v : adjList.get(u)) {
+                inDegree[v]++;  // v has one more incoming edge (dependency)
+            }
+        }
+
+        // -------------------------------------------------------
+        // Step 2: Push all nodes with indegree 0 into the queue
+        //
+        // These are nodes that can be processed immediately because
+        // they have no prerequisites.
+        // -------------------------------------------------------
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        for (int node = 0; node < V; node++) {
+            if (inDegree[node] == 0) {
+                queue.offer(node);
+            }
+        }
+
+        // This list will store the final topological order
+        List<Integer> topoOrder = new ArrayList<>();
+
+        // -------------------------------------------------------
+        // Step 3: BFS-like processing
+        //
+        // Take a node with indegree 0, add it to result.
+        // Then "remove" its outgoing edges by reducing indegree
+        // of its neighbors.
+        // -------------------------------------------------------
+        while (!queue.isEmpty()) {
+
+            int node = queue.poll();
+            topoOrder.add(node);
+
+            // Remove outgoing edges: node -> neighbor
+            for (int neighbor : adjList.get(node)) {
+
+                inDegree[neighbor]--;
+
+                // If indegree becomes 0, it means all prerequisites are done
+                if (inDegree[neighbor] == 0) {
+                    queue.offer(neighbor);
+                }
+            }
+        }
+
+        // -------------------------------------------------------
+        // Step 4: Cycle detection
+        //
+        // If topoOrder does NOT contain all vertices,
+        // it means some vertices were never reduced to indegree 0.
+        // That only happens when a cycle exists.
+        // -------------------------------------------------------
+        if (topoOrder.size() != V) {
+            throw new IllegalStateException(
+                    "Cycle detected! Topological sort is not possible.");
+        }
+
+        return topoOrder;
+    }
+}
+
+/*
+ * indegree[node] tells how many prerequisites are still pending.
+ * A node can only be processed when indegree becomes 0.
+ *
+ * Kahn's algorithm keeps removing nodes with indegree 0.
+ * If a cycle exists, nodes inside the cycle will never reach indegree 0.
+ */
+
+
 public class KhansTopologicalSortMain {
 
     public static void main(String[] args) {
@@ -28,7 +125,7 @@ public class KhansTopologicalSortMain {
 }
 
 
-class KhansTopologicalSort {
+class KhansTopologicalSort2 {
 
     public List<Integer> topologicalSort(int numVertices, List<List<Integer>> adjList) {
         int[] inDegree = new int[numVertices];

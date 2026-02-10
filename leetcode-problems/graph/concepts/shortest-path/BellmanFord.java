@@ -2,6 +2,110 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+/*
+ * Bellman-Ford Algorithm (Single Source Shortest Path)
+ *
+ * Works for:
+ *  - Directed / Undirected graphs
+ *  - Supports NEGATIVE edge weights
+ *
+ * Special Feature:
+ *  - Detects NEGATIVE WEIGHT CYCLE
+ *
+ * Why do we need Bellman-Ford?
+ *  - Dijkstra fails if negative edges exist
+ *  - Bellman-Ford is slower but works safely
+ *
+ * Core Idea:
+ *  - Relax all edges (V - 1) times
+ *  - Because the shortest path can have at most (V - 1) edges
+ *    (a shortest path never repeats vertices, otherwise cycle exists)
+ *
+ * Negative Cycle Check:
+ *  - Do one more relaxation round
+ *  - If we can still reduce distance => negative cycle exists
+ *
+ * Time Complexity: O(V * E)
+ * Space Complexity: O(V)
+ */
+class BellmanFordAlgorithm {
+
+    static class Edge {
+        int from;
+        int to;
+        int weight;
+
+        Edge(int from, int to, int weight) {
+            this.from = from;
+            this.to = to;
+            this.weight = weight;
+        }
+    }
+
+    /*
+     * Returns shortest distances from source to all vertices.
+     *
+     * If a negative cycle is reachable from source,
+     * we return null (or you can throw exception).
+     */
+    public int[] shortestPath(int V, List<Edge> edges, int source) {
+
+        int[] dist = new int[V];
+        Arrays.fill(dist, Integer.MAX_VALUE);
+
+        dist[source] = 0;
+
+        // ----------------------------------------------------
+        // Step 1: Relax all edges (V - 1) times
+        // ----------------------------------------------------
+        for (int i = 1; i <= V - 1; i++) {
+
+            boolean updated = false;
+
+            for (Edge edge : edges) {
+
+                // If "from" is unreachable, skip
+                if (dist[edge.from] == Integer.MAX_VALUE) {
+                    continue;
+                }
+
+                // Relaxation:
+                // if dist[u] + w < dist[v] => update dist[v]
+                if (dist[edge.from] + edge.weight < dist[edge.to]) {
+                    dist[edge.to] = dist[edge.from] + edge.weight;
+                    updated = true;
+                }
+            }
+
+            // Optimization:
+            // If in one full pass no updates happen,
+            // then shortest paths are already finalized.
+            if (!updated) {
+                break;
+            }
+        }
+
+        // ----------------------------------------------------
+        // Step 2: Check for Negative Weight Cycle
+        // ----------------------------------------------------
+        for (Edge edge : edges) {
+
+            if (dist[edge.from] == Integer.MAX_VALUE) {
+                continue;
+            }
+
+            // If we can still relax, it means negative cycle exists
+            if (dist[edge.from] + edge.weight < dist[edge.to]) {
+                System.out.println("Negative weight cycle detected!");
+                return null;
+            }
+        }
+
+        return dist;
+    }
+
+}
+
 class BellmanFord {
 
     private final int INF = Integer.MAX_VALUE;
