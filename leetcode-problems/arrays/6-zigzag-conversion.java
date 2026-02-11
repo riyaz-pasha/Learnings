@@ -1,12 +1,14 @@
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 /*
  * The string "PAYPALISHIRING" is written in a zigzag pattern on a given number
  * of rows like this: (you may want to display this pattern in a fixed font for
  * better legibility)
  * 
- * P A H N
+ * P   A   H   N
  * A P L S I I G
- * Y I R
+ * Y   I   R
  * And then read line by line: "PAHNAPLSIIGYIR"
  * 
  * Write the code that will take a string and make this conversion given a

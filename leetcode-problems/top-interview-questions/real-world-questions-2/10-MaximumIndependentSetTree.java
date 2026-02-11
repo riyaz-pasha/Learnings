@@ -88,8 +88,6 @@ class MaximumIndependentSetTree {
     }
 }
 
-import java.util.*;
-
 /**
  * Maximum Weight Independent Set in Tree (Iterative DP)
  *
