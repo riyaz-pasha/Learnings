@@ -19,10 +19,10 @@ fs.readFile(__filename, () => {
     console.log("5️⃣ File Read I/O Callback Phase(2)");
 
     // // Inside I/O callback (Poll Phase), we queue `setImmediate()` → Check Phase
-    // setImmediate(() => console.log("6️⃣ setImmediate Inside I/O - Check Phase - Poll phase(4)"));
+    setImmediate(() => console.log("6️⃣ setImmediate Inside I/O - Check Phase - Poll phase(4)"));
 
     // // Inside I/O callback (Poll Phase), we queue another `setTimeout()` → Timers Phase
-    // setTimeout(() => console.log("7️⃣ setTimeout Inside I/O - Timers Phase - Poll Phase(4)"), 0);
+    setTimeout(() => console.log("7️⃣ setTimeout Inside I/O - Timers Phase - Poll Phase(4)"), 0);
 });
 
 // 🔹 `setImmediate()` outside I/O - It runs in Check Phase
