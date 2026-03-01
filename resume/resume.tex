@@ -1,0 +1,209 @@
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[rm]{merriweather} % Merriweather font
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{xcolor} % For HTML colors
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{setspace} % For line spacing
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{} 
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins for a cleaner, well-spaced look
+\addtolength{\oddsidemargin}{-0.3in}
+\addtolength{\evensidemargin}{-0.3in}
+\addtolength{\textwidth}{0.6in}
+\addtolength{\topmargin}{-0.4in}
+\addtolength{\textheight}{0.8in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% --- Custom Colors ---
+\definecolor{SectionBlue}{HTML}{2079c7}
+% Changed grey darker so it is fully visible but distinct from black
+\definecolor{TextGrey}{HTML}{333333} 
+\definecolor{HighlightBlack}{HTML}{000000} % For highlights
+\definecolor{LightLine}{HTML}{cccccc}
+
+% --- Formatting ---
+% Increased line spacing slightly to make each line breathe more
+\setstretch{1.20} 
+\color{TextGrey}
+
+% Define the vertical bar before section text (approximate a thick pipe `❚`)
+% Reduced standard spacing before/after section headers to make sections tighter
+\titleformat{\section}{
+  \vspace{2pt}\color{SectionBlue}\scshape\raggedright\large\bfseries % Tightened spacing here
+}{\color{SectionBlue}\rule[-1pt]{4pt}{10pt}\hspace{8pt}}{0em}{}[\vspace{-2pt}]
+
+\pdfgentounicode=1
+
+% --- Custom Commands ---
+
+% Ensure all text inside custom commands forces the correct color
+\newcommand{\resumeItem}[1]{
+  \item\small{\textcolor{TextGrey}{#1}} % Removed custom vspace after bullets
+}
+
+\newcommand{\hl}[1]{\textcolor{HighlightBlack}{\textbf{#1}}}
+\newcommand{\hlit}[1]{\textcolor{HighlightBlack}{\textit{#1}}}
+
+\newcommand{\resumeSubheading}[3]{
+  \vspace{2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \hl{#1} \quad \hlit{#2} & \textcolor{TextGrey}{\small #3} \\
+    \end{tabular*}\vspace{0pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+  \vspace{0pt}\item
+    \begin{tabular*}{1.0\textwidth}{l@{\extracolsep{\fill}}r}
+      \hl{#1} \quad \textcolor{TextGrey}{\textit{\small #2}} & \\
+    \end{tabular*}\vspace{0pt}
+}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}\vspace{2pt}}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=0.2in, label={\textcolor{TextGrey}{\vcenter{\hbox{\tiny$\bullet$}}}}] \vspace{-2pt} }
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{0pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\color{TextGrey} % Start document with base grey color
+
+%----------HEADING----------
+\noindent\begin{tabular*}{\textwidth}{@{}l@{\extracolsep{\fill}}l@{}}
+\begin{minipage}[t]{0.65\textwidth}
+    % Name is now in Title Case, Black, and slightly smaller
+    {\Large \color{HighlightBlack} \textbf{Riyaz Pasha Mohammed}} \\ 
+    {\normalsize \textcolor{TextGrey}{Senior Software Engineer $|$ Full Stack (Backend Heavy)}}
+\end{minipage} &
+\begin{minipage}[t]{0.35\textwidth}
+    \raggedleft \small \textcolor{TextGrey}{
+    Hyderabad, India \\
+    \hl{+91 90009 67748} \\
+    \href{mailto:riyazpasha880@gmail.com}{\textcolor{HighlightBlack}{riyazpasha880@gmail.com}} \\
+    \href{https://linkedin.com/in/riyazpasha880}{\textcolor{HighlightBlack}{linkedin.com/in/riyazpasha880}}
+    }
+\end{minipage}
+\end{tabular*}
+\vspace{2pt}
+
+\vspace{0pt} \hrule height 0.5pt \color{LightLine} \vspace{0pt} % Tightened gap under the line
+\color{TextGrey}
+
+%-----------SUMMARY-----------
+\section*{SUMMARY}
+\small{\textcolor{TextGrey}{Senior Software Engineer with 6+ years of experience building and modernizing high-traffic web and mobile applications at ThoughtWorks and Everest Engineering. Specializes in \hl{Spring Boot}, \hl{ExpressJS}, \hl{React}, \hl{React Native}, \hl{TypeScript}, \hl{Java}, and \hl{AWS} cloud-native architectures. Delivered measurable impact: cut API latency by \hl{67\%}, reduced CI build times by $\sim$\hl{35\%}, and integrated AI-driven automation into production systems. Passionate about clean architecture, TDD, and engineering quality.}}
+
+%-----------EXPERIENCE-----------
+\section*{EXPERIENCE}
+  \resumeSubHeadingListStart
+
+    \resumeSubheading
+      {Everest Engineering}{Software Craftsperson}{OCT 2022 - PRESENT}
+      \resumeItemListStart
+        \resumeItem{Developed scalable backend services for a construction platform using \hl{Spring Boot} and \hl{PostgreSQL}, managing budget utilization, work progress, and material delivery tracking.}
+        \resumeItem{Integrated \hl{Azure AI Document Intelligence} to automate invoice data extraction, reducing manual data entry errors and improving ingestion accuracy.}
+        \resumeItem{Optimized frontend performance via \hl{TanStack Query} and architecture refactoring, reducing page load times by $\sim$\hl{40\%}.}
+        \resumeItem{Streamlined CI/CD pipelines in \hl{GitHub Actions}, reducing pipeline runtime by $\sim$\hl{35\%} and accelerating release cycles.}
+        \resumeItem{Collaborated with stakeholders to translate business requirements into scalable APIs and iterative product improvements.}
+      \resumeItemListEnd
+
+    \resumeSubheading
+      {ThoughtWorks}{Application Developer | Consultant}{JUL 2020 - OCT 2022}
+      \resumeItemListStart
+        \resumeItem{Reduced critical pricing API latency from $\sim$2s to $\sim$\hl{600ms} by optimizing \hl{SQL} queries, improving database indexing, and introducing a \hl{Redis} caching layer.}
+        \resumeItem{Modernized legacy enterprise systems by migrating monolithic architectures to \hl{microservices} using \hl{AWS SQS}, \hl{Lambda}, and \hl{RDS/Aurora}.}
+        \resumeItem{Migrated a SOAP-based university data exchange platform to \hl{RESTful APIs}, replacing API-key auth with \hl{Auth0} and cutting \hl{Jenkins} build time from 25+ to $\sim$\hl{12 minutes}.}
+        \resumeItem{Practiced \hl{Agile/XP} — pair programming, TDD, continuous refactoring — across multiple client engagements.}
+        \resumeItem{Mentored junior engineers through technical onboarding, code reviews, and knowledge-sharing sessions.}
+      \resumeItemListEnd
+
+    \resumeSubheading
+      {ThoughtWorks}{Application Developer | Consultant Graduate}{JUL 2019 - JUL 2020}
+      \resumeItemListStart
+        \resumeItem{Delivered production-ready features for legacy modernization projects using \hl{Java} and \hl{TDD}; improved system stability by increasing unit and integration test coverage.}
+        \resumeItem{Supported production deployments and collaborated on debugging and resolution of live issues.}
+      \resumeItemListEnd
+
+  \resumeSubHeadingListEnd
+
+%-----------PROJECTS-----------
+\section*{KEY PROJECTS}
+    \resumeSubHeadingListStart
+      
+      \resumeProjectHeading
+          {Construction Project Management Platform}{React $\cdot$ TypeScript $\cdot$ Spring Boot $\cdot$ PostgreSQL $\cdot$ Azure AI Document Intelligence}
+          \resumeItemListStart
+            \resumeItem{Designed backend workflows to track construction progress at building-floor granularity, improving operational visibility for site engineers.}
+            \resumeItem{Implemented schedule vs. delivery reconciliation logic to identify missing or excess materials and validate delivery accuracy.}
+            \resumeItem{Built scalable REST APIs with validation and error handling to support both web and mobile clients.}
+            \resumeItem{Refactored frontend into a modular, maintainable architecture, reducing complexity and improving long-term extensibility.}
+          \resumeItemListEnd
+          
+      \resumeProjectHeading
+          {Legacy Modernization -- Pricing Application}{Java $\cdot$ Spring Boot $\cdot$ WebFlux $\cdot$ PostgreSQL $\cdot$ Redis $\cdot$ JUnit}
+          \resumeItemListStart
+            \resumeItem{Owned end-to-end modernization of two critical pricing microservices to production-ready Spring WebFlux services.}
+            \resumeItem{Developed JMX-based performance testing scripts to validate latency improvements under production-like traffic.}
+            \resumeItem{Improved code quality by resolving \hl{SonarQube} issues and increasing unit and integration test coverage.}
+            \resumeItem{Conducted onboarding and knowledge-sharing sessions to improve team ramp-up and engineering consistency.}
+          \resumeItemListEnd
+          
+      \resumeProjectHeading
+          {Payments Application}{React Native $\cdot$ JavaScript}
+          \resumeItemListStart
+            \resumeItem{Owned and implemented two major end-to-end business flows — UI, validations, API integration, and edge-case handling.}
+            \resumeItem{Led a development stream coordinating tasks across team members and ensuring timely sprint delivery.}
+            \resumeItem{Conducted requirement analysis and delivered solutions backed by POCs to validate feasibility before implementation.}
+          \resumeItemListEnd
+
+    \resumeSubHeadingListEnd
+
+%-----------SKILLS-----------
+\section*{SKILLS}
+ \vspace{2pt}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \hl{Languages:}\quad \textcolor{TextGrey}{Java, TypeScript, JavaScript, SQL} \\ \vspace{2pt}
+     \hl{Backend:}\quad \textcolor{TextGrey}{Spring Boot, WebFlux, Node.js, Express.js, Hibernate, REST APIs, Microservices} \\ \vspace{2pt}
+     \hl{Frontend:}\quad \textcolor{TextGrey}{React, Next.js, React Native, Redux, TanStack Query} \\ \vspace{2pt}
+     \hl{Cloud \& DevOps:}\quad \textcolor{TextGrey}{AWS (Lambda, SQS, RDS, Aurora), Docker, Serverless, Jenkins, GitHub Actions} \\ \vspace{2pt}
+     \hl{Databases:}\quad \textcolor{TextGrey}{PostgreSQL, MongoDB, Redis, DynamoDB} \\ \vspace{2pt}
+     \hl{Testing:}\quad \textcolor{TextGrey}{JUnit, Jest, Playwright, Mocha, Chai, SonarQube, Git, TDD}
+    }}
+ \end{itemize}
+
+%-----------CERTIFICATIONS-----------
+\section*{CERTIFICATIONS}
+  \vspace{2pt}
+  \begin{itemize}[leftmargin=0.2in, label={\textcolor{TextGrey}{\vcenter{\hbox{\tiny$\bullet$}}}}]
+    \small{\item{
+     \textcolor{TextGrey}{Stripe Certified Professional Developer}
+    }}
+    \small{\item{
+     \textcolor{TextGrey}{Stripe Certified Billing Developer}
+    }}
+  \end{itemize}
+
+%-------------------------------------------
+\end{document}
