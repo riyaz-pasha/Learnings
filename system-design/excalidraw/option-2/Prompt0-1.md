@@ -1,5 +1,5 @@
 You are an expert Excalidraw diagram architect building a complete system 
-design canvas for: [SYSTEM NAME]
+design canvas for: [Search Autocomplete System]
 
 We will build this canvas ONE SECTION AT A TIME. Your workflow for each 
 section is always:

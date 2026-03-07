@@ -928,4 +928,53 @@ This is actually one of the most important things to internalize for system desi
 
 ---
 
+Great question — and it's actually a more thoughtful suggestion than Redis or DynamoDB, because a Trie genuinely *is* a graph. Every node has edges to its children, exactly like a graph. So the intuition here is sound. Let's figure out why it still doesn't work.
 
+---
+
+## The Intuition Is Right — A Trie Is a Graph
+
+A Trie is a directed acyclic graph where each edge is labeled with a character. When you think about it that way, a graph database like Neo4j seems like a natural fit. You'd model it like this — each node in the graph represents a Trie node, and each relationship (edge) is labeled with a character. To find the Trie node for "wea", you'd run a query like:
+
+```cypher
+MATCH (root)-[:CHAR_w]->(w)-[:CHAR_e]->(we)-[:CHAR_a]->(wea)
+RETURN wea.top_k_cache
+```
+
+This is actually valid, clean, and expressive. Graph databases are specifically designed to traverse relationships like this efficiently. So what's the problem?
+
+---
+
+## The Problem Is Still the Network — Same Disease, Different Patient
+
+Even though Neo4j is brilliant at traversing graph relationships, it's still a **separate service running on a separate machine**. Every time your Trie server needs to answer an autocomplete query, it has to send that Cypher query over the network to Neo4j, wait for Neo4j to traverse its internal graph structure, and receive the response back. You're back to the same 1–5ms network latency that killed the Redis approach.
+
+In fact, for this specific use case, a graph database might actually be *slower* than Redis. Here's why — Redis is a simple key-value store, so a lookup is literally "hash this key, find the bucket, return the value." A graph database has to do more work per traversal step because it has to follow relationship pointers in its own internal storage format, evaluate relationship labels, and potentially check indexes. It's more expressive, but that expressiveness has a cost.
+
+---
+
+## The Deeper Issue — Graph Databases Are Optimized for Complex Traversals, Not Simple Ones
+
+Graph databases earn their keep on queries like "find all friends of friends who live in the same city as someone who bought this product" — deeply connected, multi-hop traversals where the query shape isn't known in advance. This is where they absolutely destroy relational databases.
+
+But your Trie traversal is the opposite of that. It's a **completely predictable, shallow, linear path**. You always start at the root. You always follow exactly one edge per character. You always stop when you've consumed the prefix. There's no branching logic, no variable-depth exploration, no complex relationship filtering. You're using a Ferrari to drive 200 meters to the corner shop. The Ferrari's capabilities are completely wasted, and you're still paying the parking fee.
+
+---
+
+## There's Also a Write Amplification Problem
+
+Remember from Chapter 2 how updating the top_k_cache requires walking back up to every ancestor node? In a graph database, each of those ancestor node updates is a separate write transaction that has to travel over the network, get applied to the graph store, and be acknowledged. For a single query frequency update, you might be making 20–30 separate network write calls in sequence. Graph databases also typically use ACID transactions with locking to maintain consistency — so while you're updating the ancestor chain, those nodes might be locked and unavailable for reads. Your 500,000 reads per second suddenly start hitting locks. This is precisely the problem the batch rebuild approach was designed to avoid.
+
+---
+
+## So When Would a Graph Database Actually Make Sense Here?
+
+There is one legitimate use case for a graph database adjacent to autocomplete — **query relationship modeling** for advanced suggestion features. Imagine you want to suggest not just completions but *related* queries. If someone searches "python tutorial", you might want to also surface "python for beginners", "learn python free", and "django tutorial" — queries that aren't prefix matches but are semantically related based on how real users navigate between searches. Modeling which queries co-occur in the same user session, and finding clusters of related queries, is exactly the kind of graph traversal problem that Neo4j would excel at. This would feed into the re-ranking layer as an additional signal, not replace the Trie.
+
+---
+
+## The Unified Principle Behind All Three Answers
+
+You've now asked about DynamoDB, Redis, and graph databases, and the answer to all three points at the same underlying principle. **The Trie must live in local process memory because the traversal requires sequential dependent pointer following, and any network boundary in that chain multiplies latency by a factor of 10,000.** No database — regardless of how clever its internal data structures are — can eliminate the physics of sending packets between machines. The only way to make pointer traversal fast is to keep all the pointers in the same memory space as the code that follows them.
+
+A useful way to remember this: the question isn't "which database is best for storing a Trie?" The question is "does this component need a database at all?" Sometimes the answer is no — the data structure should live directly in your application's memory, managed by your application's code, with no storage middleware in between. That answer feels uncomfortable because we're trained to reach for databases, but for read-heavy, latency-critical, pointer-traversal-heavy structures, it's the right call.
