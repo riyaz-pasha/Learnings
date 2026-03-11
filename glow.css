@@ -1,0 +1,37 @@
+body {
+  background-color: #0f1117;
+  color: #e6edf3;
+  font-family: "JetBrains Mono", monospace;
+}
+
+h1 {
+  color: #ff7b72;
+  border-bottom: 1px solid #30363d;
+}
+
+h2 {
+  color: #79c0ff;
+}
+
+h3 {
+  color: #d2a8ff;
+}
+
+code {
+  background: #161b22;
+  color: #f8f8f2;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+pre {
+  background: #161b22;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+blockquote {
+  border-left: 4px solid #f2cc60;
+  padding-left: 12px;
+  color: #9da5b4;
+}

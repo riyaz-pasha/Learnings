@@ -1,0 +1,75 @@
+{
+    "colorful-markdown.styles": {
+        "heading": {
+            "color": "#f3bb7a",
+            "fontweight": "700",
+            "borderRadius": "3px",
+            "outline": "1px solid #3f4657"
+        },
+        "heading1": {
+            "color": "#ffbe7a",
+            "fontweight": "820"
+        },
+        "heading2": {
+            "color": "#fdbd79",
+            "fontweight": "800"
+        },
+        "heading3": {
+            "color": "#f7bc78",
+            "fontweight": "780"
+        },
+        "heading4": {
+            "color": "#f2bb77",
+            "fontweight": "760"
+        },
+        "heading5": {
+            "color": "#ecba76",
+            "fontweight": "740"
+        },
+        "heading6": {
+            "color": "#e6b975",
+            "fontweight": "720"
+        },
+        "blockquote": {
+            "background": "#2a3342",
+            "color": "#7fb7c5",
+            "borderRadius": "4px",
+            "before": {
+                "contentText": "|",
+                "color": "#7fb7c5cc"
+            }
+        },
+        "list": {
+            "color": "#d19a66"
+        },
+        "bold": {
+            "color": "#ff7a90",
+            "fontweight": "700"
+        },
+        "italic": {
+            "color": "#98c379",
+            "decoration": "underline dotted #98c37966",
+            "fontstyle": "italic"
+        },
+        "strikethrough": {
+            "color": "#f7768e",
+            "decoration": "line-through"
+        },
+        "link": {
+            "color": "#61afef",
+            "decoration": "underline"
+        },
+        "inlineCode": {
+            "background": "#2b313f",
+            "color": "#e5c07b",
+            "fontweight": "600",
+            "border": "1px solid #434c5e",
+            "borderRadius": "4px"
+        },
+        "codeFence": {
+            "background": "#1f2430",
+            "color": "#c8d3f5",
+            "border": "1px solid #434c5e"
+        }
+    }
+}
