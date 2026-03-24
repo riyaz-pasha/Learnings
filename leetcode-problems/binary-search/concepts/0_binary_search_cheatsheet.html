@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Search — Interview Cheat Sheet</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #10141c;
+    --surface2: #161b26;
+    --border: #1e2535;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --accent3: #f59e0b;
+    --accent4: #10b981;
+    --accent5: #f43f5e;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --code-bg: #0d111a;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .wrapper { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* ─── HEADER ─── */
+  .hero {
+    text-align: center;
+    padding: 60px 0 48px;
+    position: relative;
+  }
+  .hero::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+    margin-top: 40px;
+  }
+  .hero-tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-transform: uppercase;
+    border: 1px solid rgba(0,229,255,0.3);
+    padding: 4px 14px;
+    border-radius: 2px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: clamp(36px, 6vw, 72px);
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1;
+    background: linear-gradient(135deg, #fff 30%, var(--accent) 70%, var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 16px;
+  }
+  .hero-sub {
+    color: var(--muted);
+    font-size: 15px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  /* ─── NAV PILLS ─── */
+  .nav-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 32px 0 0;
+  }
+  .nav-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+    text-decoration: none;
+  }
+  .nav-pill:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ─── SECTION WRAPPER ─── */
+  .section {
+    margin-top: 56px;
+    scroll-margin-top: 80px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .section-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    opacity: 0.6;
+    min-width: 28px;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #fff;
+  }
+  .section-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ─── CARDS ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .card.cyan::before { background: var(--accent); }
+  .card.purple::before { background: var(--accent2); }
+  .card.amber::before { background: var(--accent3); }
+  .card.green::before { background: var(--accent4); }
+  .card.rose::before { background: var(--accent5); }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+
+  /* ─── CODE BLOCKS ─── */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    position: relative;
+  }
+  .code-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .kw { color: #c792ea; }
+  .fn { color: #82aaff; }
+  .str { color: #c3e88d; }
+  .num { color: #f78c6c; }
+  .cm { color: #546e7a; font-style: italic; }
+  .var { color: #eeffff; }
+  .op { color: var(--accent); }
+  .ret { color: var(--accent5); }
+  .dec { color: var(--accent3); }
+  .cls { color: #ffcb6b; }
+
+  /* ─── TABLES ─── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(30,37,53,0.6);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(0,229,255,0.03); }
+
+  /* ─── BADGES ─── */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .badge-cyan { background: rgba(0,229,255,0.1); color: var(--accent); border: 1px solid rgba(0,229,255,0.2); }
+  .badge-purple { background: rgba(124,58,237,0.12); color: #a78bfa; border: 1px solid rgba(124,58,237,0.25); }
+  .badge-amber { background: rgba(245,158,11,0.1); color: var(--accent3); border: 1px solid rgba(245,158,11,0.2); }
+  .badge-green { background: rgba(16,185,129,0.1); color: var(--accent4); border: 1px solid rgba(16,185,129,0.2); }
+  .badge-rose { background: rgba(244,63,94,0.1); color: var(--accent5); border: 1px solid rgba(244,63,94,0.2); }
+
+  /* ─── ALERT BOXES ─── */
+  .alert {
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 13.5px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-top: 12px;
+  }
+  .alert-icon { font-size: 16px; margin-top: 1px; flex-shrink: 0; }
+  .alert-danger { background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2); }
+  .alert-warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); }
+  .alert-info { background: rgba(0,229,255,0.06); border: 1px solid rgba(0,229,255,0.15); }
+  .alert-success { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); }
+
+  /* ─── PATTERN CARDS ─── */
+  .pattern-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+  .pattern-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .pattern-card h4 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pattern-card p { font-size: 13px; color: var(--muted); line-height: 1.65; }
+  .pattern-card ul { list-style: none; margin-top: 8px; }
+  .pattern-card ul li {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+    padding: 3px 0;
+  }
+  .pattern-card ul li::before { content: '→ '; color: var(--accent); }
+
+  /* ─── CUE PILLS ─── */
+  .cue-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .cue-pill {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+    transition: border-color 0.2s;
+  }
+  .cue-pill span { color: var(--accent3); margin-right: 4px; }
+  .cue-pill:hover { border-color: var(--accent3); }
+
+  /* ─── COMPLEXITY BOX ─── */
+  .complexity-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .complexity-row:last-child { border-bottom: none; }
+  .complexity-label { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .complexity-val { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+
+  /* ─── STEP FLOW ─── */
+  .steps { list-style: none; counter-reset: step; }
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .steps li:last-child { border-bottom: none; }
+  .steps li::before {
+    content: counter(step);
+    min-width: 28px; height: 28px;
+    background: rgba(0,229,255,0.1);
+    border: 1px solid rgba(0,229,255,0.3);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .steps li strong { color: #fff; display: block; margin-bottom: 3px; }
+
+  /* ─── PROBLEM TABLE ─── */
+  .diff-easy { color: var(--accent4); }
+  .diff-med { color: var(--accent3); }
+  .diff-hard { color: var(--accent5); }
+
+  h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  p { font-size: 14px; color: var(--muted); line-height: 1.7; }
+  strong { color: var(--text); }
+
+  .inline-code {
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(0,229,255,0.08);
+    color: var(--accent);
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* scroll */
+  html { scroll-behavior: smooth; }
+
+  /* ─── DECISION TREE ─── */
+  .tree { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 2; }
+  .tree-node { padding: 6px 14px; border-radius: 6px; display: inline-block; margin: 2px 0; }
+  .tree-q { background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3); color: #a78bfa; }
+  .tree-a { background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.2); color: var(--accent); }
+  .tree-line { color: var(--muted); margin: 0 8px; }
+
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+<!-- ═══ HERO ═══ -->
+<div class="hero">
+  <div class="hero-tag">Interview Cheat Sheet</div>
+  <h1>Binary Search</h1>
+  <p class="hero-sub">// Every pattern · Every template · Every edge case — one page</p>
+  <div class="nav-pills">
+    <a class="nav-pill" href="#fundamentals">Fundamentals</a>
+    <a class="nav-pill" href="#templates">3 Templates</a>
+    <a class="nav-pill" href="#invariants">Loop Invariants</a>
+    <a class="nav-pill" href="#patterns">Patterns</a>
+    <a class="nav-pill" href="#variants">All Variants</a>
+    <a class="nav-pill" href="#mistakes">Gotchas</a>
+    <a class="nav-pill" href="#cues">Recognition Cues</a>
+    <a class="nav-pill" href="#bs-on-answer">BS on Answer</a>
+    <a class="nav-pill" href="#problems">Problem Bank</a>
+  </div>
+</div>
+
+<!-- ═══ 1. FUNDAMENTALS ═══ -->
+<div class="section" id="fundamentals">
+  <div class="section-header">
+    <span class="section-num">01</span>
+    <h2>Fundamentals & Mental Model</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card cyan">
+      <h3>What Is Binary Search?</h3>
+      <p>A divide-and-conquer strategy that repeatedly halves a search space. Works on any <strong>monotone predicate</strong> — not just sorted arrays. The core idea:</p>
+      <div class="alert alert-info" style="margin-top:14px;">
+        <span class="alert-icon">💡</span>
+        <div>At every step, you <strong>eliminate half</strong> of the remaining candidates with certainty. You never revisit eliminated space. This gives O(log n) time.</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="complexity-row"><span class="complexity-label">Time</span><span class="complexity-val" style="color:var(--accent4)">O(log n)</span></div>
+        <div class="complexity-row"><span class="complexity-label">Space</span><span class="complexity-val" style="color:var(--accent4)">O(1) iterative · O(log n) recursive</span></div>
+        <div class="complexity-row"><span class="complexity-label">Iterations max</span><span class="complexity-val" style="color:var(--accent3)">⌈log₂(n)⌉ ≈ 30 for n=10⁹</span></div>
+      </div>
+    </div>
+
+    <div class="card purple">
+      <h3>The Two Core Questions</h3>
+      <p style="margin-bottom:12px;">Before writing code, answer:</p>
+      <ol style="list-style:none;display:flex;flex-direction:column;gap:12px;">
+        <li style="display:flex;gap:12px;align-items:flex-start;">
+          <span class="badge badge-purple">Q1</span>
+          <div><strong>What is my search space?</strong><br><span style="font-size:13px;color:var(--muted)">Indices [lo..hi] into array? Or a value range [min_val..max_val]? Know this before lo/hi setup.</span></div>
+        </li>
+        <li style="display:flex;gap:12px;align-items:flex-start;">
+          <span class="badge badge-purple">Q2</span>
+          <div><strong>What is my predicate?</strong><br><span style="font-size:13px;color:var(--muted)">A boolean function f(x) such that the space looks like [F,F,F,...,T,T,T]. You want the boundary.</span></div>
+        </li>
+      </ol>
+      <div class="alert alert-info" style="margin-top:14px;">
+        <span class="alert-icon">🎯</span>
+        <div>Every binary search is finding where a predicate flips from <span class="inline-code">False</span> → <span class="inline-code">True</span> (or <span class="inline-code">True</span> → <span class="inline-code">False</span>).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card amber" style="margin-top:16px;">
+    <h3>Prerequisites / Applicability Checklist</h3>
+    <div class="grid-3" style="margin-top:8px;">
+      <div>
+        <p style="font-weight:700;color:#fff;font-size:13px;margin-bottom:8px;">✅ You CAN use BS when:</p>
+        <ul class="pattern-card" style="background:none;border:none;padding:0;"><ul>
+          <li>Array is sorted (ascending or descending)</li>
+          <li>Search space has a monotone property</li>
+          <li>Function feasible(x) is monotone</li>
+          <li>You can define lo/hi bounds clearly</li>
+          <li>"Find min X such that condition holds"</li>
+          <li>Rotated sorted array (with adaptation)</li>
+        </ul></ul>
+      </div>
+      <div>
+        <p style="font-weight:700;color:#fff;font-size:13px;margin-bottom:8px;">❌ BS does NOT work when:</p>
+        <ul class="pattern-card" style="background:none;border:none;padding:0;"><ul>
+          <li>Array is unsorted (no monotonicity)</li>
+          <li>Multiple separate valid ranges</li>
+          <li>Predicate is not monotone (oscillates)</li>
+          <li>You need all occurrences (use BS + expand)</li>
+        </ul></ul>
+      </div>
+      <div>
+        <p style="font-weight:700;color:#fff;font-size:13px;margin-bottom:8px;">⚠️ Handle carefully:</p>
+        <ul class="pattern-card" style="background:none;border:none;padding:0;"><ul>
+          <li>Integer overflow in mid computation</li>
+          <li>lo/hi initialization (in-bounds vs sentinel)</li>
+          <li>Inclusive vs exclusive boundaries</li>
+          <li>Off-by-one in the return value</li>
+          <li>Empty arrays → lo &gt; hi on entry</li>
+        </ul></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 2. THREE TEMPLATES ═══ -->
+<div class="section" id="templates">
+  <div class="section-header">
+    <span class="section-num">02</span>
+    <h2>The 3 Templates (Memorise These)</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="alert alert-warn" style="margin-bottom:20px;">
+    <span class="alert-icon">⚡</span>
+    <div>Pick <strong>ONE</strong> template and master it. Template 1 (closed interval) is the most versatile and recommended for interviews. Templates 2 & 3 are for specific boundary-finding patterns.</div>
+  </div>
+
+  <!-- Template 1 -->
+  <div class="card cyan" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin-bottom:0;">Template 1 — Exact Match / Closed Interval [lo, hi]</h3>
+      <span class="badge badge-cyan">RECOMMENDED</span>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="code-label">Python</div>
+        <pre><span class="kw">def</span> <span class="fn">binary_search</span>(<span class="var">nums</span>, <span class="var">target</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>) <span class="op">-</span> <span class="num">1</span>   <span class="cm"># both INCLUSIVE</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;=</span> <span class="var">hi</span>:              <span class="cm"># ≤ (processes single element)</span>
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>  <span class="cm"># no overflow</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">==</span> <span class="var">target</span>:
+            <span class="kw">return</span> <span class="var">mid</span>
+        <span class="kw">elif</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">target</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>             <span class="cm"># mid ruled out</span>
+        <span class="kw">else</span>:
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>             <span class="cm"># mid ruled out</span>
+    <span class="kw">return</span> <span class="op">-</span><span class="num">1</span>                       <span class="cm"># not found</span></pre>
+      </div>
+      <div>
+        <div class="code-label">Java / C++</div>
+        <pre><span class="kw">int</span> <span class="fn">binarySearch</span>(<span class="kw">int</span>[] <span class="var">nums</span>, <span class="kw">int</span> <span class="var">target</span>) {
+    <span class="kw">int</span> <span class="var">lo</span> <span class="op">=</span> <span class="num">0</span>, <span class="var">hi</span> <span class="op">=</span> <span class="var">nums</span>.<span class="var">length</span> <span class="op">-</span> <span class="num">1</span>;
+    <span class="kw">while</span> (<span class="var">lo</span> <span class="op">&lt;=</span> <span class="var">hi</span>) {
+        <span class="cm">// Use unsigned right shift to avoid overflow</span>
+        <span class="kw">int</span> <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">/</span> <span class="num">2</span>;
+        <span class="cm">// OR: int mid = (lo + hi) >>> 1; (Java)</span>
+        <span class="kw">if</span> (<span class="var">nums</span>[<span class="var">mid</span>] <span class="op">==</span> <span class="var">target</span>) <span class="kw">return</span> <span class="var">mid</span>;
+        <span class="kw">if</span> (<span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">target</span>) <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>;
+        <span class="kw">else</span> <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>;
+    }
+    <span class="kw">return</span> <span class="op">-</span><span class="num">1</span>;
+}</pre>
+      </div>
+    </div>
+    <div class="alert alert-success" style="margin-top:12px;">
+      <span class="alert-icon">✅</span>
+      <div><strong>Key invariant:</strong> At exit (lo &gt; hi), every element in [0..lo-1] is &lt; target, every element in [hi+1..n-1] is &gt; target. Loop terminates because search space shrinks every iteration (mid ± 1 always).</div>
+    </div>
+  </div>
+
+  <!-- Template 2 -->
+  <div class="card purple" style="margin-bottom:16px;">
+    <h3>Template 2 — Find First True / Left Boundary [lo, hi) — half-open</h3>
+    <p style="margin-bottom:14px;font-size:13px;">hi starts at <strong>n</strong> (one past end). Loop condition is <span class="inline-code">lo &lt; hi</span>. At exit, lo == hi == first index where predicate is True. If no True, lo == n.</p>
+    <div class="two-col">
+      <div>
+        <div class="code-label">Python — bisect_left equivalent</div>
+        <pre><span class="kw">def</span> <span class="fn">lower_bound</span>(<span class="var">nums</span>, <span class="var">target</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>)  <span class="cm"># hi = n (exclusive)</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:           <span class="cm"># strict &lt;</span>
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">target</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+        <span class="kw">else</span>:               <span class="cm"># nums[mid] >= target</span>
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>        <span class="cm"># keep mid as candidate</span>
+    <span class="kw">return</span> <span class="var">lo</span>              <span class="cm"># first index where nums[i] >= target</span></pre>
+      </div>
+      <div>
+        <div class="code-label">General Predicate Form</div>
+        <pre><span class="kw">def</span> <span class="fn">first_true</span>(<span class="var">lo</span>, <span class="var">hi</span>, <span class="var">predicate</span>):
+    <span class="cm"># finds first x in [lo,hi] where pred(x) is True</span>
+    <span class="cm"># pred must be: F,F,...,T,T,T</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">predicate</span>(<span class="var">mid</span>):
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>    <span class="cm"># could be answer, look left</span>
+        <span class="kw">else</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>  <span class="cm"># not answer, discard</span>
+    <span class="kw">return</span> <span class="var">lo</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Template 3 -->
+  <div class="card amber">
+    <h3>Template 3 — Find Last True / Right Boundary</h3>
+    <p style="margin-bottom:14px;font-size:13px;">hi starts at n-1 (inclusive). At exit, lo == hi == last index where predicate is True. Tricky: mid must bias toward hi to avoid infinite loop. Use <strong>mid = lo + (hi - lo + 1) // 2</strong> (ceiling division).</p>
+    <div class="two-col">
+      <div>
+        <div class="code-label">Python — bisect_right equivalent</div>
+        <pre><span class="kw">def</span> <span class="fn">upper_bound</span>(<span class="var">nums</span>, <span class="var">target</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>) <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="cm"># ceiling mid — prevents infinite loop!</span>
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span> <span class="op">+</span> <span class="num">1</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;=</span> <span class="var">target</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span>      <span class="cm"># keep mid as candidate</span>
+        <span class="kw">else</span>:
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span>              <span class="cm"># last index where nums[i] <= target</span></pre>
+      </div>
+      <div>
+        <div class="code-label">General Last-True Form</div>
+        <pre><span class="kw">def</span> <span class="fn">last_true</span>(<span class="var">lo</span>, <span class="var">hi</span>, <span class="var">predicate</span>):
+    <span class="cm"># pred must be: T,T,...,F,F</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="cm"># ⚠️ ceiling mid is CRITICAL here</span>
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span> <span class="op">+</span> <span class="num">1</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">predicate</span>(<span class="var">mid</span>):
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span>    <span class="cm"># keep mid as candidate</span>
+        <span class="kw">else</span>:
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span></pre>
+      </div>
+    </div>
+    <div class="alert alert-danger" style="margin-top:12px;">
+      <span class="alert-icon">🔥</span>
+      <div><strong>Why ceiling mid for right boundary?</strong> When lo=4, hi=5: floor mid=4. If predicate(4)=True → lo=4, hi=5 unchanged → INFINITE LOOP. Ceiling mid=5 always advances lo or shrinks hi.</div>
+    </div>
+  </div>
+
+  <!-- Template comparison table -->
+  <div class="card" style="margin-top:16px;">
+    <h3>Template Decision Table</h3>
+    <table>
+      <thead><tr><th>Goal</th><th>hi init</th><th>Loop</th><th>mid bias</th><th>Return</th><th>Use case</th></tr></thead>
+      <tbody>
+        <tr><td>Exact match</td><td><span class="inline-code">n-1</span></td><td><span class="inline-code">lo ≤ hi</span></td><td>floor</td><td><span class="inline-code">-1</span> or mid</td><td>Classic search</td></tr>
+        <tr><td>First ≥ target (lower_bound)</td><td><span class="inline-code">n</span></td><td><span class="inline-code">lo &lt; hi</span></td><td>floor</td><td><span class="inline-code">lo</span></td><td>bisect_left</td></tr>
+        <tr><td>First &gt; target (upper_bound)</td><td><span class="inline-code">n</span></td><td><span class="inline-code">lo &lt; hi</span></td><td>floor</td><td><span class="inline-code">lo</span></td><td>bisect_right</td></tr>
+        <tr><td>Last ≤ target</td><td><span class="inline-code">n-1</span></td><td><span class="inline-code">lo &lt; hi</span></td><td>ceiling ⚠️</td><td><span class="inline-code">lo</span></td><td>right boundary</td></tr>
+        <tr><td>First True (predicate)</td><td><span class="inline-code">n</span></td><td><span class="inline-code">lo &lt; hi</span></td><td>floor</td><td><span class="inline-code">lo</span></td><td>BS on answer</td></tr>
+        <tr><td>Last True (predicate)</td><td><span class="inline-code">n-1</span></td><td><span class="inline-code">lo &lt; hi</span></td><td>ceiling ⚠️</td><td><span class="inline-code">lo</span></td><td>Max feasible value</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 3. LOOP INVARIANTS ═══ -->
+<div class="section" id="invariants">
+  <div class="section-header">
+    <span class="section-num">03</span>
+    <h2>Loop Invariants & Termination Proofs</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card cyan">
+      <h3>Invariant for Template 1 (lo ≤ hi)</h3>
+      <ul class="steps" style="font-size:13px;">
+        <li><strong>Before loop:</strong> target ∈ nums[lo..hi] if it exists</li>
+        <li><strong>Each iteration:</strong> mid divides [lo,hi] into [lo,mid-1], mid, [mid+1,hi]</li>
+        <li><strong>Update lo=mid+1:</strong> target ∉ [lo..mid] → narrows down</li>
+        <li><strong>Update hi=mid-1:</strong> target ∉ [mid..hi] → narrows down</li>
+        <li><strong>Termination:</strong> lo &gt; hi means empty interval — target absent</li>
+      </ul>
+      <div class="alert alert-info" style="margin-top:14px;">
+        <span class="alert-icon">📐</span>
+        <div>Search space shrinks by at least 1 every iteration (mid ± 1). So terminates in at most log₂(n+1) steps.</div>
+      </div>
+    </div>
+    <div class="card purple">
+      <h3>Invariant for Templates 2 & 3 (lo &lt; hi)</h3>
+      <ul class="steps" style="font-size:13px;">
+        <li><strong>Invariant:</strong> answer ∈ [lo, hi] always</li>
+        <li><strong>Template 2:</strong> first True ∈ [lo, hi]. When pred(mid)=True: hi=mid (answer could be mid). When False: lo=mid+1 (mid is not answer)</li>
+        <li><strong>Template 3:</strong> last True ∈ [lo, hi]. When pred(mid)=True: lo=mid (mid could be answer). When False: hi=mid-1</li>
+        <li><strong>Termination:</strong> lo==hi → exactly one candidate left</li>
+        <li><strong>Why ceil for T3:</strong> lo=mid with floor would stall when hi=lo+1</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card amber" style="margin-top:16px;">
+    <h3>Mid Calculation Deep Dive</h3>
+    <div class="two-col">
+      <div>
+        <pre><span class="cm"># ❌ WRONG — integer overflow in Java/C++</span>
+<span class="var">mid</span> <span class="op">=</span> (<span class="var">lo</span> <span class="op">+</span> <span class="var">hi</span>) <span class="op">//</span> <span class="num">2</span>
+<span class="cm"># If lo=hi=2^31-1, lo+hi overflows 32-bit int!</span>
+
+<span class="cm"># ✅ CORRECT — no overflow</span>
+<span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>      <span class="cm"># floor (default)</span>
+<span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span> <span class="op">+</span> <span class="num">1</span>) <span class="op">//</span> <span class="num">2</span>  <span class="cm"># ceiling</span>
+
+<span class="cm"># Java only — unsigned right shift:</span>
+<span class="cm">// int mid = (lo + hi) >>> 1;  // safe even with overflow</span>
+
+<span class="cm"># Python — no overflow (arbitrary precision), but</span>
+<span class="cm"># still best practice to use lo + (hi-lo)//2</span></pre>
+      </div>
+      <div>
+        <pre><span class="cm"># Summary of floor vs ceiling bias:</span>
+<span class="cm">#</span>
+<span class="cm"># floor(lo=0, hi=1) → mid=0  (biased left)</span>
+<span class="cm"># ceil (lo=0, hi=1) → mid=1  (biased right)</span>
+<span class="cm">#</span>
+<span class="cm"># Template 2 (lo=mid+1 or hi=mid):</span>
+<span class="cm">#   floor is SAFE because lo=mid+1 always advances</span>
+<span class="cm">#</span>
+<span class="cm"># Template 3 (lo=mid or hi=mid-1):</span>
+<span class="cm">#   floor causes INFINITE LOOP when lo+1==hi</span>
+<span class="cm">#   because lo=mid=lo, nothing changes!</span>
+<span class="cm">#   ceiling REQUIRED → mid=hi, lo advances to hi</span></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 4. ALL VARIANTS ═══ -->
+<div class="section" id="variants">
+  <div class="section-header">
+    <span class="section-num">04</span>
+    <h2>All Variants with Code</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <!-- 4.1 First / Last occurrence -->
+  <div class="card cyan" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin-bottom:0;">4.1 First & Last Occurrence (Search Range)</h3>
+      <span class="badge badge-cyan">LC 34</span>
+    </div>
+    <pre><span class="kw">def</span> <span class="fn">search_range</span>(<span class="var">nums</span>, <span class="var">target</span>):
+    <span class="kw">def</span> <span class="fn">first</span>():
+        <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>)
+        <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+            <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+            <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">target</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+            <span class="kw">else</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">return</span> <span class="var">lo</span> <span class="kw">if</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="fn">len</span>(<span class="var">nums</span>) <span class="kw">and</span> <span class="var">nums</span>[<span class="var">lo</span>] <span class="op">==</span> <span class="var">target</span> <span class="kw">else</span> <span class="op">-</span><span class="num">1</span>
+
+    <span class="kw">def</span> <span class="fn">last</span>():
+        <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>)
+        <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+            <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+            <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;=</span> <span class="var">target</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>  <span class="cm"># ≤ (not just <)</span>
+            <span class="kw">else</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">return</span> <span class="var">lo</span> <span class="op">-</span> <span class="num">1</span> <span class="kw">if</span> <span class="var">lo</span> <span class="op">&gt;</span> <span class="num">0</span> <span class="kw">and</span> <span class="var">nums</span>[<span class="var">lo</span><span class="op">-</span><span class="num">1</span>] <span class="op">==</span> <span class="var">target</span> <span class="kw">else</span> <span class="op">-</span><span class="num">1</span>
+
+    <span class="kw">return</span> [<span class="fn">first</span>(), <span class="fn">last</span>()]
+
+<span class="cm"># Python shortcut using bisect:</span>
+<span class="kw">import</span> <span class="cls">bisect</span>
+<span class="var">left</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">nums</span>, <span class="var">target</span>)
+<span class="var">right</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_right</span>(<span class="var">nums</span>, <span class="var">target</span>) <span class="op">-</span> <span class="num">1</span>
+<span class="cm"># Validate: nums[left]==target (else target absent)</span></pre>
+  </div>
+
+  <!-- 4.2 Rotated sorted array -->
+  <div class="card purple" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin-bottom:0;">4.2 Search in Rotated Sorted Array</h3>
+      <div style="display:flex;gap:8px;"><span class="badge badge-purple">LC 33</span><span class="badge badge-purple">LC 81 (dups)</span></div>
+    </div>
+    <p style="margin-bottom:14px;font-size:13px;">Key insight: <strong>one half is always sorted</strong> after any rotation. Check which half is sorted, then determine if target lies in that sorted half.</p>
+    <pre><span class="kw">def</span> <span class="fn">search</span>(<span class="var">nums</span>, <span class="var">target</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>) <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;=</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">==</span> <span class="var">target</span>: <span class="kw">return</span> <span class="var">mid</span>
+
+        <span class="cm"># Is LEFT half sorted?</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">lo</span>] <span class="op">&lt;=</span> <span class="var">nums</span>[<span class="var">mid</span>]:  <span class="cm"># ≤ handles duplicates</span>
+            <span class="cm"># Target in left sorted range?</span>
+            <span class="kw">if</span> <span class="var">nums</span>[<span class="var">lo</span>] <span class="op">&lt;=</span> <span class="var">target</span> <span class="op">&lt;</span> <span class="var">nums</span>[<span class="var">mid</span>]:
+                <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+            <span class="kw">else</span>:
+                <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+        <span class="kw">else</span>:  <span class="cm"># RIGHT half is sorted</span>
+            <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">target</span> <span class="op">&lt;=</span> <span class="var">nums</span>[<span class="var">hi</span>]:
+                <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+            <span class="kw">else</span>:
+                <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="op">-</span><span class="num">1</span>
+
+<span class="cm"># LC 81 (with duplicates): add edge case at start of loop:</span>
+<span class="cm"># if nums[lo] == nums[mid] == nums[hi]: lo++; hi-- → O(n) worst case</span></pre>
+    <div class="alert alert-warn" style="margin-top:12px;">
+      <span class="alert-icon">⚠️</span>
+      <div><strong>Find Rotation Index:</strong> Find the index of the minimum element using BS on answer — predicate: nums[mid] &lt; nums[0].</div>
+    </div>
+  </div>
+
+  <!-- 4.3 Peak finding -->
+  <div class="card amber" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin-bottom:0;">4.3 Find Peak Element</h3>
+      <span class="badge badge-amber">LC 162</span>
+    </div>
+    <p style="margin-bottom:12px;font-size:13px;">A peak is where nums[i] &gt; nums[i-1] and nums[i] &gt; nums[i+1]. Treat nums[-1]=nums[n]=-∞.</p>
+    <pre><span class="kw">def</span> <span class="fn">findPeakElement</span>(<span class="var">nums</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">nums</span>) <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">nums</span>[<span class="var">mid</span>] <span class="op">&lt;</span> <span class="var">nums</span>[<span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>]:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>  <span class="cm"># ascending → peak is to the right</span>
+        <span class="kw">else</span>:
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>      <span class="cm"># descending/equal → peak is here or left</span>
+    <span class="kw">return</span> <span class="var">lo</span>
+
+<span class="cm"># Why this works: if nums[mid] < nums[mid+1], the right slope guarantees</span>
+<span class="cm"># at least one peak exists to the right (boundary is -∞). Symmetric logic for left.</span></pre>
+  </div>
+
+  <!-- 4.4 2D matrix -->
+  <div class="card green" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin-bottom:0;">4.4 Search a 2D Matrix</h3>
+      <div style="display:flex;gap:8px;"><span class="badge badge-green">LC 74</span><span class="badge badge-green">LC 240</span></div>
+    </div>
+    <div class="two-col">
+      <div>
+        <p style="font-size:13px;margin-bottom:10px;"><strong>LC 74</strong> — Row-major sorted (last of row &lt; first of next). Treat as 1D array:</p>
+        <pre><span class="kw">def</span> <span class="fn">searchMatrix</span>(<span class="var">matrix</span>, <span class="var">target</span>):
+    <span class="var">m</span>, <span class="var">n</span> <span class="op">=</span> <span class="fn">len</span>(<span class="var">matrix</span>), <span class="fn">len</span>(<span class="var">matrix</span>[<span class="num">0</span>])
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="var">m</span> <span class="op">*</span> <span class="var">n</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;=</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="cm"># Convert 1D index to 2D</span>
+        <span class="var">val</span> <span class="op">=</span> <span class="var">matrix</span>[<span class="var">mid</span> <span class="op">//</span> <span class="var">n</span>][<span class="var">mid</span> <span class="op">%</span> <span class="var">n</span>]
+        <span class="kw">if</span> <span class="var">val</span> <span class="op">==</span> <span class="var">target</span>: <span class="kw">return</span> <span class="kw">True</span>
+        <span class="kw">if</span> <span class="var">val</span> <span class="op">&lt;</span> <span class="var">target</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+        <span class="kw">else</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="kw">False</span></pre>
+      </div>
+      <div>
+        <p style="font-size:13px;margin-bottom:10px;"><strong>LC 240</strong> — Each row & col sorted. Start top-right:</p>
+        <pre><span class="kw">def</span> <span class="fn">searchMatrix240</span>(<span class="var">matrix</span>, <span class="var">target</span>):
+    <span class="kw">if not</span> <span class="var">matrix</span>: <span class="kw">return</span> <span class="kw">False</span>
+    <span class="var">r</span>, <span class="var">c</span> <span class="op">=</span> <span class="num">0</span>, <span class="fn">len</span>(<span class="var">matrix</span>[<span class="num">0</span>]) <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">while</span> <span class="var">r</span> <span class="op">&lt;</span> <span class="fn">len</span>(<span class="var">matrix</span>) <span class="kw">and</span> <span class="var">c</span> <span class="op">&gt;=</span> <span class="num">0</span>:
+        <span class="kw">if</span> <span class="var">matrix</span>[<span class="var">r</span>][<span class="var">c</span>] <span class="op">==</span> <span class="var">target</span>:
+            <span class="kw">return</span> <span class="kw">True</span>
+        <span class="kw">elif</span> <span class="var">matrix</span>[<span class="var">r</span>][<span class="var">c</span>] <span class="op">&gt;</span> <span class="var">target</span>:
+            <span class="var">c</span> <span class="op">-=</span> <span class="num">1</span>   <span class="cm"># eliminate column</span>
+        <span class="kw">else</span>:
+            <span class="var">r</span> <span class="op">+=</span> <span class="num">1</span>   <span class="cm"># eliminate row</span>
+    <span class="kw">return</span> <span class="kw">False</span>
+<span class="cm"># O(m+n) — not BS but same elimination logic</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4.5 Square root -->
+  <div class="card rose" style="margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin-bottom:0;">4.5 Integer Square Root / nth Root</h3>
+      <span class="badge badge-rose">LC 69</span>
+    </div>
+    <pre><span class="kw">def</span> <span class="fn">mySqrt</span>(<span class="var">x</span>):
+    <span class="kw">if</span> <span class="var">x</span> <span class="op">&lt;</span> <span class="num">2</span>: <span class="kw">return</span> <span class="var">x</span>
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">1</span>, <span class="var">x</span> <span class="op">//</span> <span class="num">2</span>          <span class="cm"># sqrt(x) ≤ x//2 for x≥4</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span> <span class="op">+</span> <span class="num">1</span>) <span class="op">//</span> <span class="num">2</span>  <span class="cm"># ceiling — finding LAST True</span>
+        <span class="kw">if</span> <span class="var">mid</span> <span class="op">*</span> <span class="var">mid</span> <span class="op">&lt;=</span> <span class="var">x</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">else</span>:
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">-</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span>
+<span class="cm"># Predicate: mid² ≤ x → find LAST True → ceiling mid template</span>
+
+<span class="cm"># Floating point sqrt (more precision):</span>
+<span class="kw">def</span> <span class="fn">mySqrtF</span>(<span class="var">x</span>, <span class="var">eps</span><span class="op">=</span><span class="num">1e-9</span>):
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0.0</span>, <span class="fn">max</span>(<span class="num">1.0</span>, <span class="fn">float</span>(<span class="var">x</span>))
+    <span class="kw">while</span> <span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span> <span class="op">&gt;</span> <span class="var">eps</span>:       <span class="cm"># terminate on precision</span>
+        <span class="var">mid</span> <span class="op">=</span> (<span class="var">lo</span> <span class="op">+</span> <span class="var">hi</span>) <span class="op">/</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="var">mid</span> <span class="op">*</span> <span class="var">mid</span> <span class="op">&lt;=</span> <span class="var">x</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">else</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+    <span class="kw">return</span> <span class="var">lo</span></pre>
+  </div>
+</div>
+
+<!-- ═══ 5. BS ON ANSWER ═══ -->
+<div class="section" id="bs-on-answer">
+  <div class="section-header">
+    <span class="section-num">05</span>
+    <h2>Binary Search on the Answer (Most Powerful Pattern)</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="alert alert-info" style="margin-bottom:20px;">
+    <span class="alert-icon">🚀</span>
+    <div><strong>The big idea:</strong> Instead of searching an array, search the answer space directly. Ask: "Is it possible to achieve answer ≤ X?" — if monotone (possible for X → possible for X+1), use BS to find the minimum feasible X.</div>
+  </div>
+
+  <div class="card cyan" style="margin-bottom:16px;">
+    <h3>Universal BS-on-Answer Template</h3>
+    <pre><span class="kw">def</span> <span class="fn">solve</span>(...):
+    <span class="kw">def</span> <span class="fn">feasible</span>(<span class="var">x</span>) <span class="op">-&gt;</span> <span class="fn">bool</span>:
+        <span class="cm"># Return True if answer x is achievable / condition holds</span>
+        <span class="cm"># This must be MONOTONE: if feasible(x) then feasible(x+1)</span>
+        ...
+
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="var">min_possible_answer</span>, <span class="var">max_possible_answer</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="fn">feasible</span>(<span class="var">mid</span>):
+            <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>        <span class="cm"># mid works, try smaller (find MINIMUM feasible)</span>
+        <span class="kw">else</span>:
+            <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>    <span class="cm"># mid too small, need larger</span>
+    <span class="kw">return</span> <span class="var">lo</span>  <span class="cm"># smallest x where feasible(x) is True</span>
+
+<span class="cm"># For MAXIMUM feasible x (find last True):</span>
+<span class="cm"># if feasible(mid): lo = mid (ceiling!) else: hi = mid - 1</span></pre>
+  </div>
+
+  <div class="grid-2">
+    <div class="card purple">
+      <h3>Example: Koko Eating Bananas (LC 875)</h3>
+      <pre><span class="kw">def</span> <span class="fn">minEatingSpeed</span>(<span class="var">piles</span>, <span class="var">h</span>):
+    <span class="kw">def</span> <span class="fn">feasible</span>(<span class="var">speed</span>):
+        <span class="kw">return</span> <span class="fn">sum</span>((<span class="var">p</span> <span class="op">-</span> <span class="num">1</span>) <span class="op">//</span> <span class="var">speed</span> <span class="op">+</span> <span class="num">1</span> <span class="kw">for</span> <span class="var">p</span> <span class="kw">in</span> <span class="var">piles</span>) <span class="op">&lt;=</span> <span class="var">h</span>
+        <span class="cm"># ceiling division: math.ceil(p/speed)</span>
+
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">1</span>, <span class="fn">max</span>(<span class="var">piles</span>)
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="fn">feasible</span>(<span class="var">mid</span>): <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">else</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span></pre>
+    </div>
+    <div class="card amber">
+      <h3>Example: Split Array Largest Sum (LC 410)</h3>
+      <pre><span class="kw">def</span> <span class="fn">splitArray</span>(<span class="var">nums</span>, <span class="var">k</span>):
+    <span class="kw">def</span> <span class="fn">feasible</span>(<span class="var">limit</span>):
+        <span class="var">parts</span>, <span class="var">curr</span> <span class="op">=</span> <span class="num">1</span>, <span class="num">0</span>
+        <span class="kw">for</span> <span class="var">n</span> <span class="kw">in</span> <span class="var">nums</span>:
+            <span class="kw">if</span> <span class="var">curr</span> <span class="op">+</span> <span class="var">n</span> <span class="op">&gt;</span> <span class="var">limit</span>:
+                <span class="var">parts</span> <span class="op">+=</span> <span class="num">1</span>
+                <span class="var">curr</span> <span class="op">=</span> <span class="num">0</span>
+            <span class="var">curr</span> <span class="op">+=</span> <span class="var">n</span>
+        <span class="kw">return</span> <span class="var">parts</span> <span class="op">&lt;=</span> <span class="var">k</span>
+
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="fn">max</span>(<span class="var">nums</span>), <span class="fn">sum</span>(<span class="var">nums</span>)
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="fn">feasible</span>(<span class="var">mid</span>): <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">else</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span></pre>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>BS-on-Answer: lo/hi Initialization Guide</h3>
+    <table>
+      <thead><tr><th>Problem Type</th><th>lo</th><th>hi</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Speed / rate</td><td>1</td><td>max(array)</td><td>Minimum meaningful unit</td></tr>
+        <tr><td>Capacity / sum partition</td><td>max(array)</td><td>sum(array)</td><td>lo = minimum valid partition</td></tr>
+        <tr><td>Days / time</td><td>1</td><td>n * max(array)</td><td>Worst case</td></tr>
+        <tr><td>k-th smallest in matrix</td><td>matrix[0][0]</td><td>matrix[-1][-1]</td><td>Value range, not index</td></tr>
+        <tr><td>Integer sqrt</td><td>1</td><td>x // 2</td><td>Upper bound is tighter</td></tr>
+        <tr><td>Minimize max distance</td><td>0</td><td>max gap in sorted</td><td>Value range</td></tr>
+        <tr><td>Gas station / circular</td><td>0</td><td>total stations</td><td>Index range</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 6. PATTERNS ═══ -->
+<div class="section" id="patterns">
+  <div class="section-header">
+    <span class="section-num">06</span>
+    <h2>All Patterns Catalogue</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="pattern-grid">
+    <div class="pattern-card" style="border-top:2px solid var(--accent);">
+      <h4>🎯 Pattern 1: Classic Exact Search</h4>
+      <p>Sorted array, find value. Return index or -1.</p>
+      <ul>
+        <li>Template 1 (lo ≤ hi)</li>
+        <li>Standard 3-way branch</li>
+        <li>Used as sub-routine in harder problems</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent2);">
+      <h4>🔎 Pattern 2: Boundary Finding</h4>
+      <p>First/last occurrence, count of target, insertion position.</p>
+      <ul>
+        <li>bisect_left → first occurrence</li>
+        <li>bisect_right - 1 → last occurrence</li>
+        <li>count = bisect_right - bisect_left</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent3);">
+      <h4>🌀 Pattern 3: Rotated Array</h4>
+      <p>One half always sorted. Check which half, then check if target in that half.</p>
+      <ul>
+        <li>Find minimum in rotated</li>
+        <li>Search target in rotated</li>
+        <li>Rotation count = index of minimum</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent4);">
+      <h4>⛰️ Pattern 4: Peak Finding</h4>
+      <p>Unimodal array or bitonic. Go toward the rising slope.</p>
+      <ul>
+        <li>nums[mid] < nums[mid+1] → go right</li>
+        <li>Mountain array peak (LC 852)</li>
+        <li>Find in mountain array (LC 1095)</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent5);">
+      <h4>📊 Pattern 5: Binary Search on Answer</h4>
+      <p>Abstract search space. feasible(x) is monotone over answer values.</p>
+      <ul>
+        <li>Min speed / capacity / time</li>
+        <li>Max tasks with constraints</li>
+        <li>Kth smallest/largest problems</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent);">
+      <h4>🗺️ Pattern 6: 2D Binary Search</h4>
+      <p>Matrix with sorted rows or row-major order. Map to 1D or staircase elimination.</p>
+      <ul>
+        <li>LC 74: row-major → 1D index</li>
+        <li>LC 240: start top-right corner</li>
+        <li>Kth smallest in sorted matrix</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent2);">
+      <h4>🔢 Pattern 7: Numerical / Math BS</h4>
+      <p>Integer sqrt, nth root, power functions. Search over value range.</p>
+      <ul>
+        <li>Integer result → Last True template</li>
+        <li>Float result → epsilon termination</li>
+        <li>Overflow guard: use float or long</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent3);">
+      <h4>🎲 Pattern 8: Kth Element (BS + Count)</h4>
+      <p>Kth smallest in sorted matrix / merged lists. Count elements ≤ mid.</p>
+      <ul>
+        <li>predicate: count(≤ x) ≥ k</li>
+        <li>lo=min, hi=max of value range</li>
+        <li>Final answer is always in the array</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent4);">
+      <h4>📈 Pattern 9: Median of Two Sorted Arrays</h4>
+      <p>Partition both arrays. Binary search on partition index of smaller array.</p>
+      <ul>
+        <li>O(log(min(m,n))) time</li>
+        <li>Edge: partition at 0 or n → ±∞</li>
+        <li>LC 4 — hardest BS problem</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent5);">
+      <h4>🔗 Pattern 10: BS in Implicit Search Space</h4>
+      <p>No array given. Search space is conceptual (e.g., number of days, workers).</p>
+      <ul>
+        <li>Capacity to ship packages</li>
+        <li>Minimum days to bloom</li>
+        <li>Construct the feasible() function</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent);">
+      <h4>🔀 Pattern 11: Parallel BS on Multiple Arrays</h4>
+      <p>Count elements across multiple sorted arrays satisfying a condition.</p>
+      <ul>
+        <li>Kth smallest in M sorted arrays</li>
+        <li>Sum of squares ≤ k</li>
+        <li>Use inner BS per outer iteration</li>
+      </ul>
+    </div>
+    <div class="pattern-card" style="border-top:2px solid var(--accent2);">
+      <h4>🌊 Pattern 12: Floating Point BS</h4>
+      <p>Answer is real-valued. Terminate when precision is sufficient.</p>
+      <ul>
+        <li>Loop 50–100 times OR hi-lo &lt; ε</li>
+        <li>No mid ± 1 (continuous space)</li>
+        <li>Bisect continuously until convergent</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 7. RECOGNITION CUES ═══ -->
+<div class="section" id="cues">
+  <div class="section-header">
+    <span class="section-num">07</span>
+    <h2>Recognition Cues — When to Think Binary Search</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card cyan">
+      <h3>🗣️ Problem Statement Signals</h3>
+      <div class="cue-grid">
+        <div class="cue-pill"><span>"sorted"</span>or "ordered"</div>
+        <div class="cue-pill"><span>"find minimum"</span>X such that Y</div>
+        <div class="cue-pill"><span>"find maximum"</span>X such that Y</div>
+        <div class="cue-pill"><span>"k-th smallest"</span>/ largest</div>
+        <div class="cue-pill"><span>"monotone"</span>function / sequence</div>
+        <div class="cue-pill"><span>"O(log n)"</span>required</div>
+        <div class="cue-pill"><span>"rotated"</span>sorted array</div>
+        <div class="cue-pill"><span>"search in"</span>large range</div>
+        <div class="cue-pill"><span>n ≥ 10⁸</span>→ linear is too slow</div>
+        <div class="cue-pill"><span>"feasible"</span>/ "possible" / "can"</div>
+        <div class="cue-pill"><span>"split into k"</span>parts</div>
+        <div class="cue-pill"><span>"minimize max"</span>/ "maximize min"</div>
+        <div class="cue-pill"><span>"days"</span>/ "speed" / "capacity"</div>
+        <div class="cue-pill"><span>"peak"</span>/ bitonic / mountain</div>
+        <div class="cue-pill"><span>"first/last"</span>occurrence</div>
+        <div class="cue-pill"><span>"insertion position"</span></div>
+      </div>
+    </div>
+    <div class="card purple">
+      <h3>🧠 Abstract Pattern Signals</h3>
+      <div class="cue-grid">
+        <div class="cue-pill"><span>"if X is possible,"</span>X+1 is also possible</div>
+        <div class="cue-pill"><span>answer ∈ [lo, hi]</span>integer range</div>
+        <div class="cue-pill"><span>feasible(x)</span>is monotone</div>
+        <div class="cue-pill"><span>greedy check</span>verifies a threshold</div>
+        <div class="cue-pill"><span>O(n log n)</span>accepted → BS + O(n) per iter</div>
+        <div class="cue-pill"><span>sliding window</span>with fixed size inside</div>
+        <div class="cue-pill"><span>two pointers</span>on sorted → think BS first</div>
+        <div class="cue-pill"><span>"minimum cost"</span>with unlimited range</div>
+        <div class="cue-pill"><span>partition problem</span>with monotone property</div>
+        <div class="cue-pill"><span>value not index</span>being searched for</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Decision tree -->
+  <div class="card amber" style="margin-top:16px;">
+    <h3>🌳 Decision Tree: Which Template?</h3>
+    <div class="tree" style="padding:8px 0;">
+      <div><span class="tree-node tree-q">Is the array / answer space monotone?</span></div>
+      <div style="margin-left:20px;">
+        <div><span style="color:var(--accent5)">No →</span> Binary Search does NOT apply. Consider sorting first.</div>
+        <div style="margin-top:8px;"><span style="color:var(--accent4)">Yes →</span> <span class="tree-node tree-q">Exact match or boundary?</span></div>
+        <div style="margin-left:24px;">
+          <div><span style="color:var(--accent)">Exact match</span> → <span class="tree-node tree-a">Template 1: lo ≤ hi, return mid or -1</span></div>
+          <div style="margin-top:6px;"><span style="color:var(--accent)">Boundary →</span> <span class="tree-node tree-q">First True or Last True?</span></div>
+          <div style="margin-left:24px;">
+            <div><span style="color:var(--accent4)">First True (min feasible)</span> → <span class="tree-node tree-a">Template 2: hi=n, floor mid, hi=mid</span></div>
+            <div style="margin-top:6px;"><span style="color:var(--accent3)">Last True (max feasible)</span> → <span class="tree-node tree-a">Template 3: hi=n-1, ceiling mid, lo=mid</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 8. MISTAKES ═══ -->
+<div class="section" id="mistakes">
+  <div class="section-header">
+    <span class="section-num">08</span>
+    <h2>Classic Bugs, Gotchas & Edge Cases</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="grid-2" style="gap:14px;">
+    <div class="alert alert-danger">
+      <span class="alert-icon">🔥</span>
+      <div>
+        <strong>Bug 1: Infinite Loop (most common)</strong><br>
+        <span style="font-size:12px;color:var(--muted);">Using <code style="color:var(--accent5)">hi = mid</code> in Template 3 WITHOUT ceiling mid. When lo+1==hi, mid=lo, lo=mid=lo → nothing changes.</span><br>
+        <strong>Fix:</strong> <span class="inline-code">mid = lo + (hi - lo + 1) // 2</span> when doing <span class="inline-code">lo = mid</span>
+      </div>
+    </div>
+    <div class="alert alert-danger">
+      <span class="alert-icon">💥</span>
+      <div>
+        <strong>Bug 2: Integer Overflow</strong><br>
+        <span style="font-size:12px;color:var(--muted);">In Java/C++, <code style="color:var(--accent5)">(lo + hi) / 2</code> overflows if lo+hi &gt; INT_MAX.</span><br>
+        <strong>Fix:</strong> <span class="inline-code">lo + (hi - lo) / 2</span> always.
+      </div>
+    </div>
+    <div class="alert alert-warn">
+      <span class="alert-icon">⚠️</span>
+      <div>
+        <strong>Bug 3: Off-by-one in hi init</strong><br>
+        <span style="font-size:12px;color:var(--muted);">Template 2 uses hi=n (exclusive). Template 1 uses hi=n-1 (inclusive). Mixing them causes out-of-bounds.</span><br>
+        <strong>Rule:</strong> lo&lt;hi → hi=n; lo≤hi → hi=n-1
+      </div>
+    </div>
+    <div class="alert alert-warn">
+      <span class="alert-icon">⚠️</span>
+      <div>
+        <strong>Bug 4: Wrong comparison for duplicates</strong><br>
+        <span style="font-size:12px;color:var(--muted);">Using <code>&gt;</code> instead of <code>≥</code> (or vice versa) causes boundary to skip the correct element.</span><br>
+        <strong>Rule:</strong> lower_bound uses strict <span class="inline-code">&lt;</span>; upper_bound uses <span class="inline-code">≤</span>
+      </div>
+    </div>
+    <div class="alert alert-warn">
+      <span class="alert-icon">⚠️</span>
+      <div>
+        <strong>Bug 5: Not validating the returned index</strong><br>
+        <span style="font-size:12px;color:var(--muted);">lower_bound returns the insertion point even if target doesn't exist. Always check: <code>if lo &lt; n and nums[lo] == target</code>.</span>
+      </div>
+    </div>
+    <div class="alert alert-warn">
+      <span class="alert-icon">⚠️</span>
+      <div>
+        <strong>Bug 6: BS on Answer — wrong lo/hi range</strong><br>
+        <span style="font-size:12px;color:var(--muted);">lo must include the minimum possible answer, hi the maximum. If lo is too high or hi too low, correct answer is excluded from search space.</span>
+      </div>
+    </div>
+    <div class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div>
+        <strong>Edge: Empty array</strong><br>
+        <span style="font-size:12px;color:var(--muted);">If nums is empty: Template 1 → lo=0 &gt; hi=-1, loop never runs, return -1. Template 2 → lo=hi=0, loop never runs, return 0. Always verify caller handles n=0.</span>
+      </div>
+    </div>
+    <div class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div>
+        <strong>Edge: Single element array</strong><br>
+        <span style="font-size:12px;color:var(--muted);">lo=hi=0. Template 1: mid=0, processes and returns. Template 2: lo==hi, loop skips, returns 0 immediately. Handle this in test cases.</span>
+      </div>
+    </div>
+    <div class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div>
+        <strong>Edge: All elements same</strong><br>
+        <span style="font-size:12px;color:var(--muted);">first(target) → 0, last(target) → n-1 if target matches. Rotated array with all same → LC 81 degrades to O(n); handle with lo++, hi-- when nums[lo]==nums[mid]==nums[hi].</span>
+      </div>
+    </div>
+    <div class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div>
+        <strong>Edge: Floating point BS precision</strong><br>
+        <span style="font-size:12px;color:var(--muted);">Don't use <code>hi - lo &gt; 1e-9</code> without thinking about the range. For values near 0 use relative epsilon. Fixed 50-100 iterations is safer.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card rose" style="margin-top:16px;">
+    <h3>The Mid Bias Rule — Quick Reference</h3>
+    <table>
+      <thead><tr><th>When you write</th><th>Use</th><th>Because</th></tr></thead>
+      <tbody>
+        <tr><td><span class="inline-code">lo = mid + 1</span> or <span class="inline-code">hi = mid - 1</span></td><td>Either floor or ceil</td><td>Both branches always strictly shrink interval</td></tr>
+        <tr><td><span class="inline-code">hi = mid</span> (never lo=mid+1)</td><td>Floor mid</td><td>hi shrinks, lo advances with +1. Safe.</td></tr>
+        <tr><td><span class="inline-code">lo = mid</span> (never hi=mid-1)</td><td><strong>MUST use ceil mid</strong></td><td>Floor mid → lo=mid=lo when hi=lo+1 → infinite loop</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 9. ADVANCED TECHNIQUES ═══ -->
+<div class="section" id="advanced">
+  <div class="section-header">
+    <span class="section-num">09</span>
+    <h2>Advanced Techniques</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card cyan">
+      <h3>Median of Two Sorted Arrays (LC 4) — O(log min(m,n))</h3>
+      <pre><span class="kw">def</span> <span class="fn">findMedianSortedArrays</span>(<span class="var">A</span>, <span class="var">B</span>):
+    <span class="cm"># Always binary search on the shorter array</span>
+    <span class="kw">if</span> <span class="fn">len</span>(<span class="var">A</span>) <span class="op">&gt;</span> <span class="fn">len</span>(<span class="var">B</span>): <span class="var">A</span>, <span class="var">B</span> <span class="op">=</span> <span class="var">B</span>, <span class="var">A</span>
+    <span class="var">m</span>, <span class="var">n</span> <span class="op">=</span> <span class="fn">len</span>(<span class="var">A</span>), <span class="fn">len</span>(<span class="var">B</span>)
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="num">0</span>, <span class="var">m</span>
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;=</span> <span class="var">hi</span>:
+        <span class="var">px</span> <span class="op">=</span> (<span class="var">lo</span> <span class="op">+</span> <span class="var">hi</span>) <span class="op">//</span> <span class="num">2</span>        <span class="cm"># partition A at px</span>
+        <span class="var">py</span> <span class="op">=</span> (<span class="var">m</span> <span class="op">+</span> <span class="var">n</span> <span class="op">+</span> <span class="num">1</span>) <span class="op">//</span> <span class="num">2</span> <span class="op">-</span> <span class="var">px</span>  <span class="cm"># partition B at py</span>
+
+        <span class="var">Aleft</span>  <span class="op">=</span> <span class="var">A</span>[<span class="var">px</span><span class="op">-</span><span class="num">1</span>] <span class="kw">if</span> <span class="var">px</span> <span class="op">&gt;</span> <span class="num">0</span> <span class="kw">else</span> <span class="fn">float</span>(<span class="str">'-inf'</span>)
+        <span class="var">Aright</span> <span class="op">=</span> <span class="var">A</span>[<span class="var">px</span>]   <span class="kw">if</span> <span class="var">px</span> <span class="op">&lt;</span> <span class="var">m</span> <span class="kw">else</span> <span class="fn">float</span>(<span class="str">'inf'</span>)
+        <span class="var">Bleft</span>  <span class="op">=</span> <span class="var">B</span>[<span class="var">py</span><span class="op">-</span><span class="num">1</span>] <span class="kw">if</span> <span class="var">py</span> <span class="op">&gt;</span> <span class="num">0</span> <span class="kw">else</span> <span class="fn">float</span>(<span class="str">'-inf'</span>)
+        <span class="var">Bright</span> <span class="op">=</span> <span class="var">B</span>[<span class="var">py</span>]   <span class="kw">if</span> <span class="var">py</span> <span class="op">&lt;</span> <span class="var">n</span> <span class="kw">else</span> <span class="fn">float</span>(<span class="str">'inf'</span>)
+
+        <span class="kw">if</span> <span class="var">Aleft</span> <span class="op">&lt;=</span> <span class="var">Bright</span> <span class="kw">and</span> <span class="var">Bleft</span> <span class="op">&lt;=</span> <span class="var">Aright</span>:
+            <span class="cm"># Perfect partition</span>
+            <span class="kw">if</span> (<span class="var">m</span> <span class="op">+</span> <span class="var">n</span>) <span class="op">%</span> <span class="num">2</span>:
+                <span class="kw">return</span> <span class="fn">max</span>(<span class="var">Aleft</span>, <span class="var">Bleft</span>)
+            <span class="kw">return</span> (<span class="fn">max</span>(<span class="var">Aleft</span>,<span class="var">Bleft</span>) <span class="op">+</span> <span class="fn">min</span>(<span class="var">Aright</span>,<span class="var">Bright</span>)) <span class="op">/</span> <span class="num">2</span>
+        <span class="kw">elif</span> <span class="var">Aleft</span> <span class="op">&gt;</span> <span class="var">Bright</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">px</span> <span class="op">-</span> <span class="num">1</span>
+        <span class="kw">else</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">px</span> <span class="op">+</span> <span class="num">1</span></pre>
+    </div>
+
+    <div class="card purple">
+      <h3>Kth Smallest in Sorted Matrix (LC 378)</h3>
+      <pre><span class="kw">def</span> <span class="fn">kthSmallest</span>(<span class="var">matrix</span>, <span class="var">k</span>):
+    <span class="var">n</span> <span class="op">=</span> <span class="fn">len</span>(<span class="var">matrix</span>)
+    <span class="kw">def</span> <span class="fn">count_le</span>(<span class="var">mid</span>):
+        <span class="cm"># Count elements ≤ mid using staircase from bottom-left</span>
+        <span class="var">count</span>, <span class="var">r</span>, <span class="var">c</span> <span class="op">=</span> <span class="num">0</span>, <span class="var">n</span><span class="op">-</span><span class="num">1</span>, <span class="num">0</span>
+        <span class="kw">while</span> <span class="var">r</span> <span class="op">&gt;=</span> <span class="num">0</span> <span class="kw">and</span> <span class="var">c</span> <span class="op">&lt;</span> <span class="var">n</span>:
+            <span class="kw">if</span> <span class="var">matrix</span>[<span class="var">r</span>][<span class="var">c</span>] <span class="op">&lt;=</span> <span class="var">mid</span>:
+                <span class="var">count</span> <span class="op">+=</span> <span class="var">r</span> <span class="op">+</span> <span class="num">1</span>  <span class="cm"># all in this col up to r</span>
+                <span class="var">c</span> <span class="op">+=</span> <span class="num">1</span>
+            <span class="kw">else</span>:
+                <span class="var">r</span> <span class="op">-=</span> <span class="num">1</span>
+        <span class="kw">return</span> <span class="var">count</span>
+
+    <span class="var">lo</span>, <span class="var">hi</span> <span class="op">=</span> <span class="var">matrix</span>[<span class="num">0</span>][<span class="num">0</span>], <span class="var">matrix</span>[<span class="op">-</span><span class="num">1</span>][<span class="op">-</span><span class="num">1</span>]
+    <span class="kw">while</span> <span class="var">lo</span> <span class="op">&lt;</span> <span class="var">hi</span>:
+        <span class="var">mid</span> <span class="op">=</span> <span class="var">lo</span> <span class="op">+</span> (<span class="var">hi</span> <span class="op">-</span> <span class="var">lo</span>) <span class="op">//</span> <span class="num">2</span>
+        <span class="kw">if</span> <span class="fn">count_le</span>(<span class="var">mid</span>) <span class="op">&gt;=</span> <span class="var">k</span>: <span class="var">hi</span> <span class="op">=</span> <span class="var">mid</span>
+        <span class="kw">else</span>: <span class="var">lo</span> <span class="op">=</span> <span class="var">mid</span> <span class="op">+</span> <span class="num">1</span>
+    <span class="kw">return</span> <span class="var">lo</span>
+<span class="cm"># Note: lo always converges to an actual matrix value</span></pre>
+    </div>
+  </div>
+
+  <div class="card amber" style="margin-top:16px;">
+    <h3>Python bisect Module — Complete Reference</h3>
+    <pre><span class="kw">import</span> <span class="cls">bisect</span>
+
+<span class="cm"># bisect_left(a, x, lo=0, hi=len(a))</span>
+<span class="cm"># → leftmost i where a[i] >= x (insertion point to keep sorted)</span>
+<span class="cm"># → use for: first occurrence, lower_bound, count of elements < x</span>
+<span class="var">i</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">a</span>, <span class="var">x</span>)
+<span class="cm"># a[i] == x? → x found at index i (first occurrence)</span>
+<span class="cm"># a[i] != x? → x not in array</span>
+
+<span class="cm"># bisect_right(a, x)  [same as bisect.bisect(a, x)]</span>
+<span class="cm"># → leftmost i where a[i] > x</span>
+<span class="cm"># → use for: last occurrence+1, upper_bound, insert after existing x</span>
+<span class="var">j</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_right</span>(<span class="var">a</span>, <span class="var">x</span>)
+<span class="cm"># last occurrence of x = j - 1 (if j > 0 and a[j-1] == x)</span>
+<span class="cm"># count of x in array = j - i</span>
+
+<span class="cm"># insort_left / insort_right: insert x maintaining sorted order (O(n) due to shift)</span>
+<span class="cls">bisect</span>.<span class="fn">insort_left</span>(<span class="var">a</span>, <span class="var">x</span>)   <span class="cm"># insert before existing x's</span>
+<span class="cls">bisect</span>.<span class="fn">insort_right</span>(<span class="var">a</span>, <span class="var">x</span>)  <span class="cm"># insert after existing x's</span>
+
+<span class="cm"># Common patterns:</span>
+<span class="fn">count</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_right</span>(<span class="var">a</span>,<span class="var">x</span>) <span class="op">-</span> <span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">a</span>,<span class="var">x</span>)  <span class="cm"># count x in a</span>
+<span class="fn">rank</span>  <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">a</span>, <span class="var">x</span>)                            <span class="cm"># rank of x (0-indexed)</span>
+<span class="fn">floor_val</span> <span class="op">=</span> <span class="var">a</span>[<span class="cls">bisect</span>.<span class="fn">bisect_right</span>(<span class="var">a</span>,<span class="var">x</span>)<span class="op">-</span><span class="num">1</span>] <span class="kw">if</span> <span class="var">a</span> <span class="kw">else</span> <span class="kw">None</span>       <span class="cm"># largest ≤ x</span>
+<span class="fn">ceil_val</span>  <span class="op">=</span> <span class="var">a</span>[<span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">a</span>,<span class="var">x</span>)]   <span class="kw">if</span> ... <span class="kw">else</span> <span class="kw">None</span>   <span class="cm"># smallest ≥ x</span></pre>
+  </div>
+</div>
+
+<!-- ═══ 10. PROBLEM BANK ═══ -->
+<div class="section" id="problems">
+  <div class="section-header">
+    <span class="section-num">10</span>
+    <h2>Curated Problem Bank by Pattern</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>LC#</th>
+          <th>Problem</th>
+          <th>Pattern</th>
+          <th>Difficulty</th>
+          <th>Key Insight</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>704</td><td>Binary Search</td><td><span class="badge badge-cyan">Classic</span></td><td class="diff-easy">Easy</td><td>Template 1 baseline</td></tr>
+        <tr><td>35</td><td>Search Insert Position</td><td><span class="badge badge-cyan">Classic</span></td><td class="diff-easy">Easy</td><td>bisect_left</td></tr>
+        <tr><td>34</td><td>Search Range (First&Last)</td><td><span class="badge badge-cyan">Boundary</span></td><td class="diff-med">Med</td><td>Two separate BS calls</td></tr>
+        <tr><td>278</td><td>First Bad Version</td><td><span class="badge badge-cyan">Boundary</span></td><td class="diff-easy">Easy</td><td>Template 2 baseline</td></tr>
+        <tr><td>153</td><td>Min in Rotated</td><td><span class="badge badge-purple">Rotated</span></td><td class="diff-med">Med</td><td>Compare mid vs hi</td></tr>
+        <tr><td>33</td><td>Search Rotated (no dups)</td><td><span class="badge badge-purple">Rotated</span></td><td class="diff-med">Med</td><td>Which half is sorted?</td></tr>
+        <tr><td>81</td><td>Search Rotated (with dups)</td><td><span class="badge badge-purple">Rotated</span></td><td class="diff-med">Med</td><td>lo++, hi-- when equal</td></tr>
+        <tr><td>162</td><td>Find Peak Element</td><td><span class="badge badge-amber">Peak</span></td><td class="diff-med">Med</td><td>Follow the slope</td></tr>
+        <tr><td>852</td><td>Peak Index in Mountain</td><td><span class="badge badge-amber">Peak</span></td><td class="diff-med">Med</td><td>Same as 162</td></tr>
+        <tr><td>1095</td><td>Find in Mountain Array</td><td><span class="badge badge-amber">Peak</span></td><td class="diff-hard">Hard</td><td>3 phases: find peak, search each side</td></tr>
+        <tr><td>74</td><td>Search 2D Matrix</td><td><span class="badge badge-green">2D</span></td><td class="diff-med">Med</td><td>Flatten to 1D index</td></tr>
+        <tr><td>240</td><td>Search 2D Matrix II</td><td><span class="badge badge-green">2D</span></td><td class="diff-med">Med</td><td>Staircase elimination</td></tr>
+        <tr><td>69</td><td>Sqrt(x)</td><td><span class="badge badge-rose">Math</span></td><td class="diff-easy">Easy</td><td>Last True: mid²≤x</td></tr>
+        <tr><td>875</td><td>Koko Eating Bananas</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-med">Med</td><td>feasible(speed): sum of ceil(p/speed)≤h</td></tr>
+        <tr><td>410</td><td>Split Array Largest Sum</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-hard">Hard</td><td>Greedy partition check</td></tr>
+        <tr><td>1011</td><td>Capacity to Ship Packages</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-med">Med</td><td>Same as 410 structure</td></tr>
+        <tr><td>1283</td><td>Find Smallest Divisor</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-med">Med</td><td>feasible(d): sum of ceil(n/d)≤threshold</td></tr>
+        <tr><td>1482</td><td>Minimum Days to Make m Bouquets</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-med">Med</td><td>Greedy count check</td></tr>
+        <tr><td>774</td><td>Minimize Max Distance to Gas</td><td><span class="badge badge-rose">BS on Answer</span></td><td class="diff-hard">Hard</td><td>Float BS on distance</td></tr>
+        <tr><td>4</td><td>Median of Two Sorted Arrays</td><td><span class="badge badge-purple">Partition</span></td><td class="diff-hard">Hard</td><td>BS partition on shorter array</td></tr>
+        <tr><td>378</td><td>Kth Smallest in Matrix</td><td><span class="badge badge-cyan">Kth Element</span></td><td class="diff-med">Med</td><td>BS on value + count staircase</td></tr>
+        <tr><td>668</td><td>Kth Smallest in Mult Table</td><td><span class="badge badge-cyan">Kth Element</span></td><td class="diff-hard">Hard</td><td>count(≤mid) = Σ min(mid//i, n)</td></tr>
+        <tr><td>719</td><td>Find K-th Smallest Pair Distance</td><td><span class="badge badge-cyan">Kth Element</span></td><td class="diff-hard">Hard</td><td>BS on distance + sliding window count</td></tr>
+        <tr><td>287</td><td>Find Duplicate Number</td><td><span class="badge badge-amber">BS + Pigeonhole</span></td><td class="diff-med">Med</td><td>count of nums ≤ mid tells half to look in</td></tr>
+        <tr><td>300</td><td>Longest Increasing Subsequence</td><td><span class="badge badge-green">Patience Sort</span></td><td class="diff-med">Med</td><td>bisect_left on tails array</td></tr>
+        <tr><td>354</td><td>Russian Doll Envelopes</td><td><span class="badge badge-green">Patience Sort</span></td><td class="diff-hard">Hard</td><td>Sort + LIS with BS</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- LIS with BS -->
+  <div class="card green" style="margin-top:16px;">
+    <h3>Bonus: LIS in O(n log n) using Binary Search</h3>
+    <pre><span class="kw">def</span> <span class="fn">lengthOfLIS</span>(<span class="var">nums</span>):
+    <span class="var">tails</span> <span class="op">=</span> []  <span class="cm"># tails[i] = smallest tail element of all IS of length i+1</span>
+    <span class="kw">for</span> <span class="var">n</span> <span class="kw">in</span> <span class="var">nums</span>:
+        <span class="cm"># Find first tail >= n (lower_bound)</span>
+        <span class="var">pos</span> <span class="op">=</span> <span class="cls">bisect</span>.<span class="fn">bisect_left</span>(<span class="var">tails</span>, <span class="var">n</span>)
+        <span class="kw">if</span> <span class="var">pos</span> <span class="op">==</span> <span class="fn">len</span>(<span class="var">tails</span>): <span class="var">tails</span>.<span class="fn">append</span>(<span class="var">n</span>)  <span class="cm"># extends LIS</span>
+        <span class="kw">else</span>: <span class="var">tails</span>[<span class="var">pos</span>] <span class="op">=</span> <span class="var">n</span>                <span class="cm"># replaces to minimize tail</span>
+    <span class="kw">return</span> <span class="fn">len</span>(<span class="var">tails</span>)
+<span class="cm"># tails is always sorted but NOT the actual LIS. Only length is correct.</span>
+<span class="cm"># Use bisect_right for strictly decreasing IS, or non-strictly increasing variations.</span></pre>
+  </div>
+</div>
+
+<!-- ═══ 11. COMPLEXITY CHEAT TABLE ═══ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">11</span>
+    <h2>Complexity at a Glance</h2>
+    <div class="section-line"></div>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Variant</th><th>Time</th><th>Space</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Classic BS</td><td>O(log n)</td><td>O(1)</td><td>—</td></tr>
+        <tr><td>First / Last occurrence</td><td>O(log n)</td><td>O(1)</td><td>Two separate passes</td></tr>
+        <tr><td>Rotated array search</td><td>O(log n)</td><td>O(1)</td><td>O(n) worst case with duplicates (LC 81)</td></tr>
+        <tr><td>Peak finding</td><td>O(log n)</td><td>O(1)</td><td>—</td></tr>
+        <tr><td>BS on Answer + O(n) feasible</td><td>O(n log(range))</td><td>O(1)</td><td>range = hi - lo</td></tr>
+        <tr><td>2D matrix (row-major)</td><td>O(log(m·n))</td><td>O(1)</td><td>Flatten trick</td></tr>
+        <tr><td>2D matrix (staircase LC240)</td><td>O(m+n)</td><td>O(1)</td><td>Not true BS</td></tr>
+        <tr><td>Median of two sorted arrays</td><td>O(log min(m,n))</td><td>O(1)</td><td>Always BS shorter</td></tr>
+        <tr><td>Kth smallest in matrix</td><td>O(n log(max-min))</td><td>O(1)</td><td>n=side length</td></tr>
+        <tr><td>LIS with BS</td><td>O(n log n)</td><td>O(n)</td><td>Patience sorting</td></tr>
+        <tr><td>Float BS (50 iters)</td><td>O(50·f(n))</td><td>O(1)</td><td>f(n)=cost of mid eval</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 12. INTERVIEW CHECKLIST ═══ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-num">12</span>
+    <h2>Interview Checklist — Before You Code</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="card cyan">
+    <ul class="steps">
+      <li><strong>Identify the search space</strong><br>Is it array indices [0..n-1] or value range [min..max]? Say it out loud to the interviewer.</li>
+      <li><strong>Define the predicate</strong><br>Write out f(x) = True/False explicitly. Verify monotonicity (F...F,T...T or T...T,F...F).</li>
+      <li><strong>Choose the template</strong><br>Exact match → T1. First True → T2. Last True → T3. State which you're using.</li>
+      <li><strong>Set lo and hi correctly</strong><br>For T1: hi=n-1. For T2: hi=n. For T3: hi=n-1. For BS on answer: hi=max possible answer.</li>
+      <li><strong>Choose mid bias</strong><br>If you write lo=mid anywhere → MUST use ceiling mid. Draw lo=4, hi=5 to verify no infinite loop.</li>
+      <li><strong>Handle exit condition</strong><br>What does lo mean at exit? Validate: check if nums[lo] == target before returning lo as "found".</li>
+      <li><strong>Edge cases</strong><br>Empty array → n=0. Single element. All same values. Target smaller than all / larger than all.</li>
+      <li><strong>Verify no overflow</strong><br>Use lo + (hi-lo)//2, not (lo+hi)//2. Especially in Java/C++.</li>
+    </ul>
+  </div>
+
+  <div class="card amber" style="margin-top:16px;">
+    <h3>🎯 30-Second BS Problem Solver Framework</h3>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:2.2;padding:8px 0;">
+      <div style="color:var(--muted);">Step 1: <span style="color:var(--text);">Is there a monotone property? If no → sort or use different algo.</span></div>
+      <div style="color:var(--muted);">Step 2: <span style="color:var(--text);">What am I searching? Indices or values?</span></div>
+      <div style="color:var(--muted);">Step 3: <span style="color:var(--text);">What is feasible(x)? Write it as a boolean check.</span></div>
+      <div style="color:var(--muted);">Step 4: <span style="color:var(--text);">Am I finding first True or last True?</span></div>
+      <div style="color:var(--muted);">Step 5: <span style="color:var(--text);">Set lo, hi. Verify they bracket the answer.</span></div>
+      <div style="color:var(--muted);">Step 6: <span style="color:var(--text);">Write loop, mid, two branches, return lo.</span></div>
+      <div style="color:var(--muted);">Step 7: <span style="color:var(--text);">Dry-run on 2-element array to check termination.</span></div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;padding:48px 0 20px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;">
+  Binary Search Cheat Sheet · Built for interview revision · Every pattern, one place
+</div>
+
+</div>
+</body>
+</html>

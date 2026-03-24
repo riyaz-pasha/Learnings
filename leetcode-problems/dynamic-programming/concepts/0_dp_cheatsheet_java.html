@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dynamic Programming — Java Interview Cheat Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0c0e10;
+  --bg2: #131619;
+  --bg3: #191d21;
+  --bg4: #1f2428;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #e6e3da;
+  --muted: #82807a;
+  --accent:  #f0c060;
+  --accent2: #5ec4a8;
+  --accent3: #e07a5f;
+  --accent4: #8b9cf4;
+  --accent5: #d47db0;
+  --java:    #f89c74;
+  --code-bg: #090b0d;
+  --sans:  'DM Sans', sans-serif;
+  --mono:  'JetBrains Mono', monospace;
+  --serif: 'DM Serif Display', serif;
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.65;
+  padding: 44px 24px 100px;
+  max-width: 1140px;
+  margin: 0 auto;
+}
+
+/* ── HEADER ── */
+.header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 44px;
+  padding-bottom: 26px;
+  border-bottom: 1px solid var(--border2);
+}
+.header h1 {
+  font-family: var(--serif);
+  font-size: clamp(30px, 5vw, 52px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.header h1 em { color: var(--accent); font-style: italic; }
+.header-meta { text-align:right; color:var(--muted); font-size:12px; line-height:2; }
+.badge {
+  display:inline-block; padding:3px 10px; border-radius:20px;
+  font-size:11px; font-weight:500; letter-spacing:0.04em; font-family:var(--mono);
+}
+.b-gold  { background:rgba(240,192,96,0.12);  color:var(--accent);  border:1px solid rgba(240,192,96,0.25); }
+.b-teal  { background:rgba(94,196,168,0.10);  color:var(--accent2); border:1px solid rgba(94,196,168,0.22); }
+.b-red   { background:rgba(224,122,95,0.10);  color:var(--accent3); border:1px solid rgba(224,122,95,0.22); }
+.b-blue  { background:rgba(139,156,244,0.10); color:var(--accent4); border:1px solid rgba(139,156,244,0.22); }
+.b-pink  { background:rgba(212,125,176,0.10); color:var(--accent5); border:1px solid rgba(212,125,176,0.22); }
+.b-java  { background:rgba(248,156,116,0.10); color:var(--java);    border:1px solid rgba(248,156,116,0.22); }
+
+/* ── SECTION HEAD ── */
+.sh { display:flex; align-items:center; gap:12px; margin:36px 0 16px; }
+.sh h2 { font-family:var(--serif); font-size:24px; font-weight:400; white-space:nowrap; }
+.sh .line { flex:1; height:1px; background:var(--border); }
+
+/* ── GRID ── */
+.g2  { display:grid; grid-template-columns:1fr 1fr;     gap:16px; margin-bottom:16px; }
+.g3  { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+.ga  { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-bottom:16px; }
+.s2  { grid-column:span 2; }
+.s3  { grid-column:span 3; }
+@media(max-width:720px){ .g2,.g3{ grid-template-columns:1fr; } .s2,.s3{ grid-column:span 1; } }
+
+/* ── CARD ── */
+.card {
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:20px 22px;
+  position:relative;
+  overflow:hidden;
+}
+.card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px; border-radius:10px 10px 0 0;
+}
+.card.gold::before  { background:linear-gradient(90deg,var(--accent),transparent); }
+.card.teal::before  { background:linear-gradient(90deg,var(--accent2),transparent); }
+.card.red::before   { background:linear-gradient(90deg,var(--accent3),transparent); }
+.card.blue::before  { background:linear-gradient(90deg,var(--accent4),transparent); }
+.card.pink::before  { background:linear-gradient(90deg,var(--accent5),transparent); }
+.card.java::before  { background:linear-gradient(90deg,var(--java),transparent); }
+
+.clabel { font-size:10px; font-family:var(--mono); font-weight:500; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+.ctitle { font-size:15px; font-weight:600; color:var(--text); margin-bottom:12px; }
+.cdesc  { font-size:12.5px; color:var(--muted); margin-bottom:10px; line-height:1.6; }
+
+/* ── CODE ── */
+pre, code { font-family:var(--mono); font-size:12px; }
+.cb {
+  background:var(--code-bg);
+  border:1px solid var(--border);
+  border-radius:7px;
+  padding:13px 16px;
+  margin:10px 0 0;
+  overflow-x:auto;
+  line-height:1.75;
+}
+.cb code { color:#bbb8ae; }
+/* Java syntax */
+.kw  { color:#8b9cf4; }   /* keywords */
+.ty  { color:#5ec4a8; }   /* types, classes */
+.fn  { color:#f0c060; }   /* methods */
+.num { color:#f89c74; }   /* numbers, literals */
+.cm  { color:#3e4755; }   /* comments */
+.str { color:#e07a5f; }   /* strings */
+.an  { color:#d47db0; }   /* annotations */
+
+/* ── TABLES ── */
+.rt { width:100%; border-collapse:collapse; font-size:12.5px; }
+.rt thead tr { border-bottom:1px solid var(--border2); }
+.rt th {
+  text-align:left; padding:6px 10px 9px;
+  color:var(--muted); font-weight:500; font-size:10.5px;
+  letter-spacing:0.07em; text-transform:uppercase; font-family:var(--mono);
+}
+.rt td { padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+.rt tr:last-child td { border-bottom:none; }
+.rt tr:hover td { background:rgba(255,255,255,0.018); }
+.tp  { color:var(--text); font-weight:500; font-size:13px; }
+.tr  { color:var(--accent2); font-family:var(--mono); font-size:11.5px; line-height:1.6; }
+.tc  { color:var(--accent); font-family:var(--mono); font-size:11.5px; white-space:nowrap; }
+.tn  { color:var(--muted); font-size:12px; }
+
+/* ── CHECKLIST ── */
+.cl { list-style:none; margin-top:8px; }
+.cl li {
+  display:flex; gap:10px; align-items:flex-start;
+  padding:7px 0; border-bottom:1px solid var(--border);
+  font-size:13px; color:var(--text);
+}
+.cl li:last-child { border-bottom:none; }
+.cl li::before { content:'▸'; color:var(--muted); font-size:10px; margin-top:3px; flex-shrink:0; }
+.cl .sub { font-size:11.5px; color:var(--muted); display:block; margin-top:3px; }
+
+/* ── INSIGHT ── */
+.ins {
+  background:rgba(240,192,96,0.06);
+  border-left:2px solid var(--accent);
+  border-radius:0 6px 6px 0;
+  padding:10px 14px;
+  margin-top:12px;
+  font-size:12.5px;
+  color:#cbb87a;
+  line-height:1.6;
+}
+.ins-teal { border-left-color:var(--accent2); background:rgba(94,196,168,0.06); color:#6ecdb6; }
+.ins-red  { border-left-color:var(--accent3); background:rgba(224,122,95,0.06);  color:#d88a73; }
+.ins-blue { border-left-color:var(--accent4); background:rgba(139,156,244,0.06); color:#9daaf5; }
+
+/* ── TWO-COL ── */
+.tc2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media(max-width:560px){ .tc2{ grid-template-columns:1fr; } }
+
+/* ── STEP LIST ── */
+.steps { counter-reset:step; list-style:none; margin-top:8px; }
+.steps li {
+  counter-increment:step;
+  display:flex; gap:12px; align-items:flex-start;
+  padding:8px 0; border-bottom:1px solid var(--border);
+  font-size:13px;
+}
+.steps li:last-child { border-bottom:none; }
+.steps li::before {
+  content:counter(step);
+  background:var(--bg4);
+  border:1px solid var(--border2);
+  color:var(--accent);
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:700;
+  min-width:22px; height:22px;
+  border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; margin-top:1px;
+}
+.steps .sub { font-size:11.5px; color:var(--muted); display:block; margin-top:2px; }
+
+/* ── PATTERN GRID ── */
+.pgrid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(195px,1fr));
+  gap:10px;
+  margin-top:6px;
+}
+.pi {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:8px; padding:12px 14px;
+}
+.pi:hover { border-color:var(--border2); }
+.pi .tri  { font-size:11.5px; color:var(--muted); font-style:italic; margin-bottom:6px; line-height:1.4; }
+.pi .pn   { font-size:13px; font-weight:600; color:var(--text); margin-bottom:4px; }
+.pi .pex  { font-size:11px; color:var(--muted); font-family:var(--mono); }
+
+/* ── MATH ── */
+.m { font-family:var(--mono); font-size:12px; color:var(--accent2); background:rgba(94,196,168,0.09); padding:1px 5px; border-radius:3px; }
+
+/* ── WARN ── */
+.warn {
+  background:rgba(224,122,95,0.06); border-left:2px solid var(--accent3);
+  border-radius:0 6px 6px 0; padding:10px 14px; margin-top:10px;
+  font-size:12.5px; color:#d88a73; line-height:1.6;
+}
+
+/* ── COMPLEXITY TABLE ── */
+.cx-g  { color:var(--accent2);  font-family:var(--mono); font-size:11.5px; }
+.cx-y  { color:var(--accent);   font-family:var(--mono); font-size:11.5px; }
+.cx-r  { color:var(--accent3);  font-family:var(--mono); font-size:11.5px; }
+
+/* ── FOOTER ── */
+.footer { text-align:center; color:var(--muted); font-size:11px; margin-top:60px; padding-top:20px; border-top:1px solid var(--border); font-family:var(--mono); }
+
+/* ── TOC ── */
+.toc {
+  display:flex; flex-wrap:wrap; gap:8px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; padding:16px 20px;
+  margin-bottom:36px;
+}
+.toc a {
+  color:var(--muted); text-decoration:none; font-size:12px;
+  font-family:var(--mono); padding:4px 10px;
+  border:1px solid var(--border); border-radius:5px;
+  transition:color 0.15s, border-color 0.15s;
+}
+.toc a:hover { color:var(--text); border-color:var(--border2); }
+
+@keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+.card { animation: fadeUp 0.35s ease both; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div>
+    <h1>Dynamic<br><em>Programming</em></h1>
+    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+      <span class="badge b-java">Java</span>
+      <span class="badge b-gold">Interview Revision</span>
+      <span class="badge b-teal">Deep Reference</span>
+    </div>
+  </div>
+  <div class="header-meta">
+    8 Core Patterns<br>
+    Advanced Optimisations<br>
+    Full Java Code<br>
+    Complexity Table
+  </div>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <a href="#foundations">Foundations</a>
+  <a href="#linear">Linear 1D</a>
+  <a href="#subseq">Subsequence 2D</a>
+  <a href="#knapsack">Knapsack Family</a>
+  <a href="#interval">Interval DP</a>
+  <a href="#tree">Tree DP</a>
+  <a href="#bitmask">Bitmask DP</a>
+  <a href="#digit">Digit DP</a>
+  <a href="#graph">Graph DP</a>
+  <a href="#advanced">Advanced Optimisations</a>
+  <a href="#space">Space Tricks</a>
+  <a href="#recognition">Pattern Recognition</a>
+  <a href="#mindset">Interview Mindset</a>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 1: FOUNDATIONS
+═══════════════════════════════════════ -->
+<div class="sh" id="foundations">
+  <h2>Foundations</h2><div class="line"></div>
+  <span class="badge b-gold">Core Concepts</span>
+</div>
+
+<div class="g3">
+  <div class="card gold">
+    <div class="clabel">Two Prerequisites</div>
+    <div class="ctitle">When Does DP Apply?</div>
+    <ul class="cl">
+      <li><strong>Optimal Substructure</strong><span class="sub">Optimal solution contains optimal solutions to subproblems. Greedy also has this — the difference is DP branches over all choices.</span></li>
+      <li><strong>Overlapping Subproblems</strong><span class="sub">Same sub-computation recurs. Divide &amp; Conquer (Merge Sort) splits into non-overlapping halves — no memoisation needed. Fibonacci recomputes fib(3) in every branch — memoisation cuts O(2ⁿ) → O(n).</span></li>
+      <li><strong>Principle of Optimality</strong><span class="sub">Extending an optimal solution never hurts. If a choice made at step i affects what's optimal at step j, greedy fails — DP tries all choices.</span></li>
+    </ul>
+    <div class="ins">💡 Greedy makes the locally best choice and never revisits. DP tries <em>every</em> choice and keeps the best. If you can prove greedy is correct (exchange argument), skip DP.</div>
+  </div>
+
+  <div class="card teal">
+    <div class="clabel">Two Implementations</div>
+    <div class="ctitle">Memoization vs Tabulation</div>
+    <table class="rt">
+      <thead><tr><th></th><th>Top-Down (Memo)</th><th>Bottom-Up (Tab)</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">Style</td><td class="tn">Recursive + HashMap / array cache</td><td class="tn">Iterative table fill</td></tr>
+        <tr><td class="tp">Stack depth</td><td class="tn" style="color:var(--accent3)">O(n) — can SO</td><td class="tn" style="color:var(--accent2)">No call stack</td></tr>
+        <tr><td class="tp">Solves only</td><td class="tn" style="color:var(--accent2)">States actually needed</td><td class="tn" style="color:var(--accent3)">All states</td></tr>
+        <tr><td class="tp">Space opt.</td><td class="tn" style="color:var(--accent3)">Hard (implicit tree)</td><td class="tn" style="color:var(--accent2)">Easy rolling array</td></tr>
+        <tr><td class="tp">Code feels</td><td class="tn">Closer to recurrence</td><td class="tn">More boilerplate loops</td></tr>
+        <tr><td class="tp">Java cache</td><td class="tn"><code style="color:var(--java)">HashMap&lt;String,Integer&gt;</code> or <code style="color:var(--java)">int[][]</code> init -1</td><td class="tn"><code style="color:var(--java)">int[] dp = new int[n+1]</code></td></tr>
+      </tbody>
+    </table>
+    <div class="ins ins-teal">In Java interviews prefer tabulation — no risk of StackOverflowError, easier to optimise space.</div>
+  </div>
+
+  <div class="card blue">
+    <div class="clabel">State Design</div>
+    <div class="ctitle">Designing dp[…] — The Core Skill</div>
+    <ol class="steps">
+      <li><strong>Name what changes</strong><span class="sub">Each variable that changes across subproblems = one dimension of your array.</span></li>
+      <li><strong>Define dp[i] precisely</strong><span class="sub">Write it as a sentence: "dp[i][j] = min cost to convert s[0..i] into t[0..j]."</span></li>
+      <li><strong>Find the recurrence</strong><span class="sub">Ask: what was the last decision? Enumerate all choices for it.</span></li>
+      <li><strong>Identify base cases</strong><span class="sub">Empty input, index 0/1, capacity 0 — what is trivially known?</span></li>
+      <li><strong>Determine order</strong><span class="sub">Subproblems must be solved before they're referenced.</span></li>
+      <li><strong>Extract the answer</strong><span class="sub">Sometimes dp[n], sometimes max over all dp[i], sometimes dp[n][0] vs dp[n][1].</span></li>
+    </ol>
+  </div>
+</div>
+
+<div class="g2">
+  <div class="card java">
+    <div class="clabel">Java Template</div>
+    <div class="ctitle">Top-Down Memoization (Java)</div>
+    <div class="cb"><code><span class="kw">class</span> <span class="ty">Solution</span> {
+    <span class="kw">private</span> <span class="ty">int</span>[][] memo;
+
+    <span class="kw">public</span> <span class="ty">int</span> <span class="fn">solve</span>(<span class="ty">int</span>[] nums) {
+        <span class="ty">int</span> n = nums.length;
+        memo = <span class="kw">new</span> <span class="ty">int</span>[n][CAPACITY + <span class="num">1</span>];
+        <span class="kw">for</span> (<span class="ty">int</span>[] row : memo)
+            <span class="ty">Arrays</span>.<span class="fn">fill</span>(row, -<span class="num">1</span>); <span class="cm">// -1 = not computed</span>
+        <span class="kw">return</span> <span class="fn">dp</span>(<span class="num">0</span>, CAPACITY, nums);
+    }
+
+    <span class="kw">private</span> <span class="ty">int</span> <span class="fn">dp</span>(<span class="ty">int</span> i, <span class="ty">int</span> cap, <span class="ty">int</span>[] nums) {
+        <span class="kw">if</span> (i == nums.length) <span class="kw">return</span> <span class="num">0</span>; <span class="cm">// base case</span>
+        <span class="kw">if</span> (memo[i][cap] != -<span class="num">1</span>) <span class="kw">return</span> memo[i][cap]; <span class="cm">// cache hit</span>
+
+        <span class="ty">int</span> skip = <span class="fn">dp</span>(i + <span class="num">1</span>, cap, nums);
+        <span class="ty">int</span> take = (cap >= nums[i])
+            ? nums[i] + <span class="fn">dp</span>(i + <span class="num">1</span>, cap - nums[i], nums)
+            : <span class="ty">Integer</span>.MIN_VALUE;
+
+        <span class="kw">return</span> memo[i][cap] = <span class="ty">Math</span>.<span class="fn">max</span>(skip, take);
+    }
+}</code></div>
+    <div class="ins">Use <code style="color:var(--java)">Integer.MIN_VALUE / 2</code> (not MIN_VALUE) for "impossible" — avoids overflow when adding to it.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Template</div>
+    <div class="ctitle">Bottom-Up Tabulation (Java)</div>
+    <div class="cb"><code><span class="kw">public</span> <span class="ty">int</span> <span class="fn">knapsack</span>(<span class="ty">int</span>[] wt, <span class="ty">int</span>[] val, <span class="ty">int</span> W) {
+    <span class="ty">int</span> n = wt.length;
+    <span class="cm">// dp[i][w] = max value using items 0..i-1 with capacity w</span>
+    <span class="ty">int</span>[][] dp = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">1</span>][W + <span class="num">1</span>];
+
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i <= n; i++) {
+        <span class="kw">for</span> (<span class="ty">int</span> w = <span class="num">0</span>; w <= W; w++) {
+            dp[i][w] = dp[i-<span class="num">1</span>][w]; <span class="cm">// skip item i</span>
+            <span class="kw">if</span> (wt[i-<span class="num">1</span>] <= w)
+                dp[i][w] = <span class="ty">Math</span>.<span class="fn">max</span>(dp[i][w],
+                    dp[i-<span class="num">1</span>][w - wt[i-<span class="num">1</span>]] + val[i-<span class="num">1</span>]);
+        }
+    }
+    <span class="kw">return</span> dp[n][W];
+}
+
+<span class="cm">// Space-optimised: rolling 1D array (reverse loop = 0/1)</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">knapsack1D</span>(<span class="ty">int</span>[] wt, <span class="ty">int</span>[] val, <span class="ty">int</span> W) {
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[W + <span class="num">1</span>];
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < wt.length; i++)
+        <span class="kw">for</span> (<span class="ty">int</span> w = W; w >= wt[i]; w--) <span class="cm">// ← reverse!</span>
+            dp[w] = <span class="ty">Math</span>.<span class="fn">max</span>(dp[w], dp[w - wt[i]] + val[i]);
+    <span class="kw">return</span> dp[W];
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 2: LINEAR 1D
+═══════════════════════════════════════ -->
+<div class="sh" id="linear">
+  <h2>Pattern 1 — Linear 1D</h2><div class="line"></div>
+  <span class="badge b-teal">Easiest / Most Common</span>
+</div>
+
+<div class="g2">
+  <div class="card teal">
+    <div class="clabel">Recurrences</div>
+    <div class="ctitle">Key Problems</div>
+    <table class="rt">
+      <thead><tr><th>Problem</th><th>Recurrence</th><th>Space</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">Fibonacci</td><td class="tr">dp[i] = dp[i-1] + dp[i-2]</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">Climbing Stairs</td><td class="tr">dp[i] = dp[i-1] + dp[i-2]</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">House Robber</td><td class="tr">dp[i] = max(dp[i-1], dp[i-2]+nums[i])</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">House Robber II (circle)</td><td class="tr">max(rob[0..n-2], rob[1..n-1])</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">Max Subarray (Kadane)</td><td class="tr">dp[i] = max(nums[i], dp[i-1]+nums[i])</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">Min Cost Stairs</td><td class="tr">dp[i] = cost[i] + min(dp[i-1], dp[i-2])</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">Decode Ways</td><td class="tr">dp[i] += dp[i-1] (valid 1-dig) + dp[i-2] (valid 2-dig)</td><td class="tc">O(1)</td></tr>
+        <tr><td class="tp">Jump Game II</td><td class="tr">Greedy reach; dp[i] = min jumps to i</td><td class="tc">O(n)</td></tr>
+        <tr><td class="tp">Perfect Squares</td><td class="tr">dp[i] = 1 + min(dp[i - j²]) for all j</td><td class="tc">O(n)</td></tr>
+        <tr><td class="tp">Word Break</td><td class="tr">dp[i] = any dp[j] && s[j..i] in dict</td><td class="tc">O(n)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">House Robber + Kadane</div>
+    <div class="cb"><code><span class="cm">// House Robber — O(n) time, O(1) space</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">rob</span>(<span class="ty">int</span>[] nums) {
+    <span class="ty">int</span> prev2 = <span class="num">0</span>, prev1 = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> x : nums) {
+        <span class="ty">int</span> curr = <span class="ty">Math</span>.<span class="fn">max</span>(prev1, prev2 + x);
+        prev2 = prev1;
+        prev1 = curr;
+    }
+    <span class="kw">return</span> prev1;
+}
+
+<span class="cm">// Kadane's Algorithm — max subarray sum</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">maxSubArray</span>(<span class="ty">int</span>[] nums) {
+    <span class="ty">int</span> curr = nums[<span class="num">0</span>], best = nums[<span class="num">0</span>];
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i < nums.length; i++) {
+        curr = <span class="ty">Math</span>.<span class="fn">max</span>(nums[i], curr + nums[i]);
+        best = <span class="ty">Math</span>.<span class="fn">max</span>(best, curr);
+    }
+    <span class="kw">return</span> best;
+}
+
+<span class="cm">// Decode Ways — careful with '0'</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">numDecodings</span>(<span class="ty">String</span> s) {
+    <span class="ty">int</span> n = s.length();
+    <span class="ty">int</span> prev2 = <span class="num">1</span>, prev1 = s.charAt(<span class="num">0</span>) != <span class="str">'0'</span> ? <span class="num">1</span> : <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">2</span>; i <= n; i++) {
+        <span class="ty">int</span> curr = <span class="num">0</span>;
+        <span class="ty">int</span> one = s.charAt(i-<span class="num">1</span>) - <span class="str">'0'</span>;
+        <span class="ty">int</span> two = <span class="ty">Integer</span>.<span class="fn">parseInt</span>(s.substring(i-<span class="num">2</span>, i));
+        <span class="kw">if</span> (one >= <span class="num">1</span>)             curr += prev1;
+        <span class="kw">if</span> (two >= <span class="num">10</span> && two <= <span class="num">26</span>) curr += prev2;
+        prev2 = prev1; prev1 = curr;
+    }
+    <span class="kw">return</span> prev1;
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 3: SUBSEQUENCE 2D
+═══════════════════════════════════════ -->
+<div class="sh" id="subseq">
+  <h2>Pattern 2 — Subsequence / Substring (2D)</h2><div class="line"></div>
+  <span class="badge b-gold">High Frequency</span>
+</div>
+
+<div class="g2">
+  <div class="card gold">
+    <div class="clabel">Recurrences</div>
+    <div class="ctitle">LCS, Edit Distance, Palindromes</div>
+    <table class="rt">
+      <thead><tr><th>Problem</th><th>Recurrence</th><th>Time / Space</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="tp">LCS</td>
+          <td class="tr">if s[i]==t[j]: dp[i-1][j-1]+1<br>else: max(dp[i-1][j], dp[i][j-1])</td>
+          <td class="tc">O(mn) / O(n)</td>
+        </tr>
+        <tr>
+          <td class="tp">Edit Distance (Levenshtein)</td>
+          <td class="tr">if s[i]==t[j]: dp[i-1][j-1]<br>else: 1 + min(ins=dp[i][j-1], del=dp[i-1][j], rep=dp[i-1][j-1])</td>
+          <td class="tc">O(mn) / O(n)</td>
+        </tr>
+        <tr>
+          <td class="tp">LIS (n²)</td>
+          <td class="tr">dp[i] = max(dp[j]+1) for j&lt;i, a[j]&lt;a[i]; ans=max(dp)</td>
+          <td class="tc">O(n²) / O(n)</td>
+        </tr>
+        <tr>
+          <td class="tp">LIS (n log n)</td>
+          <td class="tr">Patience sort: tails[] via binary search (lower_bound replacement)</td>
+          <td class="tc">O(n log n) / O(n)</td>
+        </tr>
+        <tr>
+          <td class="tp">Palindromic Substring</td>
+          <td class="tr">dp[i][j] = (s[i]==s[j]) && (j-i&lt;=2 || dp[i+1][j-1])</td>
+          <td class="tc">O(n²) / O(n²)</td>
+        </tr>
+        <tr>
+          <td class="tp">Longest Palindromic Subseq</td>
+          <td class="tr">if s[i]==s[j]: dp[i+1][j-1]+2<br>else: max(dp[i+1][j], dp[i][j-1])</td>
+          <td class="tc">O(n²) / O(n²)</td>
+        </tr>
+        <tr>
+          <td class="tp">Distinct Subsequences</td>
+          <td class="tr">if s[i]==t[j]: dp[i-1][j-1]+dp[i-1][j]<br>else: dp[i-1][j]</td>
+          <td class="tc">O(mn) / O(mn)</td>
+        </tr>
+        <tr>
+          <td class="tp">Interleaving String</td>
+          <td class="tr">dp[i][j] = (a[i-1]==c[i+j-1] && dp[i-1][j]) || (b[j-1]==c[i+j-1] && dp[i][j-1])</td>
+          <td class="tc">O(mn) / O(mn)</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="ins">⚡ Space compress LCS/Edit Distance: only need prev row → O(min(m,n)). But you <em>lose</em> path reconstruction — if backtracking needed, keep full table.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">Edit Distance + LIS O(n log n)</div>
+    <div class="cb"><code><span class="cm">// Edit Distance — O(mn) time, O(n) space</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">minDistance</span>(<span class="ty">String</span> word1, <span class="ty">String</span> word2) {
+    <span class="ty">int</span> m = word1.length(), n = word2.length();
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">1</span>];
+    <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">0</span>; j <= n; j++) dp[j] = j; <span class="cm">// base: "" → t[0..j]</span>
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i <= m; i++) {
+        <span class="ty">int</span> prev = dp[<span class="num">0</span>]; dp[<span class="num">0</span>] = i;
+        <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">1</span>; j <= n; j++) {
+            <span class="ty">int</span> temp = dp[j];
+            <span class="kw">if</span> (word1.charAt(i-<span class="num">1</span>) == word2.charAt(j-<span class="num">1</span>))
+                dp[j] = prev;
+            <span class="kw">else</span>
+                dp[j] = <span class="num">1</span> + <span class="ty">Math</span>.<span class="fn">min</span>(prev, <span class="ty">Math</span>.<span class="fn">min</span>(dp[j], dp[j-<span class="num">1</span>]));
+            prev = temp;
+        }
+    }
+    <span class="kw">return</span> dp[n];
+}
+
+<span class="cm">// LIS — O(n log n) using patience sorting</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">lengthOfLIS</span>(<span class="ty">int</span>[] nums) {
+    <span class="ty">int</span>[] tails = <span class="kw">new</span> <span class="ty">int</span>[nums.length];
+    <span class="ty">int</span> size = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> x : nums) {
+        <span class="cm">// binary search: first tail >= x</span>
+        <span class="ty">int</span> lo = <span class="num">0</span>, hi = size;
+        <span class="kw">while</span> (lo < hi) {
+            <span class="ty">int</span> mid = (lo + hi) / <span class="num">2</span>;
+            <span class="kw">if</span> (tails[mid] < x) lo = mid + <span class="num">1</span>;
+            <span class="kw">else</span> hi = mid;
+        }
+        tails[lo] = x;
+        <span class="kw">if</span> (lo == size) size++;
+    }
+    <span class="kw">return</span> size;
+}
+
+<span class="cm">// Longest Palindromic Subsequence</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">longestPalindromeSubseq</span>(<span class="ty">String</span> s) {
+    <span class="ty">int</span> n = s.length();
+    <span class="ty">int</span>[][] dp = <span class="kw">new</span> <span class="ty">int</span>[n][n];
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < n; i++) dp[i][i] = <span class="num">1</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> len = <span class="num">2</span>; len <= n; len++) {
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i <= n - len; i++) {
+            <span class="ty">int</span> j = i + len - <span class="num">1</span>;
+            <span class="kw">if</span> (s.charAt(i) == s.charAt(j))
+                dp[i][j] = dp[i+<span class="num">1</span>][j-<span class="num">1</span>] + <span class="num">2</span>;
+            <span class="kw">else</span>
+                dp[i][j] = <span class="ty">Math</span>.<span class="fn">max</span>(dp[i+<span class="num">1</span>][j], dp[i][j-<span class="num">1</span>]);
+        }
+    }
+    <span class="kw">return</span> dp[<span class="num">0</span>][n-<span class="num">1</span>];
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 4: KNAPSACK
+═══════════════════════════════════════ -->
+<div class="sh" id="knapsack">
+  <h2>Pattern 3 — Knapsack Family</h2><div class="line"></div>
+  <span class="badge b-red">Most Tricky</span>
+</div>
+
+<div class="g2">
+  <div class="card red">
+    <div class="clabel">Variants &amp; Key Rule</div>
+    <div class="ctitle">The Iteration Direction Rule</div>
+    <div class="ins ins-red">🔑 The single most important thing: <strong>reverse inner loop = 0/1 (item used once). Forward inner loop = unbounded (item reused).</strong></div>
+    <table class="rt" style="margin-top:12px">
+      <thead><tr><th>Variant</th><th>Outer Loop</th><th>Inner Loop</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">0/1 Knapsack</td><td class="tn">items</td><td class="tn" style="color:var(--accent3)">W → w (reverse)</td><td class="tn">Each item seen once; reverse prevents reuse</td></tr>
+        <tr><td class="tp">Unbounded</td><td class="tn">items</td><td class="tn" style="color:var(--accent2)">w → W (forward)</td><td class="tn">Can reuse same item; forward allows it</td></tr>
+        <tr><td class="tp">Coin Change (min)</td><td class="tn">coins (outer)</td><td class="tn" style="color:var(--accent2)">amount (forward)</td><td class="tn">Unbounded: same coin multiple times</td></tr>
+        <tr><td class="tp">Coin Change (count combos)</td><td class="tn">coins (outer)</td><td class="tn" style="color:var(--accent2)">amount (forward)</td><td class="tn">Outer=coins avoids counting permutations</td></tr>
+        <tr><td class="tp">Coin Change (count perms)</td><td class="tn">amounts (outer)</td><td class="tn">coins (inner)</td><td class="tn">Outer=amounts counts each ordering</td></tr>
+        <tr><td class="tp">Partition Equal Subset</td><td class="tn">items</td><td class="tn" style="color:var(--accent3)">target → 0 (reverse)</td><td class="tn">0/1: each number used exactly once</td></tr>
+        <tr><td class="tp">Target Sum (±)</td><td class="tn">items</td><td class="tn" style="color:var(--accent3)">reverse</td><td class="tn">Reduce to subset sum = (total+target)/2</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">All Knapsack Variants</div>
+    <div class="cb"><code><span class="cm">// 0/1 Knapsack — 1D optimised, O(nW)</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">knapsack01</span>(<span class="ty">int</span>[] wt, <span class="ty">int</span>[] val, <span class="ty">int</span> W) {
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[W + <span class="num">1</span>];
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < wt.length; i++)
+        <span class="kw">for</span> (<span class="ty">int</span> w = W; w >= wt[i]; w--) <span class="cm">// ← reverse</span>
+            dp[w] = <span class="ty">Math</span>.<span class="fn">max</span>(dp[w], dp[w - wt[i]] + val[i]);
+    <span class="kw">return</span> dp[W];
+}
+
+<span class="cm">// Coin Change — min coins (unbounded)</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">coinChange</span>(<span class="ty">int</span>[] coins, <span class="ty">int</span> amount) {
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[amount + <span class="num">1</span>];
+    <span class="ty">Arrays</span>.<span class="fn">fill</span>(dp, amount + <span class="num">1</span>); <span class="cm">// "infinity"</span>
+    dp[<span class="num">0</span>] = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> c : coins)
+        <span class="kw">for</span> (<span class="ty">int</span> j = c; j <= amount; j++) <span class="cm">// ← forward</span>
+            dp[j] = <span class="ty">Math</span>.<span class="fn">min</span>(dp[j], dp[j - c] + <span class="num">1</span>);
+    <span class="kw">return</span> dp[amount] > amount ? -<span class="num">1</span> : dp[amount];
+}
+
+<span class="cm">// Count combinations (NOT permutations): outer=coins</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">change</span>(<span class="ty">int</span> amount, <span class="ty">int</span>[] coins) {
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[amount + <span class="num">1</span>];
+    dp[<span class="num">0</span>] = <span class="num">1</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> c : coins) <span class="cm">// ← outer loop = coins</span>
+        <span class="kw">for</span> (<span class="ty">int</span> j = c; j <= amount; j++)
+            dp[j] += dp[j - c];
+    <span class="kw">return</span> dp[amount];
+}
+
+<span class="cm">// Partition Equal Subset Sum</span>
+<span class="kw">public</span> <span class="ty">boolean</span> <span class="fn">canPartition</span>(<span class="ty">int</span>[] nums) {
+    <span class="ty">int</span> sum = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> x : nums) sum += x;
+    <span class="kw">if</span> (sum % <span class="num">2</span> != <span class="num">0</span>) <span class="kw">return false</span>;
+    <span class="ty">int</span> target = sum / <span class="num">2</span>;
+    <span class="ty">boolean</span>[] dp = <span class="kw">new</span> <span class="ty">boolean</span>[target + <span class="num">1</span>];
+    dp[<span class="num">0</span>] = <span class="kw">true</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> x : nums)
+        <span class="kw">for</span> (<span class="ty">int</span> j = target; j >= x; j--) <span class="cm">// ← reverse 0/1</span>
+            dp[j] |= dp[j - x];
+    <span class="kw">return</span> dp[target];
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 5: INTERVAL DP
+═══════════════════════════════════════ -->
+<div class="sh" id="interval">
+  <h2>Pattern 4 — Interval DP</h2><div class="line"></div>
+  <span class="badge b-blue">O(n³) → Think Splits</span>
+</div>
+
+<div class="g2">
+  <div class="card blue">
+    <div class="clabel">Concept</div>
+    <div class="ctitle">Interval DP Template + Problems</div>
+    <div class="cdesc">State: dp[i][j] = optimal value for subproblem on range [i..j]. Transition: try every split point k. <strong>Critical: always iterate by increasing LENGTH, not by index.</strong></div>
+    <table class="rt">
+      <thead><tr><th>Problem</th><th>dp[i][j] means</th><th>Transition</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">Matrix Chain</td><td class="tn">min ops to multiply matrices i..j</td><td class="tr">min(dp[i][k]+dp[k+1][j] + dims cost)</td></tr>
+        <tr><td class="tp">Burst Balloons</td><td class="tn">max coins from (i,j) exclusive</td><td class="tr">max(dp[i][k]+dp[k][j]+a[i]*a[k]*a[j]) — k is LAST burst</td></tr>
+        <tr><td class="tp">Stone Merging</td><td class="tn">min cost to merge stones i..j</td><td class="tr">min(dp[i][k]+dp[k+1][j]+sum[i..j])</td></tr>
+        <tr><td class="tp">Palindrome Partition</td><td class="tn">min cuts for s[i..j]</td><td class="tr">if palindrome: 0; else min(dp[i][k]+dp[k+1][j]+1)</td></tr>
+        <tr><td class="tp">Optimal BST</td><td class="tn">min search cost for keys i..j</td><td class="tr">sum(freq[i..j]) + min(dp[i][k-1]+dp[k+1][j]) — Knuth O(n²)</td></tr>
+        <tr><td class="tp">Remove Boxes</td><td class="tn">dp[i][j][k]: max pts from boxes i..j with k same boxes before i</td><td class="tr">3D interval DP, O(n⁴)</td></tr>
+      </tbody>
+    </table>
+    <div class="ins ins-blue">🎯 Burst Balloons trick: instead of thinking about which balloon bursts first, think about which bursts <em>last</em> in range (i,j). This makes subproblems independent.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">Matrix Chain + Burst Balloons</div>
+    <div class="cb"><code><span class="cm">// Matrix Chain Multiplication — O(n³)</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">matrixChain</span>(<span class="ty">int</span>[] dims) {
+    <span class="ty">int</span> n = dims.length - <span class="num">1</span>; <span class="cm">// n matrices</span>
+    <span class="ty">int</span>[][] dp = <span class="kw">new</span> <span class="ty">int</span>[n][n];
+    <span class="cm">// dp[i][i] = 0 (single matrix, no cost)</span>
+    <span class="kw">for</span> (<span class="ty">int</span> len = <span class="num">2</span>; len <= n; len++) {      <span class="cm">// length of chain</span>
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i <= n - len; i++) {
+            <span class="ty">int</span> j = i + len - <span class="num">1</span>;
+            dp[i][j] = <span class="ty">Integer</span>.MAX_VALUE;
+            <span class="kw">for</span> (<span class="ty">int</span> k = i; k < j; k++) {    <span class="cm">// split point</span>
+                <span class="ty">int</span> cost = dp[i][k] + dp[k+<span class="num">1</span>][j]
+                         + dims[i] * dims[k+<span class="num">1</span>] * dims[j+<span class="num">1</span>];
+                dp[i][j] = <span class="ty">Math</span>.<span class="fn">min</span>(dp[i][j], cost);
+            }
+        }
+    }
+    <span class="kw">return</span> dp[<span class="num">0</span>][n-<span class="num">1</span>];
+}
+
+<span class="cm">// Burst Balloons — O(n³). Pad with 1s at boundaries.</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">maxCoins</span>(<span class="ty">int</span>[] nums) {
+    <span class="ty">int</span> n = nums.length + <span class="num">2</span>;
+    <span class="ty">int</span>[] a = <span class="kw">new</span> <span class="ty">int</span>[n];
+    a[<span class="num">0</span>] = a[n-<span class="num">1</span>] = <span class="num">1</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < nums.length; i++) a[i+<span class="num">1</span>] = nums[i];
+    <span class="ty">int</span>[][] dp = <span class="kw">new</span> <span class="ty">int</span>[n][n]; <span class="cm">// dp[i][j]: max coins in open (i,j)</span>
+    <span class="kw">for</span> (<span class="ty">int</span> len = <span class="num">2</span>; len < n; len++) {
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < n - len; i++) {
+            <span class="ty">int</span> j = i + len;
+            <span class="kw">for</span> (<span class="ty">int</span> k = i+<span class="num">1</span>; k < j; k++) { <span class="cm">// k = last balloon burst</span>
+                dp[i][j] = <span class="ty">Math</span>.<span class="fn">max</span>(dp[i][j],
+                    dp[i][k] + dp[k][j] + a[i]*a[k]*a[j]);
+            }
+        }
+    }
+    <span class="kw">return</span> dp[<span class="num">0</span>][n-<span class="num">1</span>];
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 6: TREE DP
+═══════════════════════════════════════ -->
+<div class="sh" id="tree">
+  <h2>Pattern 5 — Tree DP</h2><div class="line"></div>
+  <span class="badge b-pink">Post-Order DFS</span>
+</div>
+
+<div class="g2">
+  <div class="card pink">
+    <div class="clabel">Key Problems</div>
+    <div class="ctitle">DP on Trees — Always Post-Order</div>
+    <div class="cdesc">Tree DP = compute children first, then combine at parent. The DFS return value IS the dp state.</div>
+    <table class="rt">
+      <thead><tr><th>Problem</th><th>Return from DFS</th><th>Answer</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">Max Path Sum</td><td class="tn">Max single-branch gain from node</td><td class="tn">Track global max at each node (left+right+val)</td></tr>
+        <tr><td class="tp">Diameter</td><td class="tn">Depth of subtree</td><td class="tn">Global max of left_depth + right_depth at each node</td></tr>
+        <tr><td class="tp">Max Independent Set</td><td class="tn">int[2]: {with node, without node}</td><td class="tn">max(dp[root][0], dp[root][1])</td></tr>
+        <tr><td class="tp">House Robber III</td><td class="tn">int[2]: {rob this, skip this}</td><td class="tn">Same as independent set</td></tr>
+        <tr><td class="tp">Count Nodes in Complete Tree</td><td class="tn">left/right height comparison</td><td class="tn">O(log²n) with height trick</td></tr>
+        <tr><td class="tp">Distribute Coins</td><td class="tn">Excess coins at subtree</td><td class="tn">Global sum of |excess| = moves</td></tr>
+      </tbody>
+    </table>
+    <div class="ins ins-teal">🌳 The "return two values" trick: return int[2] or a custom pair where [0]=include, [1]=exclude. Very common pattern.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">Max Path Sum + House Robber III</div>
+    <div class="cb"><code><span class="cm">// Binary Tree Max Path Sum — O(n)</span>
+<span class="kw">class</span> <span class="ty">Solution</span> {
+    <span class="ty">int</span> ans = <span class="ty">Integer</span>.MIN_VALUE;
+
+    <span class="kw">public</span> <span class="ty">int</span> <span class="fn">maxPathSum</span>(<span class="ty">TreeNode</span> root) {
+        <span class="fn">dfs</span>(root); <span class="kw">return</span> ans;
+    }
+
+    <span class="kw">private</span> <span class="ty">int</span> <span class="fn">dfs</span>(<span class="ty">TreeNode</span> node) {
+        <span class="kw">if</span> (node == <span class="kw">null</span>) <span class="kw">return</span> <span class="num">0</span>;
+        <span class="ty">int</span> L = <span class="ty">Math</span>.<span class="fn">max</span>(<span class="num">0</span>, <span class="fn">dfs</span>(node.left));  <span class="cm">// discard negatives</span>
+        <span class="ty">int</span> R = <span class="ty">Math</span>.<span class="fn">max</span>(<span class="num">0</span>, <span class="fn">dfs</span>(node.right));
+        ans = <span class="ty">Math</span>.<span class="fn">max</span>(ans, L + R + node.val); <span class="cm">// path through node</span>
+        <span class="kw">return</span> node.val + <span class="ty">Math</span>.<span class="fn">max</span>(L, R);       <span class="cm">// return single branch</span>
+    }
+}
+
+<span class="cm">// House Robber III — rob/skip pair trick</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">rob</span>(<span class="ty">TreeNode</span> root) {
+    <span class="ty">int</span>[] res = <span class="fn">dfs</span>(root);
+    <span class="kw">return</span> <span class="ty">Math</span>.<span class="fn">max</span>(res[<span class="num">0</span>], res[<span class="num">1</span>]);
+}
+
+<span class="cm">// returns [rob_this_node, skip_this_node]</span>
+<span class="kw">private</span> <span class="ty">int</span>[] <span class="fn">dfs</span>(<span class="ty">TreeNode</span> node) {
+    <span class="kw">if</span> (node == <span class="kw">null</span>) <span class="kw">return new</span> <span class="ty">int</span>[]{<span class="num">0</span>, <span class="num">0</span>};
+    <span class="ty">int</span>[] L = <span class="fn">dfs</span>(node.left);
+    <span class="ty">int</span>[] R = <span class="fn">dfs</span>(node.right);
+    <span class="cm">// rob: take this node → can't take children</span>
+    <span class="ty">int</span> rob  = node.val + L[<span class="num">1</span>] + R[<span class="num">1</span>];
+    <span class="cm">// skip: don't take this node → children choose freely</span>
+    <span class="ty">int</span> skip = <span class="ty">Math</span>.<span class="fn">max</span>(L[<span class="num">0</span>], L[<span class="num">1</span>]) + <span class="ty">Math</span>.<span class="fn">max</span>(R[<span class="num">0</span>], R[<span class="num">1</span>]);
+    <span class="kw">return new</span> <span class="ty">int</span>[]{rob, skip};
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 7: BITMASK DP
+═══════════════════════════════════════ -->
+<div class="sh" id="bitmask">
+  <h2>Pattern 6 — Bitmask DP</h2><div class="line"></div>
+  <span class="badge b-gold">n ≤ 20, O(n² 2ⁿ)</span>
+</div>
+
+<div class="g2">
+  <div class="card gold">
+    <div class="clabel">Concept + Bit Tricks</div>
+    <div class="ctitle">State = Visited Subset as Integer</div>
+    <div class="cdesc">When n ≤ 20, represent which items/cities have been visited as bits in an integer. 2ⁿ possible subsets × n positions = tractable.</div>
+    <div style="margin-bottom:10px;">
+      <table class="rt">
+        <thead><tr><th>Operation</th><th>Java Code</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="tp">Check bit i</td><td class="tr">(mask >> i) & 1</td><td class="tn">Is city i visited?</td></tr>
+          <tr><td class="tp">Set bit i</td><td class="tr">mask | (1 &lt;&lt; i)</td><td class="tn">Mark city i visited</td></tr>
+          <tr><td class="tp">Clear bit i</td><td class="tr">mask & ~(1 &lt;&lt; i)</td><td class="tn">Unvisit city i</td></tr>
+          <tr><td class="tp">Count bits</td><td class="tr">Integer.bitCount(mask)</td><td class="tn">How many visited</td></tr>
+          <tr><td class="tp">All visited</td><td class="tr">mask == (1&lt;&lt;n)-1</td><td class="tn">Full mask</td></tr>
+          <tr><td class="tp">Enumerate submasks</td><td class="tr">for(sub=mask; sub>0; sub=(sub-1)&mask)</td><td class="tn">All subsets of mask</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ins">SOS (Sum over Subsets) DP: dp[mask] = sum of dp[sub] for all subsets sub of mask. O(n·2ⁿ) — used in competitive programming for subset convolution.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">TSP (Min Hamiltonian Path)</div>
+    <div class="cb"><code><span class="cm">// TSP — O(n² * 2ⁿ) time, O(n * 2ⁿ) space</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">tsp</span>(<span class="ty">int</span>[][] dist) {
+    <span class="ty">int</span> n = dist.length;
+    <span class="ty">int</span> FULL = (<span class="num">1</span> << n) - <span class="num">1</span>;
+    <span class="cm">// dp[mask][i] = min cost to visit cities in mask, ending at i</span>
+    <span class="ty">int</span>[][] dp = <span class="kw">new</span> <span class="ty">int</span>[<span class="num">1</span> << n][n];
+    <span class="kw">for</span> (<span class="ty">int</span>[] row : dp) <span class="ty">Arrays</span>.<span class="fn">fill</span>(row, <span class="ty">Integer</span>.MAX_VALUE / <span class="num">2</span>);
+    dp[<span class="num">1</span>][<span class="num">0</span>] = <span class="num">0</span>; <span class="cm">// start at city 0, mask=0b0001</span>
+
+    <span class="kw">for</span> (<span class="ty">int</span> mask = <span class="num">1</span>; mask <= FULL; mask++) {
+        <span class="kw">for</span> (<span class="ty">int</span> u = <span class="num">0</span>; u < n; u++) {
+            <span class="kw">if</span> (((mask >> u) & <span class="num">1</span>) == <span class="num">0</span>) <span class="kw">continue</span>; <span class="cm">// u not in mask</span>
+            <span class="kw">if</span> (dp[mask][u] == <span class="ty">Integer</span>.MAX_VALUE / <span class="num">2</span>) <span class="kw">continue</span>;
+            <span class="kw">for</span> (<span class="ty">int</span> v = <span class="num">0</span>; v < n; v++) {
+                <span class="kw">if</span> (((mask >> v) & <span class="num">1</span>) == <span class="num">1</span>) <span class="kw">continue</span>; <span class="cm">// v already visited</span>
+                <span class="ty">int</span> nextMask = mask | (<span class="num">1</span> << v);
+                dp[nextMask][v] = <span class="ty">Math</span>.<span class="fn">min</span>(
+                    dp[nextMask][v],
+                    dp[mask][u] + dist[u][v]
+                );
+            }
+        }
+    }
+    <span class="ty">int</span> ans = <span class="ty">Integer</span>.MAX_VALUE;
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i < n; i++)
+        ans = <span class="ty">Math</span>.<span class="fn">min</span>(ans, dp[FULL][i] + dist[i][<span class="num">0</span>]); <span class="cm">// return home</span>
+    <span class="kw">return</span> ans;
+}
+
+<span class="cm">// Assign tasks to workers — dp[mask] = min cost to</span>
+<span class="cm">// assign first popcount(mask) workers to tasks in mask</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">assignTasks</span>(<span class="ty">int</span>[][] cost) {
+    <span class="ty">int</span> n = cost.length;
+    <span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[<span class="num">1</span> << n];
+    <span class="ty">Arrays</span>.<span class="fn">fill</span>(dp, <span class="ty">Integer</span>.MAX_VALUE);
+    dp[<span class="num">0</span>] = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> mask = <span class="num">1</span>; mask < (<span class="num">1</span> << n); mask++) {
+        <span class="ty">int</span> worker = <span class="ty">Integer</span>.<span class="fn">bitCount</span>(mask) - <span class="num">1</span>; <span class="cm">// 0-indexed worker</span>
+        <span class="kw">for</span> (<span class="ty">int</span> task = <span class="num">0</span>; task < n; task++) {
+            <span class="kw">if</span> (((mask >> task) & <span class="num">1</span>) == <span class="num">0</span>) <span class="kw">continue</span>;
+            <span class="ty">int</span> prev = mask ^ (<span class="num">1</span> << task);
+            <span class="kw">if</span> (dp[prev] != <span class="ty">Integer</span>.MAX_VALUE)
+                dp[mask] = <span class="ty">Math</span>.<span class="fn">min</span>(dp[mask], dp[prev] + cost[worker][task]);
+        }
+    }
+    <span class="kw">return</span> dp[(<span class="num">1</span> << n) - <span class="num">1</span>];
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 8: DIGIT DP
+═══════════════════════════════════════ -->
+<div class="sh" id="digit">
+  <h2>Pattern 7 — Digit DP</h2><div class="line"></div>
+  <span class="badge b-teal">Count numbers in [0, N]</span>
+</div>
+
+<div class="g2">
+  <div class="card teal">
+    <div class="clabel">Framework</div>
+    <div class="ctitle">State Dimensions</div>
+    <div class="cdesc">Count integers in [lo, hi] satisfying a property. Compute f(hi) − f(lo−1). Always recurse over digit positions.</div>
+    <table class="rt">
+      <thead><tr><th>State</th><th>Type</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">pos</td><td class="tn">int 0..D-1</td><td class="tn">Current digit being placed (D = # of digits in N)</td></tr>
+        <tr><td class="tp">tight</td><td class="tn">boolean</td><td class="tn">Are we still bounded by N's digits? Once false → any digit 0-9 allowed</td></tr>
+        <tr><td class="tp">started</td><td class="tn">boolean</td><td class="tn">Have we placed a non-zero digit yet? Handles leading-zero edge cases</td></tr>
+        <tr><td class="tp">extra</td><td class="tn">problem-specific</td><td class="tn">Digit sum, count of 1s, remainder mod k, last digit placed, etc.</td></tr>
+      </tbody>
+    </table>
+    <div class="ins ins-teal">Cache key = (pos, tight, started, extra). With tight=false+started=true, the state is fully determined — cache these freely. With tight=true, don't cache (or cache separately).</div>
+    <div class="ins">Common problems: count numbers with digit sum S, count numbers with no consecutive same digits, count numbers ≡ k (mod m), count step numbers.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">Digit DP — Count Numbers with Digit Sum ≤ S</div>
+    <div class="cb"><code><span class="kw">class</span> <span class="ty">DigitDP</span> {
+    <span class="ty">int</span>[] digits;
+    <span class="ty">int</span>[][][] memo; <span class="cm">// [pos][tight][digitSum]</span>
+    <span class="ty">int</span> target;
+
+    <span class="kw">public</span> <span class="ty">int</span> <span class="fn">countUpTo</span>(<span class="ty">long</span> n, <span class="ty">int</span> S) {
+        <span class="ty">String</span> s = <span class="ty">Long</span>.<span class="fn">toString</span>(n);
+        digits = <span class="kw">new</span> <span class="ty">int</span>[s.length()];
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < s.length(); i++)
+            digits[i] = s.charAt(i) - <span class="str">'0'</span>;
+        target = S;
+        <span class="cm">// memo[pos][tight][sum] — -1 = unvisited</span>
+        memo = <span class="kw">new</span> <span class="ty">int</span>[digits.length][<span class="num">2</span>][S + <span class="num">1</span>];
+        <span class="kw">for</span> (<span class="ty">int</span>[][] a : memo) <span class="kw">for</span> (<span class="ty">int</span>[] b : a) <span class="ty">Arrays</span>.<span class="fn">fill</span>(b, -<span class="num">1</span>);
+        <span class="kw">return</span> <span class="fn">dp</span>(<span class="num">0</span>, <span class="kw">true</span>, <span class="kw">false</span>, <span class="num">0</span>);
+    }
+
+    <span class="kw">private</span> <span class="ty">int</span> <span class="fn">dp</span>(<span class="ty">int</span> pos, <span class="ty">boolean</span> tight, <span class="ty">boolean</span> started, <span class="ty">int</span> sum) {
+        <span class="kw">if</span> (sum > target) <span class="kw">return</span> <span class="num">0</span>;              <span class="cm">// pruning</span>
+        <span class="kw">if</span> (pos == digits.length) <span class="kw">return</span> started ? <span class="num">1</span> : <span class="num">0</span>;
+
+        <span class="ty">int</span> ti = tight ? <span class="num">1</span> : <span class="num">0</span>;
+        <span class="kw">if</span> (!tight && started && memo[pos][ti][sum] != -<span class="num">1</span>)
+            <span class="kw">return</span> memo[pos][ti][sum];   <span class="cm">// cache hit</span>
+
+        <span class="ty">int</span> limit = tight ? digits[pos] : <span class="num">9</span>;
+        <span class="ty">int</span> result = <span class="num">0</span>;
+        <span class="kw">for</span> (<span class="ty">int</span> d = <span class="num">0</span>; d <= limit; d++) {
+            result += <span class="fn">dp</span>(
+                pos + <span class="num">1</span>,
+                tight && (d == limit),
+                started || (d != <span class="num">0</span>),
+                started ? sum + d : (d == <span class="num">0</span> ? <span class="num">0</span> : d) <span class="cm">// skip leading zeros</span>
+            );
+        }
+        <span class="kw">if</span> (!tight && started) memo[pos][ti][sum] = result;
+        <span class="kw">return</span> result;
+    }
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 9: GRAPH DP
+═══════════════════════════════════════ -->
+<div class="sh" id="graph">
+  <h2>Pattern 8 — Graph / Grid DP</h2><div class="line"></div>
+  <span class="badge b-blue">DAGs, Grids, Bellman-Ford</span>
+</div>
+
+<div class="g2">
+  <div class="card blue">
+    <div class="clabel">Graph Settings</div>
+    <div class="ctitle">DP on DAGs and Grids</div>
+    <table class="rt">
+      <thead><tr><th>Setting</th><th>Approach</th><th>Complexity</th></tr></thead>
+      <tbody>
+        <tr><td class="tp">DAG longest path</td><td class="tn">Topological sort; relax edges in topo order</td><td class="tc">O(V+E)</td></tr>
+        <tr><td class="tp">DAG count paths</td><td class="tn">Topo sort; dp[v] += dp[u] for each edge u→v</td><td class="tc">O(V+E)</td></tr>
+        <tr><td class="tp">With cycles → SCC</td><td class="tn">Condense with Kosaraju/Tarjan → DAG on SCCs</td><td class="tc">O(V+E)</td></tr>
+        <tr><td class="tp">Shortest path k edges</td><td class="tn">Bellman-Ford: dp[k][v]=min dist using ≤k edges</td><td class="tc">O(VE)</td></tr>
+        <tr><td class="tp">Grid unique paths</td><td class="tn">dp[i][j]=dp[i-1][j]+dp[i][j-1]</td><td class="tc">O(mn) / O(n)</td></tr>
+        <tr><td class="tp">Grid min path sum</td><td class="tn">dp[i][j]=grid[i][j]+min(dp[i-1][j], dp[i][j-1])</td><td class="tc">O(mn) / O(n)</td></tr>
+        <tr><td class="tp">Dungeon Game</td><td class="tn">Fill bottom-right to top-left; dp[i][j]=min HP needed</td><td class="tc">O(mn) / O(mn)</td></tr>
+        <tr><td class="tp">Longest increasing path matrix</td><td class="tn">DFS + memo on DAG induced by increasing values</td><td class="tc">O(mn)</td></tr>
+        <tr><td class="tp">Number of islands variants</td><td class="tn">BFS/DFS + dp for max area, perimeter etc.</td><td class="tc">O(mn)</td></tr>
+      </tbody>
+    </table>
+    <div class="warn">⚠️ DP on a graph with cycles ALWAYS requires SCC contraction first. Never apply DP directly to a graph with back-edges.</div>
+  </div>
+
+  <div class="card java">
+    <div class="clabel">Java Code</div>
+    <div class="ctitle">Grid DP + Longest Increasing Path</div>
+    <div class="cb"><code><span class="cm">// Grid Min Path Sum — O(mn), O(n) space</span>
+<span class="kw">public</span> <span class="ty">int</span> <span class="fn">minPathSum</span>(<span class="ty">int</span>[][] grid) {
+    <span class="ty">int</span> m = grid.length, n = grid[<span class="num">0</span>].length;
+    <span class="ty">int</span>[] dp = grid[<span class="num">0</span>].clone();
+    <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">1</span>; j < n; j++) dp[j] += dp[j-<span class="num">1</span>]; <span class="cm">// first row</span>
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i < m; i++) {
+        dp[<span class="num">0</span>] += grid[i][<span class="num">0</span>];
+        <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">1</span>; j < n; j++)
+            dp[j] = grid[i][j] + <span class="ty">Math</span>.<span class="fn">min</span>(dp[j], dp[j-<span class="num">1</span>]);
+    }
+    <span class="kw">return</span> dp[n-<span class="num">1</span>];
+}
+
+<span class="cm">// Longest Increasing Path in Matrix — DFS + memo</span>
+<span class="kw">class</span> <span class="ty">LIPSolution</span> {
+    <span class="ty">int</span>[][] memo, matrix;
+    <span class="ty">int</span> m, n;
+    <span class="ty">int</span>[][] dirs = {{<span class="num">0</span>,<span class="num">1</span>},{<span class="num">0</span>,-<span class="num">1</span>},{<span class="num">1</span>,<span class="num">0</span>},{-<span class="num">1</span>,<span class="num">0</span>}};
+
+    <span class="kw">public</span> <span class="ty">int</span> <span class="fn">longestIncreasingPath</span>(<span class="ty">int</span>[][] mat) {
+        m = mat.length; n = mat[<span class="num">0</span>].length;
+        matrix = mat; memo = <span class="kw">new</span> <span class="ty">int</span>[m][n];
+        <span class="ty">int</span> ans = <span class="num">0</span>;
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i < m; i++)
+            <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">0</span>; j < n; j++)
+                ans = <span class="ty">Math</span>.<span class="fn">max</span>(ans, <span class="fn">dfs</span>(i, j));
+        <span class="kw">return</span> ans;
+    }
+    <span class="kw">private</span> <span class="ty">int</span> <span class="fn">dfs</span>(<span class="ty">int</span> i, <span class="ty">int</span> j) {
+        <span class="kw">if</span> (memo[i][j] != <span class="num">0</span>) <span class="kw">return</span> memo[i][j]; <span class="cm">// cache hit</span>
+        memo[i][j] = <span class="num">1</span>;
+        <span class="kw">for</span> (<span class="ty">int</span>[] d : dirs) {
+            <span class="ty">int</span> ni = i+d[<span class="num">0</span>], nj = j+d[<span class="num">1</span>];
+            <span class="kw">if</span> (ni>=<span class="num">0</span> && ni<m && nj>=<span class="num">0</span> && nj<n
+                    && matrix[ni][nj] > matrix[i][j])
+                memo[i][j] = <span class="ty">Math</span>.<span class="fn">max</span>(memo[i][j], <span class="fn">dfs</span>(ni,nj)+<span class="num">1</span>);
+        }
+        <span class="kw">return</span> memo[i][j];
+    }
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 10: ADVANCED
+═══════════════════════════════════════ -->
+<div class="sh" id="advanced">
+  <h2>Advanced Optimisations</h2><div class="line"></div>
+  <span class="badge b-red">Competitive / Hard</span>
+</div>
+
+<div class="g3">
+  <div class="card red">
+    <div class="clabel">Optimisation 1</div>
+    <div class="ctitle">Convex Hull Trick (CHT)</div>
+    <div class="cdesc">Applies when: <span class="m">dp[i] = min over j&lt;i of: b[j]·a[i] + c[j]</span> — i.e., dp is a min over linear functions. Maintain lower envelope of lines.</div>
+    <ul class="cl">
+      <li><strong>Lines sorted by slope + queries sorted</strong><span class="sub">Deque approach: O(n) total. Pop lines from back when new line dominates.</span></li>
+      <li><strong>Li Chao Tree (online, unsorted)</strong><span class="sub">Segment tree on query values. O(n log n). Handles arbitrary insert/query order.</span></li>
+      <li><strong>Slope trick</strong><span class="sub">Special case where dp transition changes the "slope" of a piecewise-linear function. Priority queue on breakpoints.</span></li>
+    </ul>
+    <div class="cb"><code><span class="cm">// CHT deque: add line y=mx+b; query min at x</span>
+<span class="kw">static</span> <span class="ty">long</span>[] <span class="fn">bad</span>(<span class="ty">long</span>[] l1, <span class="ty">long</span>[] l2, <span class="ty">long</span>[] l3) {
+    <span class="cm">// l2 never optimal if intersection(l1,l3) ≤ intersection(l1,l2)</span>
+    <span class="kw">return</span> (l3[<span class="num">1</span>]-l1[<span class="num">1</span>])*(l1[<span class="num">0</span>]-l2[<span class="num">0</span>])
+         <= (l2[<span class="num">1</span>]-l1[<span class="num">1</span>])*(l1[<span class="num">0</span>]-l3[<span class="num">0</span>]);
+}
+<span class="cm">// Deque of lines {m, b}; query = min(m*x + b)</span></code></div>
+  </div>
+
+  <div class="card gold">
+    <div class="clabel">Optimisation 2</div>
+    <div class="ctitle">Knuth–Yao Optimisation</div>
+    <div class="cdesc">Reduces interval DP from <span class="m">O(n³) → O(n²)</span> when the cost function satisfies the <strong>quadrangle inequality</strong>.</div>
+    <ul class="cl">
+      <li><strong>Condition</strong><span class="sub">cost(a,c) + cost(b,d) ≤ cost(a,d) + cost(b,c) for a≤b≤c≤d</span></li>
+      <li><strong>Consequence</strong><span class="sub">opt[i][j-1] ≤ opt[i][j] ≤ opt[i+1][j] — the optimal split point is monotone.</span></li>
+      <li><strong>Code change</strong><span class="sub">Just bound the k loop: k from opt[i][j-1] to opt[i+1][j]. Everything else stays.</span></li>
+    </ul>
+    <div class="cb"><code><span class="kw">for</span> (<span class="ty">int</span> len = <span class="num">2</span>; len <= n; len++) {
+  <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i <= n - len; i++) {
+    <span class="ty">int</span> j = i + len - <span class="num">1</span>;
+    <span class="ty">int</span> lo = opt[i][j-<span class="num">1</span>];   <span class="cm">// Knuth bound</span>
+    <span class="ty">int</span> hi = (j+<span class="num">1</span> < n) ? opt[i+<span class="num">1</span>][j] : j;
+    <span class="kw">for</span> (<span class="ty">int</span> k = lo; k <= hi; k++) {
+      <span class="kw">if</span> (dp[i][k] + dp[k+<span class="num">1</span>][j] + cost < dp[i][j]) {
+        dp[i][j] = dp[i][k] + dp[k+<span class="num">1</span>][j] + cost;
+        opt[i][j] = k;
+      }
+    }
+  }
+}</code></div>
+  </div>
+
+  <div class="card blue">
+    <div class="clabel">Optimisation 3</div>
+    <div class="ctitle">Divide &amp; Conquer Opt.</div>
+    <div class="cdesc">Reduces O(n²k) DP to <span class="m">O(nk log n)</span> when optimal split point is monotone across rows.</div>
+    <ul class="cl">
+      <li><strong>Condition</strong><span class="sub">opt[i][j] ≤ opt[i][j+1]: left bound of search range shrinks monotonically</span></li>
+      <li><strong>Algorithm</strong><span class="sub">Find opt[mid] in [opt_lo..min(opt_hi, mid)], then recurse on halves</span></li>
+      <li><strong>Apply when</strong><span class="sub">K-partition cost minimisation: split array into k groups minimising sum of costs</span></li>
+    </ul>
+    <div class="cb"><code><span class="kw">void</span> <span class="fn">solve</span>(<span class="ty">int</span> lo, <span class="ty">int</span> hi, <span class="ty">int</span> optLo, <span class="ty">int</span> optHi) {
+    <span class="kw">if</span> (lo > hi) <span class="kw">return</span>;
+    <span class="ty">int</span> mid = (lo + hi) / <span class="num">2</span>, opt = optLo;
+    <span class="kw">for</span> (<span class="ty">int</span> k = optLo; k <= <span class="ty">Math</span>.<span class="fn">min</span>(optHi, mid - <span class="num">1</span>); k++) {
+        <span class="kw">if</span> (<span class="fn">cost</span>(k, mid) < <span class="fn">cost</span>(opt, mid)) opt = k;
+    }
+    dp[layer][mid] = <span class="fn">cost</span>(opt, mid);
+    <span class="fn">solve</span>(lo, mid-<span class="num">1</span>, optLo, opt);
+    <span class="fn">solve</span>(mid+<span class="num">1</span>, hi, opt, optHi);
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 11: SPACE TRICKS
+═══════════════════════════════════════ -->
+<div class="sh" id="space">
+  <h2>Space Optimisation</h2><div class="line"></div>
+  <span class="badge b-teal">O(n²) → O(n) → O(1)</span>
+</div>
+
+<div class="g3">
+  <div class="card teal">
+    <div class="clabel">Technique 1</div>
+    <div class="ctitle">Rolling Array</div>
+    <div class="cdesc">When dp[i][j] only depends on dp[i-1][*], keep only two rows. When it only depends on dp[i-1][j-1], dp[i-1][j], dp[i][j-1] — keep one row + one scalar.</div>
+    <div class="cb"><code><span class="cm">// LCS: O(mn) → O(n) with prev row</span>
+<span class="ty">int</span>[] prev = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">1</span>];
+<span class="kw">for</span> (<span class="ty">char</span> c : s.toCharArray()) {
+    <span class="ty">int</span>[] curr = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">1</span>];
+    <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">1</span>; j <= n; j++) {
+        <span class="kw">if</span> (c == t.charAt(j-<span class="num">1</span>))
+            curr[j] = prev[j-<span class="num">1</span>] + <span class="num">1</span>;
+        <span class="kw">else</span>
+            curr[j] = <span class="ty">Math</span>.<span class="fn">max</span>(prev[j], curr[j-<span class="num">1</span>]);
+    }
+    prev = curr;
+}
+<span class="kw">return</span> prev[n];</code></div>
+    <div class="ins ins-teal">Can't reconstruct path with rolling array — keep full table if backtracking needed.</div>
+  </div>
+
+  <div class="card red">
+    <div class="clabel">Technique 2</div>
+    <div class="ctitle">In-Place Update Trick</div>
+    <div class="cdesc">For Edit Distance: update a single row in-place using a <code style="color:var(--java)">prev</code> scalar to hold the diagonal.</div>
+    <div class="cb"><code><span class="cm">// Edit Distance in O(n) space</span>
+<span class="ty">int</span>[] dp = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">1</span>];
+<span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">0</span>; j <= n; j++) dp[j] = j;
+<span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i <= m; i++) {
+    <span class="ty">int</span> diag = dp[<span class="num">0</span>]; <span class="cm">// save dp[i-1][j-1]</span>
+    dp[<span class="num">0</span>] = i;
+    <span class="kw">for</span> (<span class="ty">int</span> j = <span class="num">1</span>; j <= n; j++) {
+        <span class="ty">int</span> temp = dp[j];
+        <span class="kw">if</span> (s.charAt(i-<span class="num">1</span>)==t.charAt(j-<span class="num">1</span>))
+            dp[j] = diag;
+        <span class="kw">else</span>
+            dp[j] = <span class="num">1</span>+<span class="ty">Math</span>.<span class="fn">min</span>(diag,<span class="ty">Math</span>.<span class="fn">min</span>(dp[j],dp[j-<span class="num">1</span>]));
+        diag = temp; <span class="cm">// advance diagonal</span>
+    }
+}</code></div>
+  </div>
+
+  <div class="card blue">
+    <div class="clabel">Technique 3</div>
+    <div class="ctitle">Coordinate Compression + BIT</div>
+    <div class="cdesc">When dp values are large but sparse, compress to ranks and query with BIT or Segment Tree for O(n log n) transitions.</div>
+    <div class="cb"><code><span class="cm">// O(n log n) LIS via BIT on compressed values</span>
+<span class="ty">int</span>[] sorted = nums.clone();
+<span class="ty">Arrays</span>.<span class="fn">sort</span>(sorted); <span class="cm">// deduplicate + rank</span>
+<span class="ty">int</span>[] bit = <span class="kw">new</span> <span class="ty">int</span>[n + <span class="num">2</span>];
+<span class="ty">int</span> ans = <span class="num">0</span>;
+<span class="kw">for</span> (<span class="ty">int</span> x : nums) {
+    <span class="ty">int</span> rank = <span class="ty">Arrays</span>.<span class="fn">binarySearch</span>(sorted, x) + <span class="num">1</span>;
+    <span class="ty">int</span> best = <span class="fn">query</span>(bit, rank - <span class="num">1</span>) + <span class="num">1</span>;
+    ans = <span class="ty">Math</span>.<span class="fn">max</span>(ans, best);
+    <span class="fn">update</span>(bit, rank, best, n);
+}
+
+<span class="kw">static</span> <span class="ty">int</span> <span class="fn">query</span>(<span class="ty">int</span>[] bit, <span class="ty">int</span> i) {
+    <span class="ty">int</span> res = <span class="num">0</span>;
+    <span class="kw">for</span> (; i > <span class="num">0</span>; i -= i & -i) res = <span class="ty">Math</span>.<span class="fn">max</span>(res, bit[i]);
+    <span class="kw">return</span> res;
+}
+<span class="kw">static</span> <span class="ty">void</span> <span class="fn">update</span>(<span class="ty">int</span>[] bit, <span class="ty">int</span> i, <span class="ty">int</span> v, <span class="ty">int</span> n) {
+    <span class="kw">for</span> (; i <= n; i += i & -i) bit[i] = <span class="ty">Math</span>.<span class="fn">max</span>(bit[i], v);
+}</code></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 12: PATTERN RECOGNITION
+═══════════════════════════════════════ -->
+<div class="sh" id="recognition">
+  <h2>Pattern Recognition Guide</h2><div class="line"></div>
+  <span class="badge b-pink">Fast Lookup</span>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="clabel">Trigger → Pattern → Key Java API</div>
+  <div class="pgrid">
+    <div class="pi"><div class="tri">"max/min of contiguous subarray"</div><div class="pn">Kadane's Algorithm</div><div class="pex">maxSubArray, maxProduct, circular</div></div>
+    <div class="pi"><div class="tri">"choose subset hitting exact target"</div><div class="pn">0/1 Knapsack (reverse)</div><div class="pex">partitionEqualSubset, targetSum</div></div>
+    <div class="pi"><div class="tri">"unlimited use, fill amount"</div><div class="pn">Unbounded Knapsack (fwd)</div><div class="pex">coinChange, combinationSum IV</div></div>
+    <div class="pi"><div class="tri">"two strings, align/transform"</div><div class="pn">LCS / Edit Distance</div><div class="pex">editDistance, minInsertions</div></div>
+    <div class="pi"><div class="tri">"find longest increasing order"</div><div class="pn">LIS (patience sort)</div><div class="pex">Arrays.binarySearch on tails[]</div></div>
+    <div class="pi"><div class="tri">"split range into groups/merge"</div><div class="pn">Interval DP (length outer)</div><div class="pex">matrixChain, burstBalloons</div></div>
+    <div class="pi"><div class="tri">"all subsets, n ≤ 20"</div><div class="pn">Bitmask DP</div><div class="pex">Integer.bitCount(), 1&lt;&lt;i</div></div>
+    <div class="pi"><div class="tri">"count numbers in [lo,hi] with property"</div><div class="pn">Digit DP</div><div class="pex">f(hi) - f(lo-1); tight boolean</div></div>
+    <div class="pi"><div class="tri">"palindrome, symmetric structure"</div><div class="pn">Expand centre / interval DP</div><div class="pex">iterate length; dp[i][j]</div></div>
+    <div class="pi"><div class="tri">"game: two players, optimal"</div><div class="pn">Game DP (minimax)</div><div class="pex">dp[i][j] = max(take_left, take_right)</div></div>
+    <div class="pi"><div class="tri">"robot on grid, obstacles"</div><div class="pn">Grid DP</div><div class="pex">dp[i][j] from top + left</div></div>
+    <div class="pi"><div class="tri">"tree + combine children"</div><div class="pn">Tree DP (post-order DFS)</div><div class="pex">Return int[] {include, exclude}</div></div>
+    <div class="pi"><div class="tri">"stock prices, at most k transactions"</div><div class="pn">State machine DP</div><div class="pex">dp[k][0/1] hold/not hold</div></div>
+    <div class="pi"><div class="tri">"dp cost is linear fn of previous dp"</div><div class="pn">Convex Hull Trick</div><div class="pex">Deque of lines (m,b)</div></div>
+    <div class="pi"><div class="tri">"number of ways to arrange/decode"</div><div class="pn">Counting DP</div><div class="pex">dp[i] += dp[j] over valid transitions</div></div>
+    <div class="pi"><div class="tri">"dp[i][j] merge intervals monotone opt"</div><div class="pn">Knuth–Yao O(n²)</div><div class="pex">Bound k with opt[i][j-1]..opt[i+1][j]</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SECTION 13: INTERVIEW MINDSET
+═══════════════════════════════════════ -->
+<div class="sh" id="mindset">
+  <h2>Interview Mindset</h2><div class="line"></div>
+  <span class="badge b-gold">Process + Traps</span>
+</div>
+
+<div class="g2">
+  <div class="card gold">
+    <div class="clabel">5-Step Approach</div>
+    <div class="ctitle">Solving Any DP in Interview</div>
+    <ol class="steps">
+      <li><strong>Define dp[i] in plain English</strong><span class="sub">Write it out before coding: "dp[i][w] = max value using items 0..i-1 with capacity w." If you can't state it clearly, you don't understand the problem yet.</span></li>
+      <li><strong>Find the recurrence from last-step decomposition</strong><span class="sub">Ask: what was the LAST decision made to reach this state? What choices existed? Each choice = one case in the recurrence.</span></li>
+      <li><strong>Identify base cases precisely</strong><span class="sub">Empty input (i=0), zero capacity (w=0), single character. Test mentally: dp[0][*] and dp[*][0].</span></li>
+      <li><strong>Determine iteration order</strong><span class="sub">Every subproblem you reference must already be computed. Draw a small 2D table and trace the fill order if unsure.</span></li>
+      <li><strong>Code → Verify → Optimise space</strong><span class="sub">Get a correct O(n²) solution first, then ask: "Do I need all rows, or just the previous one?" Optimise only after correctness is confirmed.</span></li>
+    </ol>
+  </div>
+
+  <div class="card red">
+    <div class="clabel">7 Common Mistakes</div>
+    <div class="ctitle">Where Candidates Fail</div>
+    <ul class="cl">
+      <li><strong>Off-by-one in base cases</strong><span class="sub">Index 0 = empty prefix, index 1 = first element. Be consistent. Don't mix 0-indexed arrays with 1-indexed dp.</span></li>
+      <li><strong>Wrong direction for knapsack inner loop</strong><span class="sub">Forward = item reusable (coin change). Reverse = item used once (partition). This mistake produces wrong answers silently.</span></li>
+      <li><strong>Answer isn't always dp[n]</strong><span class="sub">Sometimes max(dp[i]) for all i (LIS, max subarray). Sometimes dp[n][0] vs dp[n][1] (house robber circle). Always check.</span></li>
+      <li><strong>Not handling -1 cache correctly in Java</strong><span class="sub">Arrays.fill(memo, -1) only works if 0 and positives are valid answers — if -1 is a valid answer, use a separate visited[][] boolean.</span></li>
+      <li><strong>Integer overflow in cost accumulations</strong><span class="sub">Use long when multiplying indices. Use Integer.MAX_VALUE/2 (not MAX_VALUE) as infinity — adding to MAX_VALUE overflows to negative.</span></li>
+      <li><strong>Initialising dp with wrong value</strong><span class="sub">For min problems initialise with Integer.MAX_VALUE/2. For max problems use Integer.MIN_VALUE/2. For count problems use 0.</span></li>
+      <li><strong>Stack overflow in deep recursion</strong><span class="sub">Java default stack is ~500k frames. For n=10⁵ with memoization → switch to tabulation or increase stack with new Thread(null, ()->{...}, "solver", 1&lt;&lt;26).</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- COMPLEXITY REFERENCE -->
+<div class="sh"><h2>Complexity Reference</h2><div class="line"></div></div>
+
+<div class="card">
+  <table class="rt" style="width:100%">
+    <thead>
+      <tr><th>Pattern</th><th>Time</th><th>Space (naive)</th><th>Space (opt.)</th><th>Java notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="tp">Linear 1D</td><td class="cx-g">O(n)</td><td class="tc">O(n)</td><td class="cx-g">O(1)</td><td class="tn">Two variables; prev2, prev1</td></tr>
+      <tr><td class="tp">2D (m×n)</td><td class="cx-g">O(mn)</td><td class="tc">O(mn)</td><td class="cx-g">O(min(m,n))</td><td class="tn">Rolling row array</td></tr>
+      <tr><td class="tp">0/1 Knapsack</td><td class="cx-g">O(nW)</td><td class="tc">O(nW)</td><td class="cx-g">O(W)</td><td class="tn">1D, reverse loop</td></tr>
+      <tr><td class="tp">Unbounded Knapsack</td><td class="cx-g">O(nW)</td><td class="tc">O(W)</td><td class="cx-g">O(W)</td><td class="tn">Already 1D, forward loop</td></tr>
+      <tr><td class="tp">LIS (n²)</td><td class="cx-y">O(n²)</td><td class="tc">O(n)</td><td class="cx-g">O(n)</td><td class="tn">dp[n] array</td></tr>
+      <tr><td class="tp">LIS (patience)</td><td class="cx-g">O(n log n)</td><td class="tc">O(n)</td><td class="cx-g">O(n)</td><td class="tn">Arrays.binarySearch on tails[]</td></tr>
+      <tr><td class="tp">Interval DP</td><td class="cx-r">O(n³)</td><td class="tc">O(n²)</td><td class="cx-y">O(n²)</td><td class="tn">Iterate by length; int[n][n]</td></tr>
+      <tr><td class="tp">Interval + Knuth opt.</td><td class="cx-y">O(n²)</td><td class="tc">O(n²)</td><td class="cx-y">O(n²)</td><td class="tn">opt[][] auxiliary array</td></tr>
+      <tr><td class="tp">Tree DP</td><td class="cx-g">O(n)</td><td class="tc">O(n)</td><td class="cx-g">O(depth)</td><td class="tn">Post-order DFS</td></tr>
+      <tr><td class="tp">Bitmask DP</td><td class="cx-r">O(n² 2ⁿ)</td><td class="tc">O(n 2ⁿ)</td><td class="cx-r">O(n 2ⁿ)</td><td class="tn">int[1&lt;&lt;n][n]; n ≤ 20</td></tr>
+      <tr><td class="tp">Digit DP</td><td class="cx-g">O(D × states)</td><td class="tc">O(D × states)</td><td class="cx-g">O(states)</td><td class="tn">D ≤ 18 digits; 3D memo</td></tr>
+      <tr><td class="tp">Grid DP</td><td class="cx-g">O(mn)</td><td class="tc">O(mn)</td><td class="cx-g">O(n)</td><td class="tn">Rolling row</td></tr>
+      <tr><td class="tp">CHT (sorted)</td><td class="cx-g">O(n)</td><td class="tc">O(n)</td><td class="cx-g">O(n)</td><td class="tn">Deque&lt;long[]&gt;</td></tr>
+      <tr><td class="tp">Li Chao Tree</td><td class="cx-g">O(n log n)</td><td class="tc">O(n)</td><td class="cx-g">O(n)</td><td class="tn">Segment tree on coordinate domain</td></tr>
+      <tr><td class="tp">D&amp;C Optimisation</td><td class="cx-y">O(nk log n)</td><td class="tc">O(nk)</td><td class="cx-y">O(nk)</td><td class="tn">Recursive divide by mid row</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  Dynamic Programming — Java Interview Cheat Sheet &nbsp;·&nbsp; 8 patterns · Advanced optimisations · Full Java code
+</div>
+
+</body>
+</html>
