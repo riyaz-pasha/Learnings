@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monotonic Stack – Complete Reference</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0d0f14;
+    --surface:   #13161e;
+    --border:    #1f2433;
+    --muted:     #3a3f52;
+    --text:      #c9d1e8;
+    --dim:       #606880;
+    --accent:    #7c9eff;
+    --green:     #5ef08b;
+    --yellow:    #f0c95e;
+    --red:       #f06e6e;
+    --purple:    #c77dff;
+    --cyan:      #5ed8f0;
+    --orange:    #f0a05e;
+    --tag-bg:    #1a1f2e;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+  }
+
+  /* ── Header ── */
+  header {
+    max-width: 980px;
+    margin: 0 auto 56px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+  header h1 span { color: var(--accent); }
+  header p {
+    margin-top: 10px;
+    color: var(--dim);
+    font-size: 0.95rem;
+    max-width: 600px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    max-width: 980px;
+    margin: 0 auto 48px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--tag-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Matrix ── */
+  .matrix {
+    max-width: 980px;
+    margin: 0 auto 56px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .matrix-cell {
+    background: var(--surface);
+    padding: 16px 20px;
+  }
+  .matrix-cell.header-cell {
+    background: var(--tag-bg);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .matrix-cell h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+  .matrix-cell p { font-size: 0.8rem; color: var(--dim); }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 8px;
+  }
+  .badge.dir-r  { background: #1a2540; color: var(--accent); }
+  .badge.dir-l  { background: #251a40; color: var(--purple); }
+  .badge.pop-g  { background: #1a3025; color: var(--green); }
+  .badge.pop-r  { background: #3a1a1a; color: var(--red); }
+
+  /* ── Sections ── */
+  .section-group {
+    max-width: 980px;
+    margin: 0 auto 64px;
+  }
+  .group-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 700px) {
+    .cards-grid { grid-template-columns: 1fr; }
+    .matrix { grid-template-columns: 1fr; }
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .card-header h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.01em;
+  }
+  .card-header .tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .tag {
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .tag.next   { background: #1a2540; color: var(--accent);  }
+  .tag.prev   { background: #251a40; color: var(--purple);  }
+  .tag.greater{ background: #1a3025; color: var(--green);   }
+  .tag.smaller{ background: #3a1a1a; color: var(--red);     }
+  .tag.circ   { background: #2a2210; color: var(--yellow);  }
+
+  /* ── Example box ── */
+  .example-box {
+    padding: 12px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+  }
+  .example-box .label {
+    color: var(--dim);
+    font-size: 0.68rem;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .example-box .ex-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  .ex-in  { color: var(--cyan); }
+  .ex-out { color: var(--yellow); }
+  .ex-label { color: var(--dim); }
+
+  /* ── Code block ── */
+  pre {
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    line-height: 1.75;
+    overflow-x: auto;
+    background: transparent;
+  }
+
+  /* Syntax tokens */
+  .kw  { color: var(--purple); font-weight: 600; }
+  .ty  { color: var(--cyan); }
+  .fn  { color: var(--accent); }
+  .cm  { color: var(--muted); font-style: italic; }
+  .cm.hi { color: #7a8aaa; } /* slightly brighter for important comments */
+  .nu  { color: var(--orange); }
+  .st  { color: var(--green); }
+
+  /* Highlight lines */
+  .diff {
+    display: block;
+    background: rgba(240, 201, 94, 0.07);
+    border-left: 2px solid var(--yellow);
+    margin: 0 -20px;
+    padding: 0 20px 0 18px;
+  }
+  .diff-r {
+    display: block;
+    background: rgba(240, 110, 110, 0.07);
+    border-left: 2px solid var(--red);
+    margin: 0 -20px;
+    padding: 0 20px 0 18px;
+  }
+
+  /* ── Key diff section ── */
+  .key-diff {
+    max-width: 980px;
+    margin: 0 auto 64px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .key-diff-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  th {
+    text-align: left;
+    padding: 12px 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+    background: var(--tag-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.name { color: #fff; font-weight: 600; }
+  td.dir  { color: var(--accent); }
+  td.cond { color: var(--yellow); }
+  td.fill { color: var(--green); }
+  td.note { color: var(--dim); font-size: 0.72rem; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════ HEADER ══════════════════════ -->
+<header>
+  <h1>Monotonic <span>Stack</span> – Complete Reference</h1>
+  <p>All 8 variants (linear + circular) with consistent structure, detailed comments, and highlighted differences.</p>
+</header>
+
+<!-- ══════════════════════ LEGEND ══════════════════════ -->
+<div class="legend">
+  <div class="legend-item"><div class="dot" style="background:var(--yellow)"></div>KEY DIFFERENCE LINE</div>
+  <div class="legend-item"><div class="dot" style="background:var(--red)"></div>CIRCULAR-SPECIFIC LINE</div>
+  <div class="legend-item"><div class="dot" style="background:var(--purple)"></div>keyword</div>
+  <div class="legend-item"><div class="dot" style="background:var(--cyan)"></div>type</div>
+  <div class="legend-item"><div class="dot" style="background:var(--accent)"></div>method name</div>
+  <div class="legend-item"><div class="dot" style="background:var(--muted)"></div>comment</div>
+</div>
+
+<!-- ══════════════════════ DECISION MATRIX ══════════════════════ -->
+<div style="max-width:980px;margin:0 auto 56px;">
+  <div class="group-title">Decision Matrix — pick your variant in 2 questions</div>
+  <div class="matrix">
+    <div class="matrix-cell header-cell"></div>
+    <div class="matrix-cell header-cell">→ NEXT (look right)</div>
+    <div class="matrix-cell header-cell">← PREVIOUS (look left)</div>
+
+    <div class="matrix-cell header-cell">▲ GREATER</div>
+    <div class="matrix-cell">
+      <h4>nextGreater</h4>
+      <p>First element to the right that is strictly larger.</p>
+      <span class="badge dir-r">traverse: R→L</span>
+      <span class="badge pop-g">pop: ≤ current</span>
+    </div>
+    <div class="matrix-cell">
+      <h4>previousGreater</h4>
+      <p>First element to the left that is strictly larger.</p>
+      <span class="badge dir-l">traverse: L→R</span>
+      <span class="badge pop-g">pop: ≤ current</span>
+    </div>
+
+    <div class="matrix-cell header-cell">▼ SMALLER</div>
+    <div class="matrix-cell">
+      <h4>nextSmaller</h4>
+      <p>First element to the right that is strictly smaller.</p>
+      <span class="badge dir-r">traverse: R→L</span>
+      <span class="badge pop-r">pop: ≥ current</span>
+    </div>
+    <div class="matrix-cell">
+      <h4>previousSmaller</h4>
+      <p>First element to the left that is strictly smaller.</p>
+      <span class="badge dir-l">traverse: L→R</span>
+      <span class="badge pop-r">pop: ≥ current</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SUMMARY TABLE ══════════════════════ -->
+<div class="key-diff">
+  <div class="key-diff-header">All 8 variants at a glance — spot the two axes that change</div>
+  <table>
+    <tr>
+      <th>Variant</th><th>Loop direction</th><th>Pop condition</th><th>Result fill</th><th>Circular: fill window</th>
+    </tr>
+    <tr>
+      <td class="name">nextGreater</td>
+      <td class="dir">n-1 → 0</td>
+      <td class="cond">nums[top] ≤ nums[i]</td>
+      <td class="fill">every i</td>
+      <td class="note">i &lt; n only</td>
+    </tr>
+    <tr>
+      <td class="name">nextSmaller</td>
+      <td class="dir">n-1 → 0</td>
+      <td class="cond">nums[top] ≥ nums[i]</td>
+      <td class="fill">every i</td>
+      <td class="note">i &lt; n only</td>
+    </tr>
+    <tr>
+      <td class="name">previousGreater</td>
+      <td class="dir">0 → n-1</td>
+      <td class="cond">nums[top] ≤ nums[i]</td>
+      <td class="fill">every i</td>
+      <td class="note">i ≥ n only</td>
+    </tr>
+    <tr>
+      <td class="name">previousSmaller</td>
+      <td class="dir">0 → n-1</td>
+      <td class="cond">nums[top] ≥ nums[i]</td>
+      <td class="fill">every i</td>
+      <td class="note">i ≥ n only</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ══════════════════════ GROUP 1: NEXT ══════════════════════ -->
+<div class="section-group">
+  <div class="group-title">Group 1 — Next Element (traverse Right → Left)</div>
+  <div class="cards-grid">
+
+    <!-- ── Next Greater ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Next Greater Element</h3>
+        <div class="tags">
+          <span class="tag next">NEXT</span>
+          <span class="tag greater">GREATER</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[4, 5, 2, 10, 8]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[5, 10, 10, -1, -1]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          4→5 (next bigger) · 5→10 · 2→10 · 10→none · 8→none
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">nextGreaterElement</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="cm">// Stack holds INDICES (not values) so we can</span>
+    <span class="cm">// look up nums[stack.peek()] when needed.</span>
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ AXIS 1: traverse RIGHT → LEFT so that when</span>
+    <span class="cm hi">//   we process index i, the stack already holds</span>
+    <span class="cm hi">//   candidates to the RIGHT of i.</span>
+<span class="diff">    <span class="kw">for</span> (<span class="kw">int</span> i = n - <span class="nu">1</span>; i >= <span class="nu">0</span>; i--) {</span>
+
+        <span class="cm">// Discard elements that cannot be the answer for</span>
+        <span class="cm">// i because they are NOT greater than nums[i].</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] &lt;= nums[i]) {</span>
+            stack.pop(); <span class="cm">// pop: ≤ current (GREATER variant)</span>
+        }
+
+        <span class="cm">// Top of stack (if any) is the first element to</span>
+        <span class="cm">// the right that is strictly GREATER than nums[i].</span>
+        result[i] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];
+
+        stack.push(i); <span class="cm">// always push current index</span>
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+    <!-- ── Next Smaller ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Next Smaller Element</h3>
+        <div class="tags">
+          <span class="tag next">NEXT</span>
+          <span class="tag smaller">SMALLER</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[4, 5, 2, 10, 8]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[2, 2, -1, 8, -1]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          4→2 (next smaller) · 5→2 · 2→none · 10→8 · 8→none
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">nextSmallerElement</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="cm">// Stack holds INDICES (not values).</span>
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ AXIS 1: same as nextGreater — traverse RIGHT → LEFT.</span>
+<span class="diff">    <span class="kw">for</span> (<span class="kw">int</span> i = n - <span class="nu">1</span>; i >= <span class="nu">0</span>; i--) {</span>
+
+        <span class="cm">// Discard elements that are NOT smaller than nums[i].</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] >= nums[i]) {</span>
+            stack.pop(); <span class="cm">// pop: ≥ current (SMALLER variant)</span>
+        }
+
+        <span class="cm">// Top of stack is the first element to the right</span>
+        <span class="cm">// that is strictly SMALLER than nums[i].</span>
+        result[i] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];
+
+        stack.push(i);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════ GROUP 2: PREVIOUS ══════════════════════ -->
+<div class="section-group">
+  <div class="group-title">Group 2 — Previous Element (traverse Left → Right)</div>
+  <div class="cards-grid">
+
+    <!-- ── Previous Greater ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Previous Greater Element</h3>
+        <div class="tags">
+          <span class="tag prev">PREV</span>
+          <span class="tag greater">GREATER</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[4, 5, 2, 10, 8]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[-1, -1, 5, -1, 10]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          4→none · 5→none · 2→5 (prev bigger) · 10→none · 8→10
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">previousGreaterElement</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="cm">// Stack holds INDICES (not values).</span>
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ AXIS 1: traverse LEFT → RIGHT so that when</span>
+    <span class="cm hi">//   we process index i, the stack already holds</span>
+    <span class="cm hi">//   candidates to the LEFT of i.</span>
+<span class="diff">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i &lt; n; i++) {</span>
+
+        <span class="cm">// Discard elements that cannot be the answer for</span>
+        <span class="cm">// i because they are NOT greater than nums[i].</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] &lt;= nums[i]) {</span>
+            stack.pop(); <span class="cm">// pop: ≤ current (GREATER variant)</span>
+        }
+
+        <span class="cm">// Top of stack is the first element to the left</span>
+        <span class="cm">// that is strictly GREATER than nums[i].</span>
+        result[i] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];
+
+        stack.push(i);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+    <!-- ── Previous Smaller ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Previous Smaller Element</h3>
+        <div class="tags">
+          <span class="tag prev">PREV</span>
+          <span class="tag smaller">SMALLER</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[4, 5, 2, 10, 8]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[-1, 4, -1, 2, 2]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          4→none · 5→4 (prev smaller) · 2→none · 10→2 · 8→2
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">previousSmallerElement</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="cm">// Stack holds INDICES (not values).</span>
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ AXIS 1: same as previousGreater — traverse LEFT → RIGHT.</span>
+<span class="diff">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i &lt; n; i++) {</span>
+
+        <span class="cm">// Discard elements that are NOT smaller than nums[i].</span>
+        <span class="cm">// BUG FIX: original used nums[i] instead of nums[index]</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] >= nums[i]) {</span>
+            stack.pop(); <span class="cm">// pop: ≥ current (SMALLER variant)</span>
+        }
+
+        <span class="cm">// Top of stack is the first element to the left</span>
+        <span class="cm">// that is strictly SMALLER than nums[i].</span>
+        result[i] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];
+
+        stack.push(i);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════ GROUP 3: CIRCULAR NEXT ══════════════════════ -->
+<div class="section-group">
+  <div class="group-title">Group 3 — Circular Next Element (wrap-around, traverse 2n Right → Left)</div>
+  <div style="background:var(--tag-bg);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:20px;font-size:0.8rem;color:var(--dim);line-height:1.7;">
+    <strong style="color:var(--yellow)">Circular idea:</strong> simulate a doubled array by running <code style="color:var(--cyan)">2n</code> iterations using <code style="color:var(--cyan)">i % n</code>.
+    The <strong>second pass</strong> (i ≥ n) pre-loads the stack with elements that would appear "to the right after wrap".
+    Only fill <code style="color:var(--yellow)">result</code> during the <strong>first pass</strong> (i &lt; n) to avoid double-writing.
+  </div>
+  <div class="cards-grid">
+
+    <!-- ── Circular Next Greater ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Circular Next Greater</h3>
+        <div class="tags">
+          <span class="tag next">NEXT</span>
+          <span class="tag greater">GREATER</span>
+          <span class="tag circ">CIRCULAR</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[5, 4, 3, 2, 1]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[-1, 5, 5, 5, 5]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          5→none (largest) · 4→5(wrap) · 3→5(wrap) · 2→5(wrap) · 1→5(wrap)
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">nextGreaterElementCircular</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="ty">Arrays</span>.fill(result, -<span class="nu">1</span>); <span class="cm">// default -1; only overwrite in first pass</span>
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ CIRCULAR: loop 2n times instead of n.</span>
+    <span class="cm hi">//   Second pass (i ≥ n) fills the stack with</span>
+    <span class="cm hi">//   "future" elements for the wrap-around window.</span>
+<span class="diff-r">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">2</span> * n - <span class="nu">1</span>; i >= <span class="nu">0</span>; i--) {</span>
+<span class="diff-r">        <span class="kw">int</span> idx = i % n; <span class="cm">// real index into nums[]</span></span>
+
+        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] &lt;= nums[idx]) {
+            stack.pop();
+        }
+
+        <span class="cm hi">// ◀ Only write result in first real pass (i &lt; n).</span>
+        <span class="cm hi">//   Second pass just primes the stack — no writes.</span>
+<span class="diff-r">        <span class="kw">if</span> (i &lt; n) {</span>
+<span class="diff-r">            result[idx] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];</span>
+<span class="diff-r">        }</span>
+
+        stack.push(idx);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+    <!-- ── Circular Next Smaller ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Circular Next Smaller</h3>
+        <div class="tags">
+          <span class="tag next">NEXT</span>
+          <span class="tag smaller">SMALLER</span>
+          <span class="tag circ">CIRCULAR</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[1, 2, 3, 4, 5]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[5, 1, 2, 3, 4]... </span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          in:  [3, 1, 2, 4] · out: [1, 2, 1, 3]  — 4 wraps to 3
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">nextSmallerElementCircular</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="ty">Arrays</span>.fill(result, -<span class="nu">1</span>);
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ CIRCULAR: same 2n trick as nextGreaterCircular.</span>
+<span class="diff-r">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">2</span> * n - <span class="nu">1</span>; i >= <span class="nu">0</span>; i--) {</span>
+<span class="diff-r">        <span class="kw">int</span> idx = i % n;</span>
+
+        <span class="cm">// Only change vs nextGreaterCircular: pop condition flips.</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] >= nums[idx]) {</span>
+            stack.pop(); <span class="cm">// pop: ≥ current (SMALLER variant)</span>
+        }
+
+<span class="diff-r">        <span class="kw">if</span> (i &lt; n) {</span>
+<span class="diff-r">            result[idx] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];</span>
+<span class="diff-r">        }</span>
+
+        stack.push(idx);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════ GROUP 4: CIRCULAR PREVIOUS ══════════════════════ -->
+<div class="section-group">
+  <div class="group-title">Group 4 — Circular Previous Element (wrap-around, traverse 2n Left → Right)</div>
+  <div style="background:var(--tag-bg);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:20px;font-size:0.8rem;color:var(--dim);line-height:1.7;">
+    <strong style="color:var(--yellow)">Circular idea:</strong> mirror of group 3. Traverse left → right for <code style="color:var(--cyan)">2n</code> steps.
+    The <strong>first pass</strong> (i &lt; n) pre-loads the stack. Only fill <code style="color:var(--yellow)">result</code> during the <strong>second pass</strong> (i ≥ n).
+  </div>
+  <div class="cards-grid">
+
+    <!-- ── Circular Previous Greater ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Circular Previous Greater</h3>
+        <div class="tags">
+          <span class="tag prev">PREV</span>
+          <span class="tag greater">GREATER</span>
+          <span class="tag circ">CIRCULAR</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[3, 1, 2, 4]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[4, 3, 3, -1]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          3→4(wrap) · 1→3 · 2→3 · 4→none (largest)
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">previousGreaterElementCircular</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="ty">Arrays</span>.fill(result, -<span class="nu">1</span>);
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ CIRCULAR + PREVIOUS: traverse LEFT → RIGHT for 2n steps.</span>
+    <span class="cm hi">//   First pass (i &lt; n) primes the stack.</span>
+    <span class="cm hi">//   Second pass (i ≥ n) fills result with circular answers.</span>
+<span class="diff-r">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i &lt; <span class="nu">2</span> * n; i++) {</span>
+<span class="diff-r">        <span class="kw">int</span> idx = i % n;</span>
+
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] &lt;= nums[idx]) {</span>
+            stack.pop(); <span class="cm">// pop: ≤ current (GREATER variant)</span>
+        }
+
+<span class="diff-r">        <span class="kw">if</span> (i >= n) { <span class="cm">// second pass only</span></span>
+<span class="diff-r">            result[idx] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];</span>
+<span class="diff-r">        }</span>
+
+        stack.push(idx);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+    <!-- ── Circular Previous Smaller ── -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Circular Previous Smaller</h3>
+        <div class="tags">
+          <span class="tag prev">PREV</span>
+          <span class="tag smaller">SMALLER</span>
+          <span class="tag circ">CIRCULAR</span>
+        </div>
+      </div>
+      <div class="example-box">
+        <div class="label">Example</div>
+        <div class="ex-row">
+          <span><span class="ex-label">in:  </span><span class="ex-in">[3, 1, 2, 4]</span></span>
+          <span><span class="ex-label">out: </span><span class="ex-out">[2, -1, 1, 2]</span></span>
+        </div>
+        <div style="color:var(--dim);font-size:0.68rem;margin-top:6px;">
+          3→2(wrap) · 1→none (smallest) · 2→1 · 4→2
+        </div>
+      </div>
+<pre><span class="kw">public int</span>[] <span class="fn">previousSmallerElementCircular</span>(<span class="kw">int</span>[] nums) {
+    <span class="kw">int</span> n = nums.length;
+    <span class="kw">int</span>[] result = <span class="kw">new int</span>[n];
+    <span class="ty">Arrays</span>.fill(result, -<span class="nu">1</span>);
+    <span class="ty">Stack</span>&lt;<span class="ty">Integer</span>&gt; stack = <span class="kw">new</span> <span class="ty">Stack</span>&lt;&gt;();
+
+    <span class="cm hi">// ◀ CIRCULAR + PREVIOUS: same 2n left→right as previousGreaterCircular.</span>
+<span class="diff-r">    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i &lt; <span class="nu">2</span> * n; i++) {</span>
+<span class="diff-r">        <span class="kw">int</span> idx = i % n;</span>
+
+        <span class="cm">// Only change vs previousGreaterCircular: pop condition flips.</span>
+<span class="diff">        <span class="kw">while</span> (!stack.isEmpty() &amp;&amp; nums[stack.peek()] >= nums[idx]) {</span>
+            stack.pop(); <span class="cm">// pop: ≥ current (SMALLER variant)</span>
+        }
+
+<span class="diff-r">        <span class="kw">if</span> (i >= n) {</span>
+<span class="diff-r">            result[idx] = stack.isEmpty() ? -<span class="nu">1</span> : nums[stack.peek()];</span>
+<span class="diff-r">        }</span>
+
+        stack.push(idx);
+    }
+    <span class="kw">return</span> result;
+}</pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════ BUGS & NOTES ══════════════════════ -->
+<div style="max-width:980px;margin:0 auto 40px;">
+  <div class="key-diff">
+    <div class="key-diff-header">Bug fixed + quick mental model</div>
+    <table>
+      <tr>
+        <th>Topic</th><th>Detail</th>
+      </tr>
+      <tr>
+        <td class="name" style="color:var(--red)">Bug fix</td>
+        <td style="color:var(--text)">
+          <code style="color:var(--red)">previousSmallerElement</code> originally had
+          <code style="color:var(--red)">nums[stack.peek()] >= nums[i]</code> (using variable <code>i</code>
+          instead of <code>index</code>). Fixed to use the loop variable consistently.
+        </td>
+      </tr>
+      <tr>
+        <td class="name">Loop direction</td>
+        <td style="color:var(--dim)">
+          <strong style="color:var(--accent)">NEXT</strong> → traverse right-to-left so right-side candidates are already on the stack.<br>
+          <strong style="color:var(--purple)">PREV</strong> → traverse left-to-right so left-side candidates are already on the stack.
+        </td>
+      </tr>
+      <tr>
+        <td class="name">Pop condition</td>
+        <td style="color:var(--dim)">
+          <strong style="color:var(--green)">GREATER</strong> → pop while top <code>≤ current</code> (keep the stack monotonically decreasing).<br>
+          <strong style="color:var(--red)">SMALLER</strong> → pop while top <code>≥ current</code> (keep the stack monotonically increasing).
+        </td>
+      </tr>
+      <tr>
+        <td class="name">Circular fill window</td>
+        <td style="color:var(--dim)">
+          <strong style="color:var(--accent)">Circular NEXT</strong>: loop <code>2n-1 → 0</code>; fill result only when <code>i &lt; n</code>.<br>
+          <strong style="color:var(--purple)">Circular PREV</strong>: loop <code>0 → 2n-1</code>; fill result only when <code>i ≥ n</code>.
+        </td>
+      </tr>
+      <tr>
+        <td class="name">Complexity</td>
+        <td style="color:var(--dim)">
+          All variants: <strong style="color:var(--green)">O(n)</strong> time — each element is pushed and popped at most once.<br>
+          Circular variants: still <strong style="color:var(--green)">O(n)</strong> — 2n iterations, same amortized argument.
+        </td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

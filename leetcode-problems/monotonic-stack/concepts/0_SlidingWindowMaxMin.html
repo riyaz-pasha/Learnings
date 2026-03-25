@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sliding Window Max / Min</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #0b0d12;
+  --s1:       #111420;
+  --s2:       #171b28;
+  --border:   #1e2436;
+  --text:     #c5cde6;
+  --dim:      #4a5270;
+  --accent:   #6e95ff;
+  --green:    #46d97a;
+  --yellow:   #f0c84e;
+  --red:      #f06464;
+  --orange:   #f09a50;
+  --cyan:     #50d4f0;
+  --purple:   #b96fff;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'JetBrains Mono',monospace;
+  min-height:100vh;
+  padding:28px 16px 80px;
+}
+.wrap{max-width:860px;margin:0 auto}
+
+/* ── Header ── */
+.hdr{margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.hdr h1{font-family:'Syne',sans-serif;font-size:clamp(1.3rem,3.5vw,1.9rem);font-weight:800;color:#fff;letter-spacing:-0.02em}
+.hdr h1 em{font-style:normal;color:var(--accent)}
+.hdr p{color:var(--dim);font-size:0.73rem;margin-top:5px}
+
+/* ── Mental model ── */
+.mm{
+  background:var(--s1);border:1px solid var(--border);border-radius:10px;
+  padding:16px 18px;margin-bottom:18px;
+  display:grid;grid-template-columns:1fr 1fr;gap:0;
+}
+.mm-col{padding:0 12px}
+.mm-col:first-child{padding-left:0;border-right:1px solid var(--border);padding-right:20px}
+.mm-col:last-child{padding-left:20px}
+.mm-title{font-size:0.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.rule{display:flex;gap:9px;align-items:flex-start;margin-bottom:8px;font-size:0.72rem;line-height:1.5}
+.rule-icon{
+  width:19px;height:19px;border-radius:4px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.6rem;font-weight:700;margin-top:1px
+}
+.ico-o{background:rgba(240,154,80,.18);color:var(--orange)}
+.ico-r{background:rgba(240,100,100,.18);color:var(--red)}
+.ico-g{background:rgba(70,217,122,.18);color:var(--green)}
+.ico-c{background:rgba(80,212,240,.18);color:var(--cyan)}
+.rule b{font-weight:700}
+.rule small{display:block;color:var(--dim);font-size:0.67rem}
+.why-text{font-size:0.7rem;line-height:1.65;color:var(--dim)}
+.why-text strong{font-weight:600}
+
+/* ── Tabs ── */
+.tabs{display:flex;gap:0;margin-bottom:14px;width:fit-content;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.tab{
+  padding:8px 22px;cursor:pointer;border:none;
+  font-family:'JetBrains Mono',monospace;font-size:0.78rem;font-weight:700;
+  letter-spacing:.04em;transition:all .15s;background:var(--s1);color:var(--dim)
+}
+.tab:hover{color:var(--text)}
+.tab.am{background:rgba(70,217,122,.1);color:var(--green)}
+.tab.ai{background:rgba(240,100,100,.1);color:var(--red)}
+
+/* ── Card ── */
+.card{background:var(--s1);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+
+/* Controls */
+.ctrl{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px;border-bottom:1px solid var(--border);background:var(--s2)
+}
+.cbtn{
+  background:var(--bg);border:1px solid var(--border);color:var(--text);
+  width:30px;height:30px;border-radius:6px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:.9rem;
+  transition:all .12s
+}
+.cbtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.cbtn:disabled{opacity:.3;cursor:not-allowed}
+.sinfo{font-size:0.72rem;color:var(--dim)}
+.sinfo strong{color:var(--text)}
+.pbar{flex:1;height:2px;background:var(--border);border-radius:2px;overflow:hidden}
+.pfill{height:100%;background:var(--accent);border-radius:2px;transition:width .18s}
+
+/* Array section */
+.arr-sec{padding:18px 16px 14px;border-bottom:1px solid var(--border)}
+.sec-title{font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
+.arr-row{display:flex;gap:5px;flex-wrap:wrap;align-items:flex-end}
+.acell{display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
+.abox{
+  width:42px;height:42px;border-radius:6px;border:1.5px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.85rem;font-weight:600;background:var(--bg);color:var(--dim);
+  transition:all .18s
+}
+.abox.win{background:rgba(110,149,255,.06);border-color:rgba(110,149,255,.22);color:var(--text)}
+.abox.cur{
+  background:rgba(110,149,255,.18);border-color:var(--accent);color:#fff;
+  box-shadow:0 0 14px rgba(110,149,255,.22)
+}
+.abox.result-src{border-color:var(--cyan);box-shadow:0 0 10px rgba(80,212,240,.2)}
+.aidx{font-size:.58rem;color:var(--dim)}
+.astar{font-size:.58rem;color:var(--cyan);height:10px;line-height:1}
+.win-info{margin-top:7px;font-size:.62rem;color:var(--dim)}
+.win-info span{color:var(--accent)}
+
+/* Deque section */
+.dq-sec{padding:16px 16px;border-bottom:1px solid var(--border)}
+.dq-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.dq-sub{font-size:.62rem;color:var(--dim);margin-bottom:12px}
+.dq-main{display:flex;gap:5px;align-items:flex-start;flex-wrap:wrap;min-height:60px}
+.dq-cell{
+  display:flex;flex-direction:column;align-items:center;
+  gap:2px
+}
+.dq-box{
+  width:50px;height:50px;border-radius:7px;border:1.5px solid var(--border);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-size:.7rem;background:var(--bg);transition:all .18s
+}
+.dq-box .di{color:var(--dim);font-size:.57rem}
+.dq-box .dv{font-weight:700;font-size:.9rem;color:var(--text)}
+.dq-lbl{font-size:.55rem;color:var(--dim);text-align:center}
+/* front cell */
+.dq-box.front{border-color:var(--cyan);background:rgba(80,212,240,.07)}
+.dq-box.front .dv{color:var(--cyan)}
+/* new push cell */
+.dq-box.newpush{border-color:var(--green);background:rgba(70,217,122,.07)}
+.dq-box.newpush .dv{color:var(--green)}
+/* popped cells */
+.dq-box.pf{border:1.5px dashed rgba(240,154,80,.45);background:transparent;opacity:.55}
+.dq-box.pf .dv{color:var(--orange);text-decoration:line-through}
+.dq-box.pb{border:1.5px dashed rgba(240,100,100,.45);background:transparent;opacity:.55}
+.dq-box.pb .dv{color:var(--red);text-decoration:line-through}
+/* empty */
+.dq-empty{color:var(--dim);font-size:.72rem;font-style:italic;padding:16px 0}
+
+.removed-row{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+.rm-band{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rm-tag{
+  font-size:.6rem;font-weight:700;padding:3px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0
+}
+.rm-tag.ot{background:rgba(240,154,80,.15);color:var(--orange)}
+.rm-tag.rb{background:rgba(240,100,100,.15);color:var(--red)}
+.rm-cells{display:flex;gap:5px;flex-wrap:wrap}
+
+/* Ops log */
+.ops-sec{padding:14px 16px;border-bottom:1px solid var(--border)}
+.op-row{display:flex;align-items:flex-start;gap:9px;margin-bottom:6px;font-size:.71rem;line-height:1.5}
+.op-ic{
+  width:17px;height:17px;border-radius:3px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.55rem;font-weight:700;margin-top:1px
+}
+.oi-o{background:rgba(240,154,80,.18);color:var(--orange)}
+.oi-r{background:rgba(240,100,100,.18);color:var(--red)}
+.oi-g{background:rgba(70,217,122,.18);color:var(--green)}
+.oi-c{background:rgba(80,212,240,.18);color:var(--cyan)}
+.oi-n{border:1px solid var(--border);color:var(--dim)}
+.op-txt{color:var(--text)}
+.op-txt .lo{color:var(--dim)}
+.op-txt .hi{font-weight:700}
+
+/* Result section */
+.res-sec{padding:14px 16px}
+.res-row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.rbox{
+  width:42px;height:34px;border-radius:5px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.82rem;font-weight:600;
+}
+.rbox.done{background:rgba(80,212,240,.07);border:1.5px solid rgba(80,212,240,.25);color:var(--cyan)}
+.rbox.fresh{background:rgba(80,212,240,.16);border:1.5px solid var(--cyan);color:#fff}
+.rbox.empty{border:1.5px dashed var(--border);color:var(--border)}
+
+.kb{font-size:.62rem;color:var(--dim);text-align:center;margin-top:16px}
+.kk{background:var(--s2);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:.58rem}
+
+@media(max-width:560px){
+  .mm{grid-template-columns:1fr}
+  .mm-col:first-child{border-right:none;border-bottom:1px solid var(--border);padding-right:0;padding-bottom:12px;margin-bottom:12px}
+  .mm-col:last-child{padding-left:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1>Sliding Window <em>Max</em> / <em>Min</em></h1>
+    <p>Step through every deque operation — see exactly what gets pushed, popped, and why</p>
+  </div>
+
+  <div class="mm" id="mm"><!-- filled by JS --></div>
+
+  <div id="app"></div>
+
+  <div class="kb">
+    Use <kbd class="kk">←</kbd> <kbd class="kk">→</kbd> arrow keys or the buttons to step through
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────
+//  Config
+// ─────────────────────────────────────────────────
+const NUMS = [1, 3, -1, -3, 5, 3, 6, 7];
+const K    = 3;
+
+// ─────────────────────────────────────────────────
+//  Step computation
+// ─────────────────────────────────────────────────
+function computeSteps(nums, k, mode) {
+  const n = nums.length;
+  const steps = [];
+  const dq = [];          // working deque (indices)
+  const results = [];
+
+  for (let i = 0; i < n; i++) {
+    const pf = [];   // popped from front (window expiry)
+    const pb = [];   // popped from back  (monotonicity)
+
+    // ── Rule 1: expire front ──────────────────────
+    // Condition: deque[0] is no longer in [i-k+1 .. i]
+    //            ↔ deque[0] <= i - k
+    while (dq.length && dq[0] <= i - k) {
+      pf.push(dq.shift());
+    }
+
+    // ── Rule 2: maintain monotonicity ─────────────
+    // MAX: keep decreasing → pop back if back ≤ current
+    // MIN: keep increasing → pop back if back ≥ current
+    while (dq.length) {
+      const bi = dq[dq.length - 1];
+      const weak = mode === 'max'
+        ? nums[bi] <= nums[i]   // smaller or equal → can never be max
+        : nums[bi] >= nums[i];  // larger  or equal → can never be min
+      if (weak) pb.push(dq.pop());
+      else break;
+    }
+
+    // ── Rule 3: push current index to back ────────
+    dq.push(i);
+
+    // ── Read front = window answer ─────────────────
+    let result = null;
+    if (i >= k - 1) {
+      result = nums[dq[0]];
+      results.push(result);
+    }
+
+    steps.push({
+      i,
+      dq:      [...dq],
+      pf,
+      pb,                           // in pop order (last-in first)
+      result,
+      results: [...results],
+      wStart:  Math.max(0, i - k + 1),
+      wEnd:    i,
+    });
+  }
+  return steps;
+}
+
+const MAX_STEPS = computeSteps(NUMS, K, 'max');
+const MIN_STEPS = computeSteps(NUMS, K, 'min');
+
+// ─────────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────────
+let mode = 'max';
+let si   = 0;
+
+const getSteps = () => mode === 'max' ? MAX_STEPS : MIN_STEPS;
+const getStep  = () => getSteps()[si];
+
+// ─────────────────────────────────────────────────
+//  Render helpers
+// ─────────────────────────────────────────────────
+
+function dqCell(idx, boxCls, lbl) {
+  return `<div class="dq-cell">
+    <div class="dq-box ${boxCls}">
+      <span class="di">[${idx}]</span>
+      <span class="dv">${NUMS[idx]}</span>
+    </div>
+    <div class="dq-lbl">${lbl}</div>
+  </div>`;
+}
+
+function renderMM() {
+  const cmpSym = mode === 'max' ? '≤' : '≥';
+  const modeColor = mode === 'max' ? 'var(--green)' : 'var(--red)';
+  const modeDesc  = mode === 'max'
+    ? 'Older, smaller element can never beat newer+bigger → discard it.'
+    : 'Older, larger element can never beat newer+smaller → discard it.';
+  const monDesc   = mode === 'max'
+    ? '<strong style="color:var(--green)">Monotonically ↓ decreasing</strong> — front is always MAX.'
+    : '<strong style="color:var(--red)">Monotonically ↑ increasing</strong> — front is always MIN.';
+
+  document.getElementById('mm').innerHTML = `
+    <div class="mm-col">
+      <div class="mm-title">3 Rules — always in this order</div>
+      <div class="rule">
+        <div class="rule-icon ico-o">1</div>
+        <div>
+          <b style="color:var(--orange)">POP FRONT</b> if out of window
+          <small>if dq[0] ≤ i − k → it left the window</small>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-icon ico-r">2</div>
+        <div>
+          <b style="color:var(--red)">POP BACK</b> while back is weaker
+          <small>while nums[back] ${cmpSym} nums[i] → pop back</small>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-icon ico-g">3</div>
+        <div>
+          <b style="color:var(--green)">PUSH BACK</b> current index
+          <small>always, after the cleanup above</small>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-icon ico-c">★</div>
+        <div>
+          <b style="color:var(--cyan)">READ FRONT</b> = window ${mode}
+          <small>only when window is full (i ≥ k−1)</small>
+        </div>
+      </div>
+    </div>
+    <div class="mm-col">
+      <div class="mm-title">Why it stays monotonic</div>
+      <div class="why-text">
+        ${modeDesc}<br><br>
+        So the deque is always ${monDesc}<br><br>
+        Pop from <b style="color:var(--orange)">front</b> = window slid past it (time expiry).<br>
+        Pop from <b style="color:var(--red)">back</b> = a stronger candidate arrived (value eviction).
+      </div>
+    </div>`;
+}
+
+function renderPage() {
+  const steps = getSteps();
+  const step  = steps[si];
+  const total = steps.length;
+  const pct   = ((si + 1) / total * 100).toFixed(1);
+
+  const { i, dq, pf, pb, result, results, wStart, wEnd } = step;
+  const cmpSym  = mode === 'max' ? '≤' : '≥';
+  const whatKind = mode === 'max' ? 'max' : 'min';
+  const resultSrcIdx = dq[0]; // front of deque = the answer index
+
+  // ── Array ─────────────────────────────────────
+  const arrCells = NUMS.map((v, idx) => {
+    let bc = 'abox';
+    if (idx === i)                         bc += ' cur';
+    else if (idx >= wStart && idx <= wEnd) bc += ' win';
+    const isResultSrc = result !== null && idx === resultSrcIdx;
+    if (isResultSrc) bc += ' result-src';
+    const star = isResultSrc ? `<div class="astar">★</div>` : `<div class="astar"></div>`;
+    return `<div class="acell">
+      ${star}
+      <div class="${bc}">${v}</div>
+      <div class="aidx">${idx}</div>
+    </div>`;
+  }).join('');
+
+  // ── Deque ─────────────────────────────────────
+  let dqMain = '';
+  if (dq.length === 0) {
+    dqMain = `<div class="dq-empty">[ empty ]</div>`;
+  } else {
+    dqMain = dq.map((idx, pos) => {
+      const isFirst = pos === 0;
+      const isLast  = pos === dq.length - 1;
+      const isNew   = idx === i;
+      let boxCls = '';
+      let lbl    = '';
+      if (isFirst && isLast) {
+        // only element: new push wins styling if it's also the front
+        boxCls = isNew ? 'newpush' : 'front';
+        lbl = '← FRONT=BACK →';
+      } else if (isFirst) {
+        boxCls = 'front'; lbl = '← FRONT';
+      } else if (isLast) {
+        boxCls = isNew ? 'newpush' : '';
+        lbl = isNew ? 'BACK → new' : 'BACK →';
+      }
+      return dqCell(idx, boxCls, lbl);
+    }).join('');
+  }
+
+  // Build removed-row: pf on top (expired), pb below (weaker)
+  let removedHTML = '';
+  const hasPF = pf.length > 0;
+  const hasPB = pb.length > 0;
+  if (hasPF || hasPB) {
+    let inner = '';
+    if (hasPF) {
+      const cells = pf.map(idx => dqCell(idx, 'pf', 'expired')).join('');
+      inner += `<div class="rm-band">
+        <div class="rm-tag ot">⬆ FRONT popped</div>
+        <div class="rm-cells">${cells}</div>
+        <span style="font-size:.62rem;color:var(--dim);">window left behind</span>
+      </div>`;
+    }
+    if (hasPB) {
+      // display in original deque order (reverse of pop order)
+      const displayPb = [...pb].reverse();
+      const cells = displayPb.map(idx => dqCell(idx, 'pb', 'weaker')).join('');
+      inner += `<div class="rm-band">
+        <div class="rm-tag rb">⬆ BACK popped</div>
+        <div class="rm-cells">${cells}</div>
+        <span style="font-size:.62rem;color:var(--dim);">${cmpSym} nums[${i}]=${NUMS[i]}, can't be future ${whatKind}</span>
+      </div>`;
+    }
+    removedHTML = `<div class="removed-row">${inner}</div>`;
+  }
+
+  const modeColor  = mode === 'max' ? 'var(--green)' : 'var(--red)';
+  const monotonicLabel = mode === 'max'
+    ? '↓ decreasing → front = MAX'
+    : '↑ increasing → front = MIN';
+
+  // ── Ops log ───────────────────────────────────
+  function opRow(icCls, iconTxt, mainHtml) {
+    return `<div class="op-row">
+      <div class="op-ic ${icCls}">${iconTxt}</div>
+      <div class="op-txt">${mainHtml}</div>
+    </div>`;
+  }
+
+  let opsHtml = '';
+
+  // Rule 1: front expiry
+  if (pf.length === 0) {
+    const frontIsEmpty = dq.length === 0 || (dq.length === 1 && dq[0] === i);
+    // The front *before* this step: since we popped nothing, original front = current dq[0]
+    // But if only element is i (just pushed), deque was empty before.
+    // Let's just say: no expiry happened.
+    opsHtml += opRow('oi-n','1',
+      `<span class="lo">FRONT check — no expiry</span> `
+      + (dq.length > 0
+        ? `<span class="lo">(dq front=${dq[0]} > ${i}−${K}=${i-K}, still in window)</span>`
+        : `<span class="lo">(deque was empty)</span>`));
+  } else {
+    pf.forEach(idx => {
+      opsHtml += opRow('oi-o','↑F',
+        `<span class="hi" style="color:var(--orange)">POP FRONT</span> — idx=${idx} val=${NUMS[idx]}
+         <span class="lo"> (${idx} ≤ ${i}−${K}=${i-K} → before window start ${wStart})</span>`);
+    });
+  }
+
+  // Rule 2: back pops
+  if (pb.length === 0) {
+    opsHtml += opRow('oi-n','2',
+      `<span class="lo">BACK check — no weaker elements removed</span>`);
+  } else {
+    pb.forEach(idx => {
+      opsHtml += opRow('oi-r','↑B',
+        `<span class="hi" style="color:var(--red)">POP BACK</span> — idx=${idx} val=${NUMS[idx]}
+         <span class="lo"> (${NUMS[idx]} ${cmpSym} ${NUMS[i]}, weaker → can't be future ${whatKind})</span>`);
+    });
+  }
+
+  // Rule 3: push
+  opsHtml += opRow('oi-g','→',
+    `<span class="hi" style="color:var(--green)">PUSH BACK</span> — idx=${i} val=${NUMS[i]}`);
+
+  // Result
+  if (result !== null) {
+    opsHtml += opRow('oi-c','★',
+      `<span class="hi" style="color:var(--cyan)">RESULT</span> = nums[${resultSrcIdx}] = <strong style="color:var(--cyan)">${result}</strong>
+       <span class="lo"> (front of deque, window [${wStart}..${wEnd}])</span>`);
+  } else {
+    opsHtml += opRow('oi-n','–',
+      `<span class="lo">No result yet — window not full (need i ≥ ${K-1}, currently i=${i})</span>`);
+  }
+
+  // ── Result boxes ──────────────────────────────
+  const totalResults = NUMS.length - K + 1;
+  const resDots = Array.from({length: totalResults}, (_, r) => {
+    if (r < results.length - 1) return `<div class="rbox done">${results[r]}</div>`;
+    if (r === results.length - 1) return `<div class="rbox fresh">${results[r]}</div>`;
+    return `<div class="rbox empty">?</div>`;
+  }).join('');
+
+  // ── Assemble page ─────────────────────────────
+  document.getElementById('app').innerHTML = `
+    <div class="tabs">
+      <button class="tab ${mode==='max'?'am':''}" onclick="setMode('max')">▲ MAX</button>
+      <button class="tab ${mode==='min'?'ai':''}" onclick="setMode('min')">▼ MIN</button>
+    </div>
+
+    <div class="card">
+      <!-- Controls -->
+      <div class="ctrl">
+        <button class="cbtn" onclick="prev()" ${si===0?'disabled':''}>←</button>
+        <div class="sinfo">Step <strong>${si+1}</strong>/${total} &nbsp;·&nbsp; i=<strong>${i}</strong> val=<strong>${NUMS[i]}</strong></div>
+        <button class="cbtn" onclick="next()" ${si===total-1?'disabled':''}>→</button>
+        <div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>
+        <button class="cbtn" onclick="reset()" title="Reset" style="font-size:.7rem">↺</button>
+      </div>
+
+      <!-- Array -->
+      <div class="arr-sec">
+        <div class="sec-title">Array &nbsp;nums[] &nbsp;·&nbsp; k = ${K}</div>
+        <div class="arr-row">${arrCells}</div>
+        <div class="win-info">
+          window <span>[${wStart} .. ${wEnd}]</span>
+          &nbsp;·&nbsp; current i=<span>${i}</span>
+          ${result !== null ? `&nbsp;·&nbsp; ★ = window ${whatKind} source` : ''}
+        </div>
+      </div>
+
+      <!-- Deque -->
+      <div class="dq-sec">
+        <div class="dq-header">
+          <div class="sec-title">Deque &nbsp;(stores indices)</div>
+          <div style="font-size:.62rem;color:${modeColor}">${monotonicLabel}</div>
+        </div>
+        <div class="dq-sub">← FRONT (answer lives here) &nbsp;&nbsp; BACK (new elements added here) →</div>
+        <div class="dq-main">${dqMain}</div>
+        ${removedHTML}
+      </div>
+
+      <!-- Ops -->
+      <div class="ops-sec">
+        <div class="sec-title" style="margin-bottom:10px">Operations this step</div>
+        ${opsHtml}
+      </div>
+
+      <!-- Result -->
+      <div class="res-sec">
+        <div class="sec-title">Result array (window ${whatKind}s)</div>
+        <div class="res-row">${resDots}</div>
+      </div>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────
+//  Event handlers (global, called from inline HTML)
+// ─────────────────────────────────────────────────
+window.next    = () => { const s = getSteps(); if (si < s.length-1) { si++; renderPage(); } };
+window.prev    = () => { if (si > 0) { si--; renderPage(); } };
+window.reset   = () => { si = 0; renderPage(); };
+window.setMode = m  => { mode = m; si = 0; renderMM(); renderPage(); };
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') window.next();
+  if (e.key === 'ArrowLeft')  window.prev();
+});
+
+// ─────────────────────────────────────────────────
+//  Init
+// ─────────────────────────────────────────────────
+renderMM();
+renderPage();
+</script>
+</body>
+</html>

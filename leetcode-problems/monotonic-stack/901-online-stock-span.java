@@ -94,22 +94,47 @@ import java.util.Stack;
  *   Stack: [(100,1), (85,6)]
  */
 class StockSpanner {
-    private Stack<int[]> stack; // Each element is [price, span]
+    private Stack<int[]> stack; // [price, span]
     
     public StockSpanner() {
         stack = new Stack<>();
     }
     
     public int next(int price) {
-        int span = 1; // Start with current day
         
-        // Pop all prices <= current price and accumulate their spans
+        int span = 1; // At least today counts
+        
+        // 🔥 MAIN LOGIC
         while (!stack.isEmpty() && stack.peek()[0] <= price) {
+            
+            /*
+            WHY POP?
+            
+            Example:
+            stack top = [80, 2]
+            current price = 100
+            
+            Since 80 <= 100:
+            → those 2 days are INCLUDED in today's span
+            
+            So we:
+            1. Remove that entry
+            2. Add its span
+            */
+            
             span += stack.pop()[1];
         }
         
-        // Push current price with its span
+        // 🔥 PUSH COMPRESSED RESULT
         stack.push(new int[]{price, span});
+        
+        /*
+        WHY STORE SPAN?
+        
+        So we don't re-count those days again later
+        
+        This is "compression" → makes it O(n)
+        */
         
         return span;
     }
@@ -136,7 +161,7 @@ class StockSpanner {
  * This is conceptually similar but uses indices for calculation.
  */
 class StockSpannerWithIndex {
-    private Stack<int[]> stack; // Each element is [price, index]
+    private Stack<int[]> stack; // [price, index]
     private int index;
     
     public StockSpannerWithIndex() {
@@ -145,16 +170,70 @@ class StockSpannerWithIndex {
     }
     
     public int next(int price) {
-        // Pop all prices <= current price
+        
+        // 🔥 REMOVE SMALLER OR EQUAL PRICES
         while (!stack.isEmpty() && stack.peek()[0] <= price) {
+            
+            /*
+            WHY POP?
+            
+            Example:
+            previous = 80 at index 2
+            current  = 100
+            
+            80 ≤ 100 → cannot block span
+            
+            So we remove it
+            
+            Because we are looking for:
+            👉 nearest GREATER element on left
+            */
+            
             stack.pop();
         }
         
-        // Calculate span
+        // 🔥 CALCULATE SPAN
+        
         int span = stack.isEmpty() ? index + 1 : index - stack.peek()[1];
         
-        // Push current price with index
+        /*
+        CASE 1: stack empty
+        
+        Example:
+        prices = [100, 80, 60, 120]
+        
+        At 120:
+        stack becomes empty
+        
+        → no greater element on left
+        
+        So span = index + 1
+        
+        If index = 3 → span = 4
+        (covers all days)
+        
+        --------------------------------
+        
+        CASE 2: stack NOT empty
+        
+        Example:
+        prices = [100, 80, 60, 70]
+        
+        At 70:
+        stack top = 80 at index 1
+        
+        span = current index - that index
+             = 3 - 1 = 2
+        
+        Covers indices:
+        [2,3] → 60,70
+        
+        --------------------------------
+        */
+        
+        // 🔥 PUSH CURRENT
         stack.push(new int[]{price, index});
+        
         index++;
         
         return span;

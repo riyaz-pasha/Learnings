@@ -8,22 +8,45 @@ class TrappingRainWater {
     public int trap1(int[] height) {
         Stack<Integer> stack = new Stack<>();
         int water = 0;
-        
+
         for (int i = 0; i < height.length; i++) {
-            // While current height is greater than stack top
+
+            // If current bar is taller than the bar at stack top,
+            // we found a "right boundary" → water can be trapped
             while (!stack.isEmpty() && height[i] > height[stack.peek()]) {
-                int top = stack.pop(); // Bottom of the container
-                
-                if (stack.isEmpty()) break;
-                
-                // Calculate trapped water
-                int distance = i - stack.peek() - 1;
-                int boundedHeight = Math.min(height[i], height[stack.peek()]) - height[top];
+
+                // This is the "bottom" of the container
+                int top = stack.pop();
+
+                // If stack becomes empty → no left boundary
+                // so we cannot trap water
+                if (stack.isEmpty())
+                    break;
+
+                // Now:
+                // stack.peek() = left boundary
+                // i = right boundary
+                // top = bottom
+
+                int left = stack.peek();
+                int right = i;
+
+                // Width between left and right boundaries
+                // IMPORTANT: we exclude both boundaries
+                int distance = right - left - 1;
+
+                // Height of trapped water:
+                // bounded by the shorter boundary
+                int boundedHeight = Math.min(height[left], height[right]) - height[top];
+
+                // Total water = width * height
                 water += distance * boundedHeight;
             }
+
+            // Push current index into stack
             stack.push(i);
         }
-        
+
         return water;
     }
     

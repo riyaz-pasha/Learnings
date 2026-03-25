@@ -62,15 +62,16 @@ class LargestRectangleHistogram {
      */
     public static int largestRectangleArea(int[] heights) {
         int n = heights.length;
-        if (n == 0) return 0;
-        
+        if (n == 0)
+            return 0;
+
         // left[i] = index of previous bar with height < heights[i]
         int[] left = new int[n];
         // right[i] = index of next bar with height < heights[i]
         int[] right = new int[n];
-        
+
         Stack<Integer> stack = new Stack<>();
-        
+
         // Find left boundaries (previous smaller element)
         for (int i = 0; i < n; i++) {
             while (!stack.isEmpty() && heights[stack.peek()] >= heights[i]) {
@@ -79,7 +80,7 @@ class LargestRectangleHistogram {
             left[i] = stack.isEmpty() ? -1 : stack.peek();
             stack.push(i);
         }
-        
+
         // Find right boundaries (next smaller element)
         stack.clear();
         for (int i = n - 1; i >= 0; i--) {
@@ -89,7 +90,7 @@ class LargestRectangleHistogram {
             right[i] = stack.isEmpty() ? n : stack.peek();
             stack.push(i);
         }
-        
+
         // Calculate maximum area
         int maxArea = 0;
         for (int i = 0; i < n; i++) {
@@ -97,16 +98,16 @@ class LargestRectangleHistogram {
             int area = heights[i] * width;
             maxArea = Math.max(maxArea, area);
         }
-        
+
         return maxArea;
     }
-    
+
     // ========================================================================
     // SOLUTION 2: MONOTONIC STACK - SINGLE PASS (MOST EFFICIENT)
     // Time Complexity: O(n)
     // Space Complexity: O(n)
     // ========================================================================
-    
+
     /**
      * Single-Pass Monotonic Stack
      * 
@@ -121,29 +122,109 @@ class LargestRectangleHistogram {
      * Key Insight:
      * When heights[current] < heights[stack.top], we know:
      * - heights[stack.top] cannot extend beyond current (right boundary found)
-     * - All bars between left and current are >= heights[stack.top] (maintained by stack)
+     * - All bars between left and current are >= heights[stack.top] (maintained by
+     * stack)
      * 
      * This is the MOST ELEGANT solution!
      */
     public static int largestRectangleAreaSinglePass(int[] heights) {
         Stack<Integer> stack = new Stack<>();
+        // Stack stores indices of bars
+        // IMPORTANT: heights are in increasing order in stack
+
         int maxArea = 0;
         int n = heights.length;
-        
+
         for (int i = 0; i <= n; i++) {
-            // Use 0 as sentinel value at the end to empty the stack
+
+            // 🔥 WHY THIS LINE?
+            // At i == n, we pretend height = 0
+            // This forces ALL remaining bars in stack to be processed
+
+            // Example:
+            // heights = [2,1,5,6,2,3]
+            // Without this → [2,3] would remain in stack → missed areas
+
             int currentHeight = (i == n) ? 0 : heights[i];
-            
-            // Pop bars that are taller than current
+
+            // 🔥 MAIN LOGIC
+            // If current bar is smaller, we found "right boundary"
+
             while (!stack.isEmpty() && heights[stack.peek()] >= currentHeight) {
+
+                // 🔥 This is the bar we are calculating area for
                 int height = heights[stack.pop()];
+
+                // After popping:
+                // stack.peek() = index of previous smaller bar (LEFT boundary)
+                // i = current index (RIGHT boundary)
+
+                // 🔥 WHY THIS WIDTH FORMULA?
+
                 int width = stack.isEmpty() ? i : i - stack.peek() - 1;
-                maxArea = Math.max(maxArea, height * width);
+
+                /*
+                 * CASE 1: stack is empty
+                 * --------------------------------
+                 * Example:
+                 * heights = [2]
+                 * 
+                 * pop index 0:
+                 * → no smaller bar on left
+                 * 
+                 * So rectangle can extend from index 0 to i-1
+                 * 
+                 * width = i
+                 * 
+                 * --------------------------------
+                 * 
+                 * CASE 2: stack NOT empty
+                 * --------------------------------
+                 * Example:
+                 * heights = [2,1,5,6,2]
+                 * 
+                 * Suppose we popped index = 3 (height = 6)
+                 * 
+                 * Now:
+                 * stack.peek() = 2 (height = 5) → LEFT boundary
+                 * i = 4 (height = 2) → RIGHT boundary
+                 * 
+                 * Valid rectangle for height=6 is:
+                 * only index 3
+                 * 
+                 * width = 4 - 2 - 1 = 1
+                 * 
+                 * WHY -1?
+                 * Because:
+                 * - index 2 is smaller → cannot include
+                 * - index 4 is smaller → cannot include
+                 * 
+                 * Only space BETWEEN them
+                 * 
+                 * --------------------------------
+                 */
+
+                int area = height * width;
+                maxArea = Math.max(maxArea, area);
             }
-            
+
+            // Push current index
             stack.push(i);
+
+            /*
+             * 🔥 WHY PUSH EVEN WHEN i == n?
+             * 
+             * At i = n:
+             * - we push n (fake index)
+             * - but its height = 0 (smallest possible)
+             * 
+             * This ensures:
+             * → stack becomes empty via pops
+             * 
+             * This is just a trick to avoid writing extra loop
+             */
         }
-        
+
         return maxArea;
     }
     

@@ -15,22 +15,41 @@ class SecondGreaterElement {
             int[] ans = new int[n];
             Arrays.fill(ans, -1);
 
-            Stack<Integer> stack = new Stack<>(); // waiting for first greater
-            Queue<Integer> waiting = new ArrayDeque<>(); // waiting for second greater
+            Stack<Integer> stack = new Stack<>();
+            // 🔹 Elements waiting for FIRST greater
+
+            Queue<Integer> waiting = new ArrayDeque<>();
+            // 🔹 Elements that already got FIRST greater
+            // now waiting for SECOND greater
 
             for (int i = 0; i < n; i++) {
 
-                // Step 1: resolve second greater
+                // 🔥 STEP 1: Resolve SECOND greater
                 while (!waiting.isEmpty() && nums[waiting.peek()] < nums[i]) {
+
+                    /*
+                     * Example:
+                     * nums[x] < nums[i]
+                     * 
+                     * → nums[i] is SECOND greater for x
+                     */
+
                     ans[waiting.poll()] = nums[i];
                 }
 
-                // Step 2: promote from stack to waiting
+                // 🔥 STEP 2: Promote from stack → waiting
                 while (!stack.isEmpty() && nums[stack.peek()] < nums[i]) {
+
+                    /*
+                     * nums[i] is FIRST greater for these elements
+                     * 
+                     * So they move to "waiting for second greater"
+                     */
+
                     waiting.offer(stack.pop());
                 }
 
-                // Step 3: current waits for first greater
+                // 🔥 STEP 3: Current waits for its first greater
                 stack.push(i);
             }
 

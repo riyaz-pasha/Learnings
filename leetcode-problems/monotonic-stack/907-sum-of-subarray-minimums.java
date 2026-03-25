@@ -192,26 +192,51 @@ class SumOfSubarrayMinimums {
     public static int sumSubarrayMinsSinglePass(int[] arr) {
         int n = arr.length;
         long sum = 0;
-        java.util.Stack<Integer> stack = new java.util.Stack<>();
-        
+        Stack<Integer> stack = new Stack<>();
+
         for (int i = 0; i <= n; i++) {
-            // Use 0 as sentinel value at the end to clear the stack
+
+            // 🔥 SENTINEL
+            // At i == n, we force current = 0 to empty the stack
+
             int current = (i == n) ? 0 : arr[i];
-            
+
+            // 🔥 MAIN LOGIC
             while (!stack.isEmpty() && arr[stack.peek()] >= current) {
+
                 int mid = stack.pop();
+
+                // left boundary = previous smaller element
                 int left = stack.isEmpty() ? -1 : stack.peek();
+
+                // right boundary = current index
                 int right = i;
-                
-                // Count of subarrays where arr[mid] is minimum
+
+                /*
+                 * Now:
+                 * arr[mid] is the MINIMUM between (left, right)
+                 */
+
+                // 🔥 MAGIC FORMULA
                 long count = (long) (mid - left) * (right - mid);
+
+                /*
+                 * WHY THIS WORKS?
+                 * 
+                 * (mid - left) = choices for LEFT boundary
+                 * (right - mid) = choices for RIGHT boundary
+                 * 
+                 * Multiply → total subarrays where arr[mid] is minimum
+                 */
+
                 long contribution = (long) arr[mid] * count % MOD;
+
                 sum = (sum + contribution) % MOD;
             }
-            
+
             stack.push(i);
         }
-        
+
         return (int) sum;
     }
     

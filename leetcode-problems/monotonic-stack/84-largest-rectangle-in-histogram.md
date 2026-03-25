@@ -602,3 +602,247 @@ class Solution {
 > “If histogram tests fail, check how I treat equal heights.”
 
 ---
+
+This is a **great piece of code** — but yeah, it only *really* makes sense once every line is tied to a clear mental picture.
+
+I’ll rewrite your code with **deep, intent-based comments + mini examples at each critical line** so that *nothing feels magical*.
+
+---
+
+# 🧠 Core Idea (1 line)
+
+👉 “For every bar, find how far it can expand left and right while staying the smallest height.”
+
+---
+
+# ✅ Fully Annotated Code
+
+```java
+public static int largestRectangleAreaSinglePass(int[] heights) {
+    Stack<Integer> stack = new Stack<>(); 
+    // Stack stores indices of bars
+    // IMPORTANT: heights are in increasing order in stack
+
+    int maxArea = 0;
+    int n = heights.length;
+    
+    for (int i = 0; i <= n; i++) {
+        
+        // 🔥 WHY THIS LINE?
+        // At i == n, we pretend height = 0
+        // This forces ALL remaining bars in stack to be processed
+        
+        // Example:
+        // heights = [2,1,5,6,2,3]
+        // Without this → [2,3] would remain in stack → missed areas
+        
+        int currentHeight = (i == n) ? 0 : heights[i];
+        
+        // 🔥 MAIN LOGIC
+        // If current bar is smaller, we found "right boundary"
+        
+        while (!stack.isEmpty() && heights[stack.peek()] >= currentHeight) {
+            
+            // 🔥 This is the bar we are calculating area for
+            int height = heights[stack.pop()];
+            
+            // After popping:
+            // stack.peek() = index of previous smaller bar (LEFT boundary)
+            // i = current index (RIGHT boundary)
+            
+            // 🔥 WHY THIS WIDTH FORMULA?
+            
+            int width = stack.isEmpty() ? i : i - stack.peek() - 1;
+            
+            /*
+            CASE 1: stack is empty
+            --------------------------------
+            Example:
+            heights = [2]
+            
+            pop index 0:
+            → no smaller bar on left
+            
+            So rectangle can extend from index 0 to i-1
+            
+            width = i
+            
+            --------------------------------
+            
+            CASE 2: stack NOT empty
+            --------------------------------
+            Example:
+            heights = [2,1,5,6,2]
+            
+            Suppose we popped index = 3 (height = 6)
+            
+            Now:
+            stack.peek() = 2 (height = 5) → LEFT boundary
+            i = 4 (height = 2)            → RIGHT boundary
+            
+            Valid rectangle for height=6 is:
+            only index 3
+            
+            width = 4 - 2 - 1 = 1
+            
+            WHY -1?
+            Because:
+            - index 2 is smaller → cannot include
+            - index 4 is smaller → cannot include
+            
+            Only space BETWEEN them
+            
+            --------------------------------
+            */
+            
+            int area = height * width;
+            maxArea = Math.max(maxArea, area);
+        }
+        
+        // Push current index
+        stack.push(i);
+        
+        /*
+        🔥 WHY PUSH EVEN WHEN i == n?
+        
+        At i = n:
+        - we push n (fake index)
+        - but its height = 0 (smallest possible)
+        
+        This ensures:
+        → stack becomes empty via pops
+        
+        This is just a trick to avoid writing extra loop
+        */
+    }
+    
+    return maxArea;
+}
+```
+
+---
+
+# 🔥 Walkthrough Example (important parts only)
+
+```text
+heights = [2,1,5,6,2,3]
+```
+
+---
+
+## 💥 Key Moment
+
+At `i = 4 (height = 2)`
+
+Stack before:
+
+```text
+[1,2,3]  → heights [1,5,6]
+```
+
+Now:
+
+```text
+2 < 6 → POP 6
+```
+
+### 👉 For height = 6:
+
+```text
+left = index 2 (height 5)
+right = index 4 (height 2)
+
+width = 4 - 2 - 1 = 1
+area = 6 * 1 = 6
+```
+
+---
+
+### 👉 Next POP (5)
+
+```text
+left = index 1 (height 1)
+right = index 4
+
+width = 4 - 1 - 1 = 2
+area = 5 * 2 = 10  ← MAX
+```
+
+---
+
+# 🧠 WHY `>=` (not just `>`)
+
+```java
+while (heights[stack.peek()] >= currentHeight)
+```
+
+👉 This ensures:
+
+* equal heights are also popped
+* avoids duplicate width calculations
+
+---
+
+### Example:
+
+```text
+[2,2,2]
+```
+
+If you don’t pop equal heights:
+
+* widths get messed up ❌
+
+---
+
+# 🧠 BIG INTUITION
+
+## What stack represents:
+
+```text
+Indices of bars that are waiting for a smaller bar on right
+```
+
+---
+
+## When we pop:
+
+👉 “We just found the RIGHT boundary for this bar”
+
+---
+
+## After popping:
+
+👉 “Stack top becomes LEFT boundary”
+
+---
+
+# 💡 FINAL MENTAL MODEL
+
+For each popped bar:
+
+```text
+LEFT boundary  = stack.peek()
+RIGHT boundary = current index i
+HEIGHT         = popped bar
+WIDTH          = space between them
+```
+
+---
+
+# 🧠 One-line takeaway
+
+👉 “Each bar expands until a smaller bar stops it — stack helps find those stops.”
+
+---
+
+# 🚀 If you want next level clarity
+
+I can:
+
+* 🔥 Animate this like we did for rainwater
+* 🔁 Compare with brute force (so intuition locks)
+* 🧩 Show how this relates to monotonic stack pattern everywhere
+
+Just tell me 👍
+

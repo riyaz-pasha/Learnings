@@ -46,41 +46,95 @@ class AsteroidCollision {
      */
     public static int[] asteroidCollision(int[] asteroids) {
         Stack<Integer> stack = new Stack<>();
-        
+
         for (int asteroid : asteroids) {
+
             boolean alive = true;
-            
-            // Process collisions if current asteroid is moving left (negative)
-            while (alive && asteroid < 0 && !stack.isEmpty() && stack.peek() > 0) {
-                // Collision between positive (right) and negative (left)
-                int top = stack.peek();
-                
+            // This asteroid is assumed alive unless destroyed
+
+            // 🔥 COLLISION CONDITION
+            while (alive && // current asteroid still exists
+                    asteroid < 0 && // current moving LEFT
+                    !stack.isEmpty() &&
+                    stack.peek() > 0 // stack top moving RIGHT
+            ) {
+
+                int top = stack.peek(); // right-moving asteroid
+
+                /*
+                 * COLLISION SCENARIO:
+                 * 
+                 * top → →
+                 * ← asteroid
+                 * 
+                 * They move toward each other
+                 */
+
                 if (top < -asteroid) {
-                    // Current asteroid is bigger, destroy the one in stack
+
+                    /*
+                     * Example:
+                     * top = 5, asteroid = -10
+                     * 
+                     * |5| < |10|
+                     * 
+                     * → stack asteroid explodes
+                     */
+
                     stack.pop();
-                    // Continue checking with remaining asteroids in stack
+
+                    // 🔥 IMPORTANT
+                    // We DO NOT stop here
+                    // because current asteroid may hit more
+
+                    /*
+                     * Example:
+                     * [5, 8, -10]
+                     * 
+                     * -10 destroys 8
+                     * then continues → destroys 5
+                     */
+
                 } else if (top == -asteroid) {
-                    // Both same size, both explode
+
+                    /*
+                     * Example:
+                     * 5 and -5
+                     * 
+                     * Both explode
+                     */
+
                     stack.pop();
-                    alive = false;
+                    alive = false; // current also destroyed
+
                 } else {
-                    // Top is bigger, current asteroid destroyed
+
+                    /*
+                     * Example:
+                     * top = 10, asteroid = -5
+                     * 
+                     * |10| > |5|
+                     * 
+                     * → current asteroid destroyed
+                     */
+
                     alive = false;
                 }
             }
-            
-            // Add asteroid to stack if it survived
+
+            // 🔥 ADD ONLY IF SURVIVED
             if (alive) {
                 stack.push(asteroid);
             }
         }
-        
-        // Convert stack to array
+
+        // 🔥 BUILD RESULT (stack is reversed order)
         int[] result = new int[stack.size()];
+
         for (int i = result.length - 1; i >= 0; i--) {
             result[i] = stack.pop();
         }
-        
+
         return result;
     }
     

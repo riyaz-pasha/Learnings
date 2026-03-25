@@ -51,45 +51,108 @@ class RemoveKDigits {
      */
     public static String removeKdigits(String num, int k) {
         int n = num.length();
-        
-        // Edge case: remove all digits
+
+        // 🔥 EDGE CASE
+        // If we remove all digits → smallest number is "0"
         if (k >= n) {
             return "0";
         }
-        
+
         Stack<Character> stack = new Stack<>();
-        
+        // Stack will store digits in increasing order (greedy)
+
         for (int i = 0; i < n; i++) {
             char digit = num.charAt(i);
-            
-            // Remove larger digits from stack while we can
+
+            // 🔥 MAIN GREEDY LOGIC
+            // Remove previous digits if they are bigger than current
+
             while (!stack.isEmpty() && k > 0 && stack.peek() > digit) {
+
+                /*
+                 * WHY REMOVE?
+                 * 
+                 * Example:
+                 * num = "1432", k = 1
+                 * 
+                 * stack = [1,4]
+                 * current digit = 3
+                 * 
+                 * 4 > 3 → remove 4
+                 * 
+                 * Because:
+                 * 1432 → removing 4 → 132 (smaller number)
+                 */
+
                 stack.pop();
                 k--;
             }
-            
+
             stack.push(digit);
+
+            /*
+             * WHY PUSH ALWAYS?
+             * 
+             * We are building the smallest number from left to right
+             * Each digit is part of final answer unless removed later
+             */
         }
-        
-        // If k > 0, remove from the end (largest remaining digits)
+
+        // 🔥 IMPORTANT: leftover k
         while (k > 0) {
             stack.pop();
             k--;
+
+            /*
+             * WHY REMOVE FROM END?
+             * 
+             * Example:
+             * num = "1234", k = 2
+             * 
+             * No removals happened earlier because:
+             * digits are increasing
+             * 
+             * So best strategy:
+             * remove from end → "12"
+             * 
+             * Removing from front would give bigger number ❌
+             */
         }
-        
-        // Build result string from stack
+
+        // 🔥 BUILD RESULT (stack is reversed order)
         StringBuilder result = new StringBuilder();
+
         while (!stack.isEmpty()) {
             result.append(stack.pop());
         }
+
         result.reverse();
-        
-        // Remove leading zeros
+
+        /*
+         * WHY REVERSE?
+         * 
+         * Stack pops in reverse order:
+         * 
+         * stack = [1,2,3]
+         * pop → "3,2,1"
+         * 
+         * reverse → "123"
+         */
+
+        // 🔥 REMOVE LEADING ZEROS
         while (result.length() > 1 && result.charAt(0) == '0') {
             result.deleteCharAt(0);
+
+            /*
+             * Example:
+             * "0200" → "200"
+             * 
+             * We keep at least one digit:
+             * "0" should remain "0"
+             */
         }
-        
-        // Handle empty result
+
+        // 🔥 FINAL SAFETY
         return result.length() == 0 ? "0" : result.toString();
     }
     
