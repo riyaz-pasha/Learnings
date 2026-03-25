@@ -1,4 +1,8 @@
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 /*
  * Given a string s, find the length of the longest substring without duplicate
  * characters.
@@ -83,19 +87,61 @@ class LongestSubstringWithoutRepeating {
     // Time Complexity: O(n), Space Complexity: O(min(m,n))
     public int lengthOfLongestSubstring(String s) {
         int n = s.length();
+
         Map<Character, Integer> charIndex = new HashMap<>();
-        int left = 0;
+        // Stores last seen index of each character
+
+        int left = 0; // start of window
         int maxLen = 0;
 
         for (int right = 0; right < n; right++) {
             char c = s.charAt(right);
 
-            // If character is seen and is within current window
+            // 🔥 DUPLICATE CHECK
             if (charIndex.containsKey(c) && charIndex.get(c) >= left) {
+
+                /*
+                 * WHY >= left ?
+                 * 
+                 * Because:
+                 * We only care if duplicate is INSIDE current window
+                 * 
+                 * Example:
+                 * s = "abba"
+                 * 
+                 * At last 'a':
+                 * previous 'a' index = 0
+                 * 
+                 * But left might already be 2
+                 * → old 'a' is OUTSIDE window → ignore
+                 * 
+                 * So we check:
+                 * charIndex.get(c) >= left
+                 */
+
+                // 🔥 MOVE LEFT
                 left = charIndex.get(c) + 1;
+
+                /*
+                 * WHY +1 ?
+                 * 
+                 * Example:
+                 * s = "abcabc"
+                 * ↑
+                 * duplicate 'a'
+                 * 
+                 * last 'a' at index 0
+                 * 
+                 * New window must start AFTER that
+                 * 
+                 * so left = 0 + 1 = 1
+                 */
             }
 
+            // Update latest index of character
             charIndex.put(c, right);
+
+            // 🔥 WINDOW SIZE
             maxLen = Math.max(maxLen, right - left + 1);
         }
 
