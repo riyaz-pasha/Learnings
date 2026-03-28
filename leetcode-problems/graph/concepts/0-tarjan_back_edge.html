@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tarjan's Back Edge: disc[v] vs low[v]</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0d0f14;
+    --surface: #161920;
+    --surface2: #1e2330;
+    --border: #2a3040;
+    --text: #dde3f0;
+    --muted: #6b7899;
+    --accent: #4f8ef7;
+    --green: #3ecf8e;
+    --red: #f76f6f;
+    --yellow: #f7c948;
+    --purple: #b87fff;
+    --orange: #ff9a3c;
+    --teal: #3fd8c7;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+  }
+
+  .container { max-width: 980px; margin: 0 auto; }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--teal));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 48px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .section {
+    margin-bottom: 52px;
+  }
+
+  .section-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin-bottom: 18px;
+    color: var(--text);
+  }
+
+  p {
+    color: #a8b4cc;
+    font-size: 0.95rem;
+    margin-bottom: 14px;
+    line-height: 1.75;
+  }
+
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    background: var(--surface2);
+    color: var(--yellow);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  /* ── graph panel ── */
+  .graph-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    display: flex;
+    gap: 40px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .graph-panel svg { flex-shrink: 0; }
+
+  .legend { flex: 1; min-width: 220px; }
+
+  .legend h3 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 0.88rem;
+    color: #a8b4cc;
+  }
+
+  .legend-line {
+    width: 32px;
+    height: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .legend-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 2px solid transparent;
+  }
+
+  /* ── DFS trace table ── */
+  .trace-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .trace-table thead th {
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.5px;
+  }
+
+  .trace-table tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+
+  .trace-table tbody tr:hover { background: var(--surface2); }
+
+  .trace-table td {
+    padding: 9px 14px;
+    color: #a8b4cc;
+    vertical-align: middle;
+  }
+
+  .trace-table td:first-child {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  .highlight-row {
+    background: rgba(79, 142, 247, 0.08) !important;
+    border-left: 3px solid var(--accent);
+  }
+
+  .highlight-row td { color: var(--text) !important; }
+
+  .val-disc { color: var(--green); font-weight: 600; }
+  .val-low  { color: var(--accent); font-weight: 600; }
+  .val-diff { color: var(--yellow); font-weight: 700; }
+  .val-diff-bad { color: var(--red); font-weight: 700; }
+
+  /* ── key moment comparison ── */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 24px;
+  }
+
+  @media (max-width: 640px) { .comparison { grid-template-columns: 1fr; } }
+
+  .comp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .comp-card.correct { border-color: rgba(62, 207, 142, 0.4); }
+  .comp-card.wrong   { border-color: rgba(247, 111, 111, 0.3); }
+
+  .comp-tag {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
+
+  .comp-tag.correct { background: rgba(62,207,142,0.15); color: var(--green); }
+  .comp-tag.wrong   { background: rgba(247,111,111,0.15); color: var(--red); }
+
+  .comp-card h3 { font-size: 1rem; margin-bottom: 14px; }
+  .comp-card p  { font-size: 0.88rem; margin-bottom: 12px; }
+
+  .code-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    border-left: 3px solid var(--border);
+  }
+
+  .code-line.correct { border-color: var(--green); }
+  .code-line.wrong   { border-color: var(--red); }
+
+  /* ── insight box ── */
+  .insight {
+    background: linear-gradient(135deg, rgba(79,142,247,0.08), rgba(63,216,199,0.06));
+    border: 1px solid rgba(79,142,247,0.3);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin: 24px 0;
+  }
+
+  .insight-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .insight p { margin-bottom: 8px; font-size: 0.92rem; }
+  .insight p:last-child { margin-bottom: 0; }
+
+  /* ── warning box ── */
+  .warning {
+    background: rgba(247,201,72,0.06);
+    border: 1px solid rgba(247,201,72,0.25);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+
+  .warning-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--yellow);
+    margin-bottom: 8px;
+  }
+
+  .warning p { font-size: 0.9rem; color: #c8b880; margin-bottom: 6px; }
+
+  /* ── verdict ── */
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+  }
+
+  .verdict-item {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 18px;
+    align-items: flex-start;
+    font-size: 0.9rem;
+    color: #a8b4cc;
+  }
+
+  .verdict-item:last-child { margin-bottom: 0; }
+
+  .verdict-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 1px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .step-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+  }
+
+  .step-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+  }
+
+  .step-cell .node-id { color: var(--muted); font-size: 0.72rem; margin-bottom: 4px; }
+  .step-cell .disc-val { color: var(--green); }
+  .step-cell .low-val  { color: var(--accent); }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Tarjan's Bridge Algorithm</h1>
+  <p class="subtitle">// why back edge uses disc[v] not low[v] — with a real example</p>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 1 — THE GRAPH
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 01</div>
+    <h2>The Example Graph</h2>
+    <p>
+      This graph has <strong>two cycles sharing vertex 1</strong> — a "figure-eight" shape.
+      There are no bridges; every edge belongs to at least one cycle.
+      It's the perfect graph to expose the <code>disc[v]</code> vs <code>low[v]</code> difference.
+    </p>
+
+    <div class="graph-panel">
+      <!-- SVG graph drawing -->
+      <svg width="380" height="280" viewBox="0 0 380 280">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#4f8ef7" opacity="0.8"/>
+          </marker>
+          <marker id="arrow-back" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#f76f6f" opacity="0.9"/>
+          </marker>
+          <marker id="arrow-tree" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#3ecf8e" opacity="0.8"/>
+          </marker>
+        </defs>
+
+        <!-- ── CYCLE A edges (tree) ── -->
+        <!-- 0 → 1 -->
+        <line x1="100" y1="60" x2="192" y2="100" stroke="#3ecf8e" stroke-width="2" opacity="0.7"/>
+        <!-- 1 → 2 -->
+        <line x1="208" y1="118" x2="268" y2="178" stroke="#3ecf8e" stroke-width="2" opacity="0.7"/>
+        <!-- 2 → 3 -->
+        <line x1="258" y1="200" x2="128" y2="228" stroke="#3ecf8e" stroke-width="2" opacity="0.7"/>
+        <!-- back edge 3 → 0 -->
+        <path d="M 110,230 Q 30,170 92,68" fill="none" stroke="#f76f6f" stroke-width="2" stroke-dasharray="6,4" opacity="0.85"/>
+        <polygon points="96,60 88,74 104,72" fill="#f76f6f" opacity="0.85"/>
+
+        <!-- ── CYCLE B edges (tree) ── -->
+        <!-- 1 → 4 -->
+        <line x1="200" y1="105" x2="200" y2="188" stroke="#3ecf8e" stroke-width="2" opacity="0.7"/>
+        <!-- 4 → 5 -->
+        <line x1="200" y1="208" x2="308" y2="208" stroke="#3ecf8e" stroke-width="2" opacity="0.7"/>
+        <!-- back edge 5 → 1 -->
+        <path d="M 320,200 Q 360,130 220,110" fill="none" stroke="#f7c948" stroke-width="2.5" stroke-dasharray="7,4" opacity="0.95"/>
+        <polygon points="212,108 226,104 222,118" fill="#f7c948" opacity="0.95"/>
+
+        <!-- ── Nodes ── -->
+        <!-- 0 -->
+        <circle cx="100" cy="55" r="20" fill="#161920" stroke="#3ecf8e" stroke-width="2.5"/>
+        <text x="100" y="61" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#3ecf8e">0</text>
+        <text x="100" y="32" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#6b7899">root</text>
+
+        <!-- 1 -->
+        <circle cx="200" cy="108" r="20" fill="#161920" stroke="#b87fff" stroke-width="2.5"/>
+        <text x="200" y="114" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#b87fff">1</text>
+        <text x="230" y="96" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#b87fff">← back edges target</text>
+
+        <!-- 2 -->
+        <circle cx="272" cy="198" r="20" fill="#161920" stroke="#4f8ef7" stroke-width="2"/>
+        <text x="272" y="204" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#4f8ef7">2</text>
+
+        <!-- 3 -->
+        <circle cx="120" cy="232" r="20" fill="#161920" stroke="#4f8ef7" stroke-width="2"/>
+        <text x="120" y="238" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#4f8ef7">3</text>
+
+        <!-- 4 -->
+        <circle cx="200" cy="202" r="20" fill="#161920" stroke="#4f8ef7" stroke-width="2"/>
+        <text x="200" y="208" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#4f8ef7">4</text>
+
+        <!-- 5 -->
+        <circle cx="316" cy="208" r="20" fill="#161920" stroke="#f7c948" stroke-width="2.5"/>
+        <text x="316" y="214" text-anchor="middle" font-family="JetBrains Mono" font-size="13" font-weight="700" fill="#f7c948">5</text>
+        <text x="316" y="248" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#f7c948">the key vertex</text>
+
+        <!-- ── Edge labels ── -->
+        <text x="136" y="72" font-family="JetBrains Mono" font-size="9" fill="#3ecf8e" opacity="0.8">tree</text>
+        <text x="252" y="148" font-family="JetBrains Mono" font-size="9" fill="#3ecf8e" opacity="0.8">tree</text>
+        <text x="170" y="238" font-family="JetBrains Mono" font-size="9" fill="#3ecf8e" opacity="0.8">tree</text>
+        <text x="42" y="158" font-family="JetBrains Mono" font-size="9" fill="#f76f6f" opacity="0.9">back</text>
+        <text x="207" y="158" font-family="JetBrains Mono" font-size="9" fill="#3ecf8e" opacity="0.8">tree</text>
+        <text x="248" y="200" font-family="JetBrains Mono" font-size="9" fill="#3ecf8e" opacity="0.8">tree</text>
+        <text x="346" y="158" font-family="JetBrains Mono" font-size="9" fill="#f7c948" opacity="0.9">back</text>
+      </svg>
+
+      <div class="legend">
+        <h3>Graph Legend</h3>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#3ecf8e"></div>
+          Tree edges (DFS path forward)
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background:#f76f6f; background: repeating-linear-gradient(90deg,#f76f6f 0,#f76f6f 6px,transparent 6px,transparent 10px)"></div>
+          Back edge: 3 → 0
+        </div>
+        <div class="legend-item">
+          <div class="legend-line" style="background: repeating-linear-gradient(90deg,#f7c948 0,#f7c948 7px,transparent 7px,transparent 11px)"></div>
+          Back edge: <strong>5 → 1 ← KEY</strong>
+        </div>
+        <div style="margin-top:18px; padding: 14px; background: var(--surface2); border-radius: 10px; border: 1px solid var(--border);">
+          <div style="font-size:0.78rem; color:var(--muted); letter-spacing:1px; text-transform:uppercase; margin-bottom:8px;">DFS Order</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:0.82rem; color:#a8b4cc; line-height:1.9;">
+            0 (t=0) → 1 (t=1) → 2 (t=2) → 3 (t=3)<br>
+            ↳ <span style="color:#f76f6f;">back 3→0</span><br>
+            back to 1 → 4 (t=4) → 5 (t=5)<br>
+            ↳ <span style="color:#f7c948;">back 5→1</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 2 — FULL TRACE
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 02</div>
+    <h2>Full DFS Trace — Step by Step</h2>
+    <p>Watch how <code>low[]</code> gets updated. Pay close attention to <strong>Step 5</strong> — that's where the back edge 3→0 updates <code>low[1]</code> to 0 before we ever reach vertex 5.</p>
+
+    <div style="overflow-x:auto; background:var(--surface); border:1px solid var(--border); border-radius:14px;">
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Action</th>
+            <th>disc[0]</th>
+            <th>disc[1]</th>
+            <th>disc[2]</th>
+            <th>disc[3]</th>
+            <th>disc[4]</th>
+            <th>disc[5]</th>
+            <th>low[0]</th>
+            <th>low[1]</th>
+            <th>low[2]</th>
+            <th>low[3]</th>
+            <th>low[4]</th>
+            <th>low[5]</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>Visit 0 (root)</td>
+            <td><span class="val-disc">0</span></td>
+            <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>Visit 1 (from 0)</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-low">1</span></td>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>Visit 2 (from 1)</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td>—</td><td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-low">1</span></td>
+            <td><span class="val-low">2</span></td>
+            <td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>Visit 3 (from 2)</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-low">1</span></td>
+            <td><span class="val-low">2</span></td>
+            <td><span class="val-low">3</span></td>
+            <td>—</td><td>—</td>
+          </tr>
+          <tr style="background: rgba(247,111,111,0.06);">
+            <td>5</td>
+            <td style="color:#f76f6f;">Back edge 3 → 0 → low[3]=min(3,disc[0])=<strong style="color:#f76f6f;">0</strong></td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-low">1</span></td>
+            <td><span class="val-low">2</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>6</td>
+            <td>Return 3→2: low[2]=min(2,low[3])=0</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-low">1</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>7</td>
+            <td>Return 2→1: low[1]=min(1,low[2])=0</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td>—</td><td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td style="background:rgba(184,127,255,0.15); border-radius:4px;"><span class="val-diff" style="color:#b87fff;">0 ← !!</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <td>8</td>
+            <td>Visit 4 (from 1)</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td><span class="val-disc">4</span></td>
+            <td>—</td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-diff" style="color:#b87fff;">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-low">4</span></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td>9</td>
+            <td>Visit 5 (from 4)</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td><span class="val-disc">4</span></td>
+            <td><span class="val-disc">5</span></td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-diff" style="color:#b87fff;">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-low">4</span></td>
+            <td><span class="val-low">5</span></td>
+          </tr>
+          <tr class="highlight-row">
+            <td>10</td>
+            <td style="color:#f7c948; font-weight:700;">⚡ Back edge 5→1 — THE KEY MOMENT</td>
+            <td><span class="val-disc">0</span></td>
+            <td><span class="val-disc">1</span></td>
+            <td><span class="val-disc">2</span></td>
+            <td><span class="val-disc">3</span></td>
+            <td><span class="val-disc">4</span></td>
+            <td><span class="val-disc">5</span></td>
+            <td><span class="val-low">0</span></td>
+            <td><span class="val-diff" style="color:#b87fff; font-size:1.05em;">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-diff">0</span></td>
+            <td><span class="val-low">4</span></td>
+            <td style="color:#f7c948; font-weight:700;">? ← depends</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="insight" style="margin-top:20px;">
+      <div class="insight-title">🔑 The Critical State at Step 10</div>
+      <p>Before processing back edge <code>5 → 1</code>, look at vertex 1's values:</p>
+      <p><code>disc[1] = 1</code> — vertex 1 was discovered at DFS time 1 (unchanged, always fixed)</p>
+      <p><code>low[1] = 0</code> — vertex 1 can reach vertex 0, thanks to the cycle 0-1-2-3-0 discovered earlier</p>
+      <p><strong>These two are different.</strong> When vertex 5 does a back edge to vertex 1, <em>which one do we use to update <code>low[5]</code>?</em></p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 3 — THE COMPARISON
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 03</div>
+    <h2>disc[v] vs low[v] — Side by Side</h2>
+    <p>Back edge: vertex <code>5</code> → vertex <code>1</code> (vertex 1 is already visited, not parent)</p>
+
+    <div class="comparison">
+      <div class="comp-card correct">
+        <div class="comp-tag correct">✓ CORRECT — use disc[1]</div>
+        <h3 style="color:var(--green)">low[u] = min(low[u], disc[v])</h3>
+        <div class="code-line correct">low[5] = min(5, disc[1]) = min(5, <strong>1</strong>) = <span style="color:var(--green);font-weight:700;">1</span></div>
+        <p><strong>What this says:</strong></p>
+        <p>Vertex 5 can reach back to the vertex discovered at time <strong>1</strong>, which is vertex 1. Nothing more. The back edge is a direct jump to vertex 1.</p>
+        <p style="color:#3ecf8e; font-size:0.85rem;">✓ Accurately captures only what the back edge provides</p>
+      </div>
+
+      <div class="comp-card wrong">
+        <div class="comp-tag wrong">✗ WRONG — using low[1]</div>
+        <h3 style="color:var(--red)">low[u] = min(low[u], low[v])</h3>
+        <div class="code-line wrong">low[5] = min(5, low[1]) = min(5, <strong>0</strong>) = <span style="color:var(--red);font-weight:700;">0</span></div>
+        <p><strong>What this wrongly claims:</strong></p>
+        <p>Vertex 5 can reach back to the vertex discovered at time <strong>0</strong> (vertex 0) just by taking this back edge. But vertex 5 can only <em>directly jump</em> to vertex 1 via this edge.</p>
+        <p style="color:#f76f6f; font-size:0.85rem;">✗ "Steals" reachability from vertex 1's other subtree</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 4 — THE ROOT CAUSE
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 04</div>
+    <h2>Why low[v] is Wrong — The Core Reasoning</h2>
+
+    <p>
+      When vertex 5 takes the back edge to vertex 1, the back edge contributes <em>one thing only</em>: a direct connection to vertex 1. That's it.
+    </p>
+
+    <p>
+      Vertex 1's <code>low[1] = 0</code> was earned because vertex 1 has a whole separate subtree
+      (vertices 2 and 3) where vertex 3 has a back edge all the way back to vertex 0.
+      That is <strong>vertex 1's reachability through its left subtree</strong> — not through vertex 5.
+    </p>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; margin:20px 0;">
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--muted); margin-bottom:16px;">Reachability Paths — How vertex 5 reaches vertex 0</div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; align-items:center; gap:12px; padding:14px; background:rgba(62,207,142,0.07); border-radius:10px; border:1px solid rgba(62,207,142,0.2);">
+          <div style="background:rgba(62,207,142,0.2); border-radius:8px; padding:6px 12px; font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--green); white-space:nowrap; flex-shrink:0;">✓ Correct Path</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:0.82rem; color:#a8b4cc;">
+            5 <span style="color:#f7c948;">→(back edge)</span> 1 <span style="color:#3ecf8e;">→(tree edge)</span> 2 <span style="color:#3ecf8e;">→(tree edge)</span> 3 <span style="color:#f76f6f;">→(back edge)</span> 0
+          </div>
+        </div>
+
+        <div style="padding:12px 16px; background:var(--surface2); border-radius:10px; border-left:3px solid var(--accent);">
+          <div style="font-size:0.82rem; color:#a8b4cc; line-height:1.7;">
+            <strong style="color:var(--text);">Notice:</strong> vertex 5 reaches vertex 0 by:<br>
+            1. Taking the back edge to vertex 1 (contributes <code>disc[1] = 1</code>)<br>
+            2. Then using <em>tree edges downward</em> through vertex 2, vertex 3<br>
+            3. Then using <em>vertex 3's back edge</em> up to vertex 0<br><br>
+            <strong style="color:var(--yellow);">Step 1 is what the back edge contributes.</strong>
+            Steps 2–3 are propagated upward through <code>low[child]</code> tree-edge propagation.
+            Using <code>low[1] = 0</code> for step 1 skips steps 2–3 and "steals" credit from vertex 3's back edge.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="insight">
+      <div class="insight-title">💡 The Invariant That low[] Maintains</div>
+      <p>
+        <code>low[u]</code> = minimum discovery time reachable from <em>u's subtree</em>
+        using DFS tree edges + <strong>direct back edges within the subtree</strong>.
+      </p>
+      <p>
+        A back edge from <code>u → v</code> directly contributes <code>disc[v]</code> to low[u].
+        The additional reachability from v's <em>other subtrees</em> is propagated <em>upward through tree edges</em>
+        when the DFS returns — that's what <code>low[u] = min(low[u], low[child])</code> handles.
+      </p>
+      <p>
+        <strong>If we use <code>low[v]</code> for back edges, we're conflating two separate mechanisms into one.
+        The back edge propagation and the tree-edge propagation get tangled together.</strong>
+      </p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 5 — DOES IT AFFECT THE FINAL ANSWER?
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 05</div>
+    <h2>Does Using low[v] Give Wrong Bridges?</h2>
+
+    <p>
+      This is the honest answer: for <strong>simple undirected graphs with correct parent tracking</strong>,
+      using <code>low[v]</code> happens to produce <strong>correct bridge detection</strong>
+      in the end — because <code>low[v] ≤ disc[v]</code> always,
+      so using <code>low[v]</code> can only ever <em>lower</em> low values,
+      and a mathematical argument shows this doesn't create false non-bridges.
+    </p>
+
+    <p>
+      But the <strong>intermediate values are wrong</strong>, and here's why that matters:
+    </p>
+
+    <div class="comparison" style="margin-top:8px;">
+      <div style="background:var(--surface); border:1px solid rgba(247,201,72,0.3); border-radius:14px; padding:22px;">
+        <div style="font-size:0.72rem; font-weight:700; letter-spacing:2px; color:var(--yellow); margin-bottom:12px; text-transform:uppercase;">Why disc[v] is still correct</div>
+        <div class="verdict-item" style="font-size:0.85rem;">
+          <div class="verdict-num">1</div>
+          <div>The <code>low[]</code> invariant stays <strong>semantically pure</strong> — it means exactly what it says: "earliest vertex directly reachable from this subtree"</div>
+        </div>
+        <div class="verdict-item" style="font-size:0.85rem;">
+          <div class="verdict-num">2</div>
+          <div>For <strong>directed graphs</strong> (Tarjan's SCC algorithm), using <code>low[v]</code> IS provably wrong because you can't walk back up through v's subtree</div>
+        </div>
+        <div class="verdict-item" style="font-size:0.85rem;">
+          <div class="verdict-num">3</div>
+          <div>For <strong>multigraphs</strong> (parallel edges), the two can diverge and give incorrect bridge counts</div>
+        </div>
+        <div class="verdict-item" style="font-size:0.85rem;">
+          <div class="verdict-num">4</div>
+          <div>Conceptual correctness matters: reasoning about the algorithm's correctness becomes much harder when invariants are violated mid-computation</div>
+        </div>
+      </div>
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+        <div style="font-size:0.72rem; font-weight:700; letter-spacing:2px; color:var(--muted); margin-bottom:12px; text-transform:uppercase;">Final values in our example</div>
+        <p style="font-size:0.83rem; color:#a8b4cc; margin-bottom:14px;">Even with <code>low[v]</code>, bridges are correctly detected here. But look at <code>low[5]</code>:</p>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-family:'JetBrains Mono',monospace; font-size:0.8rem;">
+          <div style="background:rgba(62,207,142,0.08); border:1px solid rgba(62,207,142,0.2); border-radius:8px; padding:12px; text-align:center;">
+            <div style="color:var(--muted); font-size:0.7rem; margin-bottom:6px;">using disc[1]</div>
+            <div style="color:var(--green); font-size:1.1rem; font-weight:700;">low[5] = 1</div>
+            <div style="color:#6b7899; font-size:0.72rem; margin-top:4px;">"5 reaches vertex 1"</div>
+          </div>
+          <div style="background:rgba(247,111,111,0.08); border:1px solid rgba(247,111,111,0.2); border-radius:8px; padding:12px; text-align:center;">
+            <div style="color:var(--muted); font-size:0.7rem; margin-bottom:6px;">using low[1]</div>
+            <div style="color:var(--red); font-size:1.1rem; font-weight:700;">low[5] = 0</div>
+            <div style="color:#6b7899; font-size:0.72rem; margin-top:4px;">"5 reaches vertex 0"</div>
+          </div>
+        </div>
+
+        <p style="font-size:0.82rem; color:#a8b4cc; margin-top:14px; margin-bottom:0;">
+          <code>low[5] = 0</code> is technically not <em>wrong</em> (vertex 5 CAN reach vertex 0),
+          but it arrived there by "borrowing" vertex 1's low value instead of earning it properly
+          through tree-edge propagation. The invariant is broken.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 6 — SUMMARY
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 06</div>
+    <h2>The One-Line Summary</h2>
+
+    <div style="background: linear-gradient(135deg, rgba(79,142,247,0.1), rgba(63,216,199,0.08)); border:1px solid rgba(79,142,247,0.35); border-radius:16px; padding:30px;">
+      <p style="font-size:1.05rem; line-height:1.8; color:var(--text); margin-bottom:0;">
+        A back edge <code>u → v</code> means vertex u can <strong>jump directly to v</strong>.
+        So it contributes <code>disc[v]</code> to <code>low[u]</code> — the discovery time of v.
+        <br><br>
+        <code>low[v]</code> is what v can reach through v's <em>own subtree's back edges</em>
+        — that information is already woven into v's subtree's <code>low[]</code> values,
+        and it will propagate upward through the tree naturally via
+        <code>low[u] = min(low[u], low[child])</code>.
+        <br><br>
+        <strong>Using <code>low[v]</code> double-counts:</strong>
+        it applies v's "already-earned" reachability to u's position as if u's single back edge bought all of it.
+      </p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SECTION 7 — CODE CALL OUT
+  ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">Section 07</div>
+    <h2>Back in the Code</h2>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:24px; font-family:'JetBrains Mono',monospace; font-size:0.82rem; line-height:1.9;">
+      <div style="color:var(--muted);">// CASE 1: Tree edge → propagate low from child's subtree</div>
+      <div style="color:#a8b4cc;">low[u] = Math.min(low[u], low[v]);  <span style="color:var(--green);">// ← use low[v]: child found a path via its subtree</span></div>
+      <br>
+      <div style="color:var(--muted);">// CASE 2: Back edge → direct jump to an ancestor</div>
+      <div style="color:#a8b4cc;">low[u] = Math.min(low[u], <span style="background:rgba(247,201,72,0.15); color:var(--yellow); padding:1px 4px; border-radius:3px;">disc[v]</span>);  <span style="color:var(--green);">// ← use disc[v]: only what THIS edge directly buys us</span></div>
+    </div>
+
+    <div class="warning" style="margin-top:20px;">
+      <div class="warning-title">⚠ The Temptation</div>
+      <p>Since <code>low[v]</code> also gives correct bridges in simple undirected graphs, many online implementations use it. But on exams, interviews, and directed graph extensions, the distinction matters. The code in your question is correct — <code>disc[v]</code> is the right choice.</p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
