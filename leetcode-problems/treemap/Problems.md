@@ -42,7 +42,7 @@ pollFirstEntry()  // Remove and return minimum entry
 
 ---
 
-### 01. Real-Time Player Matchmaking
+### [01. Real-Time Player Matchmaking](1-PlayerMatchmaking.java)
 
 **Difficulty:** Hard | **Patterns:** Floor/Ceiling, Real-Time
 
