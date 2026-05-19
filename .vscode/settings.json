@@ -71,5 +71,8 @@
             "color": "#c8d3f5",
             "border": "1px solid #434c5e"
         }
+    },
+    "jdk.notebook.projects.mapping": {
+        "/Users/riyaz/Personal/Learning/AI/RAG/rag-tutorial-1/notebook/document.ipynb": "/Users/riyaz/Personal/Learning/system-design/HLD/0-concepts/kafka/tutorial"
     }
 }
