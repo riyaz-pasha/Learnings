@@ -1,5 +1,7 @@
 # Apache Kafka — Production Deep-Dive Guide
 
+> **Enhancement notes:** this pass focused on filling operational gaps the original guide (correctly) left out since fundamentals live in `18-Kafka-PubSub-Deep-Dive.md`. Added: §13 Capacity Planning (disk = throughput × retention × RF, network fan-out math, partitions-per-broker ceiling, all with worked illustrative numbers); §14 Operational Metrics table (lag, URP, offline partitions, ISR churn, p99 latency, disk %, active-controller-count, MM2 lag — each with healthy/warning/critical thresholds); §15 Rolling Upgrades (controlled-shutdown flowchart, why it beats a hard kill, the two-phase protocol-version bump); §16 Production Incident Playbook (three decision-tree flowcharts: consumer-lag alert, disk-approaching-full, and a hot-partition symptom table that cross-references §6 instead of repeating it); and a 🆕 Controller failure & re-election subsection in §3 (KRaft quorum Raft election, distinct from partition-leader election). Also added two rows to the Common Mistakes table, new interview Q&A entries, new cheat-sheet lines, and three new mindmap leaves. Left untouched: all of §1–§12 and Golden Rules — that content was already clear, correct, and appropriately scoped, so it was not rewritten.
+
 Companion to `17-Distributed-Messaging-Queue-FAANG-Guide.md` — that guide covers the general theory (ordering, delivery semantics, replication). This one covers **Kafka specifically**: how to actually stand it up, create topics correctly, choose a partition key without shooting yourself in the foot, and run it across regions.
 
 ---
@@ -36,6 +38,9 @@ mindmap
       acks=all + min.insync.replicas
       broker.rack for AZ spread
       MirrorMaker 2 across regions, never one stretched cluster
+      🆕 Capacity: throughput x retention x RF
+      🆕 Rolling upgrade: controlled shutdown, one broker at a time
+      🆕 Watch lag, URP, p99, disk percent, controller count
 ```
 
 ---
@@ -314,6 +319,32 @@ sequenceDiagram
 **Why the new leader is always chosen from the ISR:** a replica outside the ISR is, by definition, missing some recently committed messages. Promoting it would silently lose data clients were already told (via `acks=all`) was durable. This is the direct mechanical link between `min.insync.replicas` and "how much data can I lose on a leader failure" — the answer is zero, as long as the ISR was never allowed to shrink below your `min.insync.replicas` floor.
 
 **Leader epoch, briefly:** each new leader election bumps a **leader epoch** number. Clients tag fetches/produces with the epoch they last saw; a stale epoch is rejected — this prevents a "zombie" old leader (one that hasn't yet realized it was demoted, e.g., stuck in a GC pause) from accepting writes after a new leader has already taken over.
+
+### 🆕 Controller failure & re-election (KRaft quorum)
+
+Everything above is about losing the leader of one **partition**. A different question interviewers also ask: what happens if the broker that's currently the **active controller** — the one making all those leader-election decisions — dies?
+
+In KRaft mode, a small set of nodes (typically 3 or 5, an illustrative odd number chosen for quorum math) run as **controllers**, replicating cluster metadata (topic configs, partition-leader assignments, broker liveness) as a Raft log. Only one of them is the **active** controller at a time; the rest are standby voters that already hold a synced copy of the log.
+
+```mermaid
+sequenceDiagram
+    participant C1 as Controller (Broker 1) — ACTIVE
+    participant C2 as Controller (Broker 2) — quorum voter
+    participant C3 as Controller (Broker 3) — quorum voter
+    participant B as Any data broker
+
+    Note over C1,C3: KRaft quorum — metadata log replicated via Raft,<br/>so every voter already has (nearly) the full history
+    Note over C1: Broker 1 crashes — was the active controller
+    C2->>C3: request votes (Raft leader election)
+    C3-->>C2: vote granted — C2's log is at least as up to date
+    Note over C2: C2 becomes the new active controller.<br/>No separate re-read step (unlike old ZooKeeper mode) —<br/>the log it already has IS the metadata
+    C2->>B: this node is now the controller for the cluster
+    B->>B: future leader-election / metadata requests go to C2
+```
+
+Why this matters in an interview: it's the direct payoff of "no ZooKeeper needed, KRaft handles it" (§ KRaft vs. ZooKeeper above) — controller failover used to mean re-reading state from a separate ensemble; now the new controller just continues from a log it was already replicating. For interview purposes, controller election **is** just a Raft quorum leader election over the metadata log — it isn't a separate protocol from partition leader election, only a different log being elected over.
+
+**Practically:** on a small/local cluster brokers often run in "combined mode" (broker + controller on the same process, as in the docker-compose below). On a real production cluster, dedicate separate controller-only nodes once you're past a handful of brokers — the controller's job (metadata, leader elections) shouldn't compete for CPU/disk with the same node that's also serving live produce/fetch traffic.
 
 ---
 
@@ -700,6 +731,163 @@ props.put("schema.registry.url", "http://schema-registry:8081");
 | **Ignoring consumer lag** | Silent backlog growth until an SLA breach is the first signal anyone notices | Alert on consumer group lag and age-of-oldest-unconsumed-message, not just broker health |
 | **No topic naming convention** | Ownership and discoverability collapse once you have hundreds of topics | Adopt `<domain>.<entity>.<event>` (or similar) before topic #2 |
 | **Treating `compact` and `delete` cleanup policies as interchangeable** | `compact` keeps the *latest value per key forever* (a changelog), not a time-bounded event log — using it for an event stream silently drops history you expected to keep | `delete` for event streams, `compact` only for "current state per key" topics |
+| **No capacity plan for retention × throughput growth** | Disk fills up gradually until a broker hits a critical-disk alert or, worse, crashes with no free space | Do the disk-sizing math up front (§13) and watch the *trend* of disk usage, not just its current value |
+| **"Big bang" restart of every broker at once during an upgrade** | Kills availability for any partition whose replicas all bounce together — self-inflicted version of the multi-broker-outage scenario you'd never accept from an actual failure | Roll one broker at a time; wait for under-replicated partitions to hit 0 before touching the next (§15) |
+
+---
+
+## 13. 🆕 Capacity Planning — Sizing Disks, Network, and Partitions
+
+Everything in this section answers one interview question: *"how do you size a Kafka cluster before you launch it?"* The honest answer is arithmetic, not intuition — and interviewers notice when a candidate can actually do the math instead of waving at "add more brokers."
+
+### Disk: throughput × retention × replication factor
+
+The formula is simple; people just forget the replication-factor multiplier:
+
+```
+disk needed for one topic ≈ throughput (bytes/sec) × retention (sec) × replication factor
+```
+
+**Worked example (illustrative numbers):** a topic ingests 50 MB/sec and is retained for 7 days, replication factor 3.
+
+- One replica's worth of data: `50 MB/s × 604,800 s ≈ 30 TB`.
+- With RF=3, the *cluster* needs roughly `30 TB × 3 = 90 TB` total — three independent 30 TB copies, living on three different brokers.
+- Add ~20–30% headroom on top (index files, the currently-active unsealed segment, in-flight compaction temp files) — running any disk near 100% is how you get stuck mid-incident with no room to even roll a new segment.
+- A broker with a 2 TB disk obviously can't hold a 30 TB replica of this topic alone. Your real options are: shorten retention, spread the topic's partitions across more/bigger-disk brokers, or use **tiered storage** (Kafka's built-in tiered storage in newer versions, or a custom job that offloads sealed segments to S3/GCS) so only recent data stays on local disk while older segments move to cheap object storage.
+
+This is the concrete version of the "retention vs. disk cost" trade-off: every extra day of retention on a 50 MB/s topic costs roughly another ~4.3 TB of *replicated* disk (`50 MB/s × 86,400 s × 3`), not ~1.4 TB — forgetting the RF multiplier is the single most common capacity-planning mistake.
+
+### Network: don't forget replication and fan-out reads
+
+A leader broker's network egress isn't just what producers send it — it also replicates to every follower and serves every independent consumer group's fetches:
+
+```
+egress ≈ produce_rate × (replication_factor − 1)   [replication to followers]
+        + produce_rate × number_of_consumer_groups  [each group re-reads the full stream]
+```
+
+**Worked example (illustrative):** a broker leads partitions ingesting 50 MB/s total, RF=3, and three independent consumer groups read the topic (a real-time processor, an analytics ETL job, an audit logger).
+
+- Ingress from producers: 50 MB/s.
+- Replication egress to 2 followers: `50 × 2 = 100 MB/s`.
+- Consumer fetch egress: `50 × 3 = 150 MB/s`.
+- Total egress ≈ 250 MB/s, on top of the 50 MB/s ingress. A 1 Gbps NIC tops out around 125 MB/s — this broker would already be oversubscribed. Busy brokers need multiple bonded NICs or 10 Gbps+ links, sized from this kind of fan-out math, not from the raw producer throughput alone.
+
+### Partitions per broker
+
+Partition *count per topic* is covered in §5 (`throughput ÷ ~10 MB/s per partition`, an illustrative per-partition ceiling that varies with hardware). The capacity-planning question on top of that is **how many total partitions can one broker hold** across all topics.
+
+Each partition costs the broker open file handles (each segment is at least one, usually two, open files), some JVM heap and page-cache bookkeeping, and — critically — replication/metadata overhead that controller failover and leader elections have to iterate over. As an illustrative ceiling: keeping a broker under roughly a few thousand partitions (exact safe number depends on hardware, heap size, and Kafka version — check current docs rather than trusting a hard number) keeps controller failover and restarts fast. This is the mechanical reason "thousands of tiny partitions just in case" (§12) is a real production hazard, not just a style nitpick — it's this same budget, just approached from the "too many, too small" direction instead of the disk direction.
+
+| Dimension | Formula | Illustrative worked number |
+|---|---|---|
+| Disk per topic (cluster-wide) | `throughput × retention × RF` | 50 MB/s × 7 days × RF3 ≈ 90 TB |
+| Extra disk per extra day of retention | `throughput × 86,400s × RF` | ≈ 4.3 TB/day at 50 MB/s, RF3 |
+| Broker network egress | `produce_rate × (RF−1) + produce_rate × #consumer groups` | 50 MB/s in → ~250 MB/s out (RF3, 3 groups) |
+| Partitions per broker | keep well under hardware/version-specific ceiling | low thousands, illustrative — verify per version |
+
+**Memory hook:** *multiply by replication factor for disk, multiply by (RF−1) **plus** every consumer group for network — the two most underestimated numbers in a Kafka capacity plan.*
+
+---
+
+## 14. 🆕 Operational Metrics — What to Watch, and Alert Thresholds
+
+A Kafka dashboard that only shows "brokers up/down" will miss almost every real incident — durability and availability erode gradually (a shrinking ISR, creeping lag, a filling disk) well before anything actually goes offline. These are the numbers that catch it early.
+
+| Metric | What it means | Healthy | Warning | Critical |
+|---|---|---|---|---|
+| **Consumer lag** (records behind) | Produced offset minus committed offset, per partition | Near 0, or spikes that recover within seconds/minutes | Growing steadily over several minutes | Growing for 15+ minutes with no recovery signal — see §16 |
+| **Under-replicated partitions (URP)** | Partitions whose ISR is smaller than the replication factor | 0 | Briefly > 0 during a planned rolling restart | > 0 sustained outside a planned restart |
+| **Offline partitions** | Partitions with no leader at all | 0 | — (there's no acceptable "warning" state here) | Any value > 0 — immediate incident, that partition can't be read or written |
+| **ISR shrink/expand rate** | How often replicas fall out of and back into the ISR | Near 0 | Occasional blips (GC pause, transient network hiccup) | Frequent, recurring shrink-expand cycles on the same broker — usually an overloaded or flaky node |
+| **Request latency, p99** (produce/fetch) | Broker-side time to handle a request | Single-digit ms | Tens of ms | Hundreds of ms+ — disk, GC, or CPU backpressure |
+| **Broker disk usage** | How full each broker's log volume is | < 70% | 70–85% | > 85% — risk of failed segment rolls and, eventually, an out-of-disk crash |
+| **Active controller count** (cluster-wide) | Should be exactly 1 at all times | 1 | — | 0 (no active controller) or > 1 (split-brain) sustained for more than a few seconds |
+| **MirrorMaker 2 replication lag** (§10) | How far behind the DR/other-region cluster is | Seconds | Tens of seconds to low minutes | Growing/unbounded — check the MM2 connector and inter-region network |
+
+Numbers above are illustrative starting points, not universal SLAs — calibrate the exact thresholds to your own traffic patterns and SLAs, but the *shape* (0 tolerance on offline partitions and controller count; trend-watching on lag, URP, and disk) generalizes.
+
+**Memory hook — five graphs, five fingers:** if a dashboard only has room for five panels, make them **Lag, URPs, p99 latency, Disk %, Active-controller-count**. The first three tell you the cluster is keeping up; the last two tell you it's still structurally sound.
+
+---
+
+## 15. 🆕 Rolling Upgrades & Restarts Without Downtime
+
+Kafka is built to tolerate one broker disappearing at a time — that's the entire point of replication. A rolling upgrade just does *on purpose, one broker at a time, with a health check between each step* what a real single-broker failure does by accident.
+
+### The procedure
+
+```mermaid
+flowchart TD
+    Start["Cluster healthy?<br/>URP = 0, offline partitions = 0"] -->|No| Fix["Stop — fix the existing<br/>issue first, don't upgrade a sick cluster"]
+    Start -->|Yes| Pick["Pick the next broker<br/>(one at a time, never two replicas of<br/>the same partition simultaneously)"]
+    Pick --> Shutdown["Controlled shutdown<br/>(moves partition leadership off<br/>BEFORE the process exits)"]
+    Shutdown --> Upgrade["Upgrade binary/config,<br/>restart the broker"]
+    Upgrade --> Rejoin["Wait: broker catches up and<br/>rejoins the ISR for all its partitions"]
+    Rejoin --> Healthy{"URP back to 0?"}
+    Healthy -->|No| Wait["Wait / investigate —<br/>do not touch the next broker yet"]
+    Wait --> Healthy
+    Healthy -->|Yes| More{"Brokers left<br/>to upgrade?"}
+    More -->|Yes| Pick
+    More -->|No| Bump["All brokers now on the new binary —<br/>only now bump inter.broker.protocol.version<br/>/ metadata.version"]
+    Bump --> Done["Upgrade complete"]
+```
+
+**Why controlled shutdown, specifically:** killing a broker with `SIGKILL` (or a hard crash) forces the controller to *detect* the failure via a missed heartbeat/session timeout before it can move leadership elsewhere — a real, if brief, gap where that broker's partitions are leaderless. A **controlled shutdown** (`controlled.shutdown.enable=true`, the default) tells the broker to proactively hand off leadership for all its partitions to another ISR member *before* it actually stops — the difference between a planned, near-zero-disruption step and a mini-outage on every restart.
+
+**The two-phase protocol-version bump** exists as a rollback safety net: as long as `inter.broker.protocol.version` / `metadata.version` is still pinned to the old value, every broker — old binary or new — speaks the same wire/metadata format, so you can pause mid-rollout or even roll back a broker to the old binary if something looks wrong. Only after *every* broker is confirmed running the new binary do you bump the protocol version — that step is one-way, the same way growing partitions is (§12).
+
+**Clients don't need to upgrade in lockstep with brokers** — Kafka brokers support older client protocol versions, so producers/consumers can lag the broker upgrade. Always check the specific release's upgrade notes for exceptions (deprecated configs, removed metrics) before assuming this holds for every version jump.
+
+---
+
+## 16. 🆕 Production Incident Playbook — Diagnosing the Three Most Common Pages
+
+Three alerts account for most Kafka on-call pages. Each has a small decision tree that gets you to root cause faster than guessing.
+
+### Consumer lag alert
+
+```mermaid
+flowchart TD
+    Alert["Alert: consumer lag rising"] --> Q1{"Rising on ALL partitions,<br/>or just one/a few?"}
+    Q1 -->|"Just one/a few"| Hot["Hot partition / key skew (§6) —<br/>check per-partition throughput and key cardinality"]
+    Q1 -->|"All, evenly"| Q2{"Did consumer group<br/>size just shrink?"}
+    Q2 -->|Yes| Rebalance["Fewer consumers now own<br/>more partitions each — scale consumers back up"]
+    Q2 -->|No change| Q3{"Is per-record/per-batch<br/>processing time increasing?"}
+    Q3 -->|Yes| Slow["A downstream dependency is slow<br/>(DB, external API, lock contention) —<br/>fix or scale THAT, not Kafka"]
+    Q3 -->|No, steady| Q4{"Did produce rate<br/>spike recently?"}
+    Q4 -->|Yes| Scale["Likely transient — scale consumers,<br/>or let it drain if still within SLA"]
+    Q4 -->|No| Stuck["Consumer is likely stuck or crash-looping —<br/>check max.poll.interval.ms timeouts,<br/>repeated rebalances, or a poison-pill message"]
+```
+
+**Telling a blip from a real incident, with numbers:** a lag of 50K messages that drops back to 5K within a minute of a deploy finishing is normal catch-up, not an incident. A lag growing by **10K messages/minute for 15+ minutes with no recovery signal** is not a blip — at that rate it will keep growing until someone intervenes, whether that's scaling consumers, fixing a slow downstream call, or killing a stuck consumer instance.
+
+### Disk approaching full
+
+```mermaid
+flowchart TD
+    Alert2["Alert: broker disk > 85%"] --> Q5{"Is retention.ms/bytes set<br/>to what you actually intended?"}
+    Q5 -->|"No — misconfigured"| FixRet["Lower retention, or move this<br/>topic to tiered storage"]
+    Q5 -->|Yes, as intended| Q6{"Did traffic volume<br/>grow since the last capacity plan?"}
+    Q6 -->|Yes| Replan["Re-run the capacity math (§13) —<br/>disk was sized for a lower throughput"]
+    Q6 -->|No| Q7{"Are old segments failing<br/>to delete or compact?"}
+    Q7 -->|Yes| Cleaner["Check for a stuck log-cleaner thread,<br/>or a compaction job that's fallen behind"]
+    Q7 -->|No| Skew2["Partitions are unevenly placed<br/>across brokers — rebalance with<br/>kafka-reassign-partitions.sh"]
+```
+
+**Numbers before firefighting:** a broker with a 2 TB disk retaining 7 days of a 50 MB/s topic needs ~30 TB just for that one topic's replica (§13's math) — if a broker on 2 TB disks is at 85% and climbing, that's very likely a disk that was simply never sized for this retention/throughput combination, not a mysterious leak. Do the arithmetic before you start chasing "phantom" disk usage.
+
+### Hot partition / partition skew
+
+This one's fully covered as a design-time decision in §6 (the partition-key decision tree) — the production-incident version is just recognizing the same symptom live:
+
+| Symptom | Likely root cause | Fix |
+|---|---|---|
+| One broker's CPU/network far above its peers, same partition count as everyone else | That broker leads a hot partition from a skewed/low-cardinality key | Composite or salted key (§6) |
+| Lag on exactly one partition while siblings are fine | Same | Same |
+| Lag rising on every partition, roughly proportionally | **Not** a hot-partition issue — use the consumer-lag tree above instead | — |
+
+**Memory hook:** *one broker glowing red while its neighbors idle = a key problem (§6); every broker/partition degrading together = a capacity or consumer problem (above) — they look similar on a dashboard but have opposite fixes.*
 
 ---
 
@@ -720,6 +908,9 @@ props.put("schema.registry.url", "http://schema-registry:8081");
 - "How do you get exactly-once in Kafka?" → distinguish idempotent producer (dedup one producer's writes) from transactions (atomic read-process-write) — naming both, and when each is enough, is the strong answer (§7–§8).
 - "How would you reshard/add partitions without breaking per-key ordering?" → you can't do it silently; plan a new topic + backfill, because `hash(key) % N` changes for every key the moment `N` changes (§6).
 - "How do you run Kafka across regions?" → independent per-region clusters + MirrorMaker 2 async replication, never one stretched cluster (§10).
+- "How much disk do you provision for a topic?" → `throughput × retention × replication factor`, plus ~20–30% headroom — and remember every extra day of retention costs that multiplied-by-RF amount, not the raw per-replica figure (§13).
+- "How do you upgrade a live Kafka cluster with zero downtime?" → controlled shutdown (moves leadership off first) + one broker at a time + only bump `inter.broker.protocol.version`/`metadata.version` after every broker is on the new binary (§15).
+- "A consumer-lag alert just fired — what do you check first?" → all partitions or just one (hot key vs. real lag), did the group shrink, is per-record processing slowing down, or did produce rate spike — walk the tree, don't guess (§16).
 
 ---
 
@@ -736,3 +927,8 @@ props.put("schema.registry.url", "http://schema-registry:8081");
 - **Region strategy:** one cluster per region + MirrorMaker 2 async replication. Never stretch one cluster over a WAN.
 - **Rack awareness:** set `broker.rack` per AZ so replicas of a partition spread across failure domains automatically.
 - **Schema safety:** Schema Registry + `BACKWARD`/`FORWARD`/`FULL` compatibility, decided by which side deploys first.
+- **Disk sizing:** `throughput × retention × replication factor`, plus ~20–30% headroom — a 50 MB/s topic at 7-day retention, RF3, needs ≈90 TB cluster-wide.
+- **Network sizing:** don't forget replication (×(RF−1)) *and* every independent consumer group re-reading the full stream — both add to a leader broker's egress.
+- **Five dashboards to always have up:** consumer lag, under-replicated partitions, request p99 latency, broker disk %, active-controller-count (must be exactly 1).
+- **Rolling upgrade:** controlled shutdown → one broker at a time → wait for URP=0 → only then bump the protocol/metadata version.
+- **Incident triage in one line:** lag on one partition = hot key (§6); lag on all partitions = capacity/slow-consumer (§16); disk filling = redo the retention×RF math (§13); offline partitions = controller/broker down (§3).

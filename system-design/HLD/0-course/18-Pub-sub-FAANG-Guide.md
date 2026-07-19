@@ -1,5 +1,24 @@
 # Pub-Sub Systems — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added six 🆕-tagged pieces without touching
+> anything that already worked — the original structure, voice, and section
+> order are unchanged.
+> - Requirements clarification: a new callout on asking about delivery
+>   guarantee and ordering requirements up front, not just discovering them later.
+> - API design: an explicit `ack(topic_ID, offset)` call and row added — the
+>   original table jumped from `read()` straight to `unsubscribe()`.
+> - A new "evolution arc" diagram framing the existing Design 1 → Design 2
+>   progression explicitly as v1 → v2 → v3, plus a new **Design 3** section
+>   (topic→partition→consumer-group routing diagram, and a slow-subscriber
+>   backpressure flowchart with a buffer/drop/disconnect comparison table).
+> - Capacity estimation: a new worked example with concrete illustrative
+>   numbers for fan-out ratio (publishers, topics, subscribers, hot-topic
+>   fan-out), showing why fan-out costs read bandwidth, not storage.
+> - Left untouched: Mental model, Interview playbook, core vocabulary, Design
+>   1/2 internals, delivery-semantics table, push/pull table, broker
+>   comparison table, failure modes, real-world examples, Golden Rules, and
+>   the Master Cheat Sheet — all were already clear and complete.
+
 ## Mental model
 
 A pub-sub system is a **newsletter, not a phone call**. A publisher doesn't know
@@ -64,6 +83,26 @@ flowchart TB
     end
 ```
 
+#### 🆕 Two questions the FR/NFR lists don't ask — surface them explicitly
+
+The six verbs describe *what* the system does. Two cross-cutting questions
+decide *how hard* the design is, and interviewers expect you to raise them in
+the same breath as the FR/NFR list, before sketching anything:
+
+- **Delivery guarantee** — is an occasional dropped message acceptable
+  (at-most-once), or must every message be processed at least once
+  (at-least-once — needs idempotent consumers), or must it be processed
+  exactly once (needs transactional writes + dedup)? Default to
+  at-least-once unless told otherwise.
+- **Ordering requirement** — does order matter at all, only within a
+  business key (e.g., all events for one `user_id`), or globally across the
+  whole topic? Global ordering kills parallelism — confirm it's actually
+  needed before designing around it.
+
+Ask both right after the six verbs. They change the partitioning strategy
+and ack level you draw in the high-level design, so getting them late means
+redrawing the diagram.
+
 **Cheat-sheet**
 - Functional = the six verbs: create, write, subscribe, read, retain, delete.
 - Non-functional = **S-A-D-F-C** (Scalable, Available, Durable, Fault-tolerant,
@@ -72,6 +111,8 @@ flowchart TB
 - Durability and availability are the two an interviewer will pressure-test
   first — have your answer ready ("replication + acks=all" and "no
   single-point broker" respectively) before moving to API design.
+- Delivery guarantee + ordering are the two cross-cutting questions that
+  don't fit neatly into FR or NFR — ask them anyway, in the same breath.
 
 ## API design
 
@@ -84,6 +125,7 @@ the connection/auth context, not a parameter.
 | Write a message | `write(topic_ID, message)` — max 1 MB/message | ack, or error |
 | Subscribe | `subscribe(topic_ID)` | ack |
 | Read a message | `read(topic_ID)` | message object |
+| 🆕 Acknowledge | `ack(topic_ID, offset)` — commits read progress | ack |
 | Unsubscribe | `unsubscribe(topic_ID)` | ack |
 | Delete a topic | `delete_topic(topic_ID)` | ack |
 
@@ -108,6 +150,9 @@ sequenceDiagram
     Sys->>DB: verify subscription + retention window
     Sys-->>C: message
 
+    C->>Sys: ack(topic_ID, offset)
+    Sys-->>C: ack (read progress committed)
+
     C->>Sys: unsubscribe(topic_ID)
     Sys->>DB: remove subscription
     Sys-->>C: ack
@@ -117,13 +162,17 @@ sequenceDiagram
 ```
 
 **Cheat-sheet**
-- Six calls total — if you can't name them cold, you can't drive an API
+- Seven calls total — if you can't name them cold, you can't drive an API
   design discussion; write them on the whiteboard before the high-level
   diagram.
-- `write()` and `read()` are the hot path — everything else (create,
-  subscribe, delete) is control-plane and can be slower/less optimized.
+- `write()`, `read()`, and `ack()` are the hot path — everything else
+  (create, subscribe, delete) is control-plane and can be slower/less
+  optimized.
 - Retention is a **parameter of subscribe/create**, not a separate system —
   it just gates what `read()` is allowed to return.
+- `ack()` is what makes at-least-once work: no ack within a timeout means
+  the broker redelivers — see Delivery-semantics below for the full
+  ack/retry/dedup story.
 
 ## What it is — core vocabulary
 
@@ -159,6 +208,21 @@ sequenceDiagram
   systems without knowing about them individually.
 
 ## How it works internally
+
+#### 🆕 The evolution arc — narrate this out loud
+
+Three passes, cheapest mistake to correct first. Say this sequence before
+drawing anything, then walk through each stage below.
+
+```mermaid
+flowchart LR
+    v1["v1 — single broker,\ndirect publish-to-subscriber fan-out"] --> v2["v2 — topic partitioning\n+ broker cluster"] --> v3["v3 — consumer groups,\ndurable replicated log,\nbackpressure-aware flow control"]
+```
+
+"Design 1" below is v1, "Design 2" is v2, and consumer groups + the
+backpressure flow control section together are v3 — each pass exists to fix
+the previous pass's scaling wall, not because more moving parts is inherently
+better.
 
 ### Design 1 — one queue per consumer (naive, and why it doesn't scale)
 
@@ -352,6 +416,80 @@ sequenceDiagram
     Note over C1,C2: both resume from last committed offset — no reprocessing, no gaps
 ```
 
+### 🆕 Design 3 — topic → partition → subscriber routing, and backpressure-aware flow control
+
+This is v3: same partitioned, replicated log as Design 2, but now drawn with
+the routing an interviewer will ask you to trace by hand — "which subscriber
+gets partition 2?" — plus the flow-control layer that protects the broker
+and the producer when one subscriber can't keep up.
+
+#### 🆕 Routing map: one topic, two independent consumer groups
+
+```mermaid
+flowchart TD
+    T["Topic: order-events (4 partitions)"]
+    T --> P0[Partition 0]
+    T --> P1[Partition 1]
+    T --> P2[Partition 2]
+    T --> P3[Partition 3]
+
+    subgraph GA["Consumer group: billing-service (2 members — queue-like split)"]
+        CA1["Member 1 → owns P0, P1"]
+        CA2["Member 2 → owns P2, P3"]
+    end
+    subgraph GB["Consumer group: fraud-detection (1 member — full copy)"]
+        CB1["Member 1 → owns P0, P1, P2, P3"]
+    end
+
+    P0 --> CA1
+    P1 --> CA1
+    P2 --> CA2
+    P3 --> CA2
+    P0 --> CB1
+    P1 --> CB1
+    P2 --> CB1
+    P3 --> CB1
+```
+
+Read this diagram top to bottom: **within** a group, each partition goes to
+exactly one member (queue behavior); **across** groups, every group gets
+every partition (pub-sub fan-out). Both group's routing is fully determined
+by the group coordinator's partition assignment — there's no per-message
+branching logic, just "which group, then which member owns this partition."
+
+#### 🆕 Slow-subscriber backpressure: buffer vs. drop vs. disconnect
+
+A consumer that falls behind must never block the producer — that's the
+whole point of decoupling (see Golden Rules). But "never block the
+producer" still leaves three real choices for what happens to the lagging
+consumer's unread messages:
+
+```mermaid
+flowchart TD
+    A[Consumer lag is growing] --> B{Delivery mode?}
+    B -->|Pull| C["Do nothing extra —\nthe durable log already holds\nevery unread message"]
+    C --> D{Lag > alert threshold,\ne.g. 80% of retention window?}
+    D -->|No| E[Keep monitoring, no action]
+    D -->|Yes| F["Page on-call —\nconsumer still isn't blocked,\nbut it's about to lose data"]
+    B -->|Push| G{Per-consumer buffer full?}
+    G -->|No| H[Queue in a bounded\nper-consumer buffer]
+    G -->|Yes| I{Can this topic tolerate\nmessage loss?}
+    I -->|Yes — e.g. live cursor,\nephemeral metric| J["Drop oldest message\n(at-most-once, by design)"]
+    I -->|No| K["Disconnect the slow subscriber;\nit resubscribes later and replays\nfrom its last committed offset"]
+```
+
+| Strategy | What happens | When to use it | Cost |
+|---|---|---|---|
+| **Buffer** (durable log, or a bounded per-consumer queue) | Message stays available until the consumer catches up or retention expires | Default for pull-based systems; anything durability-sensitive | Storage for the retention window; consumer risks aging out if it never catches up |
+| **Drop** | Oldest or newest message discarded once the buffer is full | Best-effort, latency-sensitive feeds (live cursors, ephemeral metrics) | Silent data loss — must be an explicit product decision, never an accident |
+| **Disconnect** | Broker closes the slow subscriber's connection; it must resubscribe and replay from its last committed offset | Push-based systems with a hard per-consumer buffer cap | Consumer downtime, plus a burst of catch-up reads on reconnect |
+
+**Mnemonic**: slow guest at a dinner party — keep their plate warm (buffer),
+skip them to the next course (drop), or ask them to step out until they're
+ready (disconnect). What you never do is stop the whole table from eating
+because one guest is slow — that's blocking the producer, and it's off the
+table by design.
+
 **Cheat-sheet (How it works internally)**
 - Partitioning solves parallelism; segments solve cheap retention/deletion;
   offsets solve independent, replayable reads.
@@ -362,6 +500,10 @@ sequenceDiagram
   out of pub-sub?"
 - Rebalancing is necessary but disruptive — prefer cooperative/incremental
   reassignment over stop-the-world when consumers join/leave often.
+- Slow subscriber: **buffer** (bounded by retention) is the default,
+  **drop** only where staleness beats loss, **disconnect** only past a lag
+  threshold with alerting — blocking the producer is never one of the three
+  options.
 
 ## Push vs. pull — disambiguation
 
@@ -571,6 +713,26 @@ your real storage bill is 3× the raw data**, not 1×. Interviewers routinely
 catch candidates who compute storage and forget to multiply by replication
 factor — don't be that candidate.
 
+#### 🆕 Fan-out ratio, worked example
+
+Illustrative numbers for a mid-size deployment (label these as illustrative
+if you're ever unsure of real ones in an interview):
+- 10K publishers, 1M subscribers, spread across 50K topics
+- 500K messages/sec average across all topics (matches the estimate above)
+- Fan-out ratio: most topics have a handful of subscribers, but a hot
+  topic — say a company-wide `user.created` event — can have up to 10K
+  subscribers reading it
+
+The number to say out loud: **this fan-out ratio costs nothing extra in
+storage**. The 906 TB figure above is the same whether 1 subscriber reads a
+partition or 10,000 do — each subscriber just tracks its own offset (a few
+bytes) in the KV store; nobody gets a private copy of the message. The only
+thing that scales with fan-out is **read bandwidth** (10,000 pollers on one
+hot topic multiply read I/O, not storage). This is exactly why Design 2/3's
+log-based fan-out beats Design 1's "physically copy per subscriber" queue:
+Design 1's cost scales linearly with subscriber count, Design 2/3's storage
+cost doesn't.
+
 **The method matters more than the number** — if an interviewer changes P to
 5M msg/s or retention to 30 days, redo steps 1→7 live; don't recite "we need
 X brokers" from memory.
@@ -584,6 +746,9 @@ X brokers" from memory.
 - State assumptions out loud (avg message size, per-broker disk/IO limits)
   before computing — the assumption is what the interviewer is actually
   grading, not the arithmetic.
+- Fan-out ratio (subscribers per topic) drives read bandwidth, not storage —
+  say this explicitly, it's the tell that you understand why log-based
+  pub-sub beats a naive per-subscriber-copy queue.
 
 ## Design decisions and trade-offs
 
@@ -616,7 +781,8 @@ X brokers" from memory.
 - **Consumer lag / slow consumer** — a consumer falling behind doesn't block
   the producer (that's the whole point of decoupling), but if lag exceeds the
   retention window, messages age out and are lost to that consumer. Monitor
-  consumer lag as a first-class metric, not an afterthought.
+  consumer lag as a first-class metric, not an afterthought. See the 🆕
+  buffer/drop/disconnect flowchart above for the concrete decision tree.
 - **Poison message** — a malformed message that crashes every consumer that
   tries to process it, causing an infinite redelivery loop. Mitigate with a
   **dead-letter queue/topic** after N failed attempts.

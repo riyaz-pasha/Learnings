@@ -1,5 +1,13 @@
 # CDN (Content Delivery Network) — FAANG Interview Guide
 
+> **Enhancement notes:** this pass targeted the gaps a FAANG interviewer would probe that the original draft covered only thinly — everything else (requirements, capacity math, push/pull, DNS-vs-anycast, TTL/lease, buy-vs-build, the recall/cheat-sheet layers) was already strong and left untouched.
+> - Added **§6.2 Architecture evolution v1 → v2 → v3** — a naive-single-origin → DNS-routed-regional-caches → anycast+shield+pub/sub-purge diagram sequence, for narrating the design as a build-up instead of presenting it finished.
+> - Added **§9.3 Preventing thundering herd on a cold cache** (request-coalescing/single-flight flowchart + an "if X then Y" splitting it from origin-shield's job) and **§9.4** dedicated cache-hit and cache-miss-with-origin-shield sequence diagrams — the combined §6.1 diagram existed, but the two paths weren't isolated anywhere.
+> - Added an **anycast-vs-DNS-geo-routing visual** in §10 (side-by-side graph) — the trade-off table and flowchart existed, but not a picture of the two routing paths themselves.
+> - Added **§11.5 How purge propagation reaches thousands of edges** — a pub/sub fan-out sequence diagram and illustrative propagation-time numbers; the guide named "purge APIs" and cited Fastly's sub-second purge before, but never showed the fan-out mechanism.
+> - Added Active Recall questions 13–14 and Golden Rule 9 covering request-coalescing-vs-origin-shield and purge fan-out, and extended the Master Cheat Sheet with three new lines summarizing the additions above.
+> - No existing section was rewritten or reordered — this is additive; all new headings are marked with 🆕.
+
 ## 1. What it is, in one mental model
 
 A CDN is a **geographically distributed cache layer sitting between users and your origin**. Think of it as franchising: instead of every customer flying to your one factory (origin data center), you open small stores (PoPs — Points of Presence) close to where customers live, stock them with your most popular products (cached content), and only ship from the factory when a store doesn't have what's needed (cache miss → origin fetch).
@@ -208,6 +216,55 @@ sequenceDiagram
 - The distribution system fans out tree-style (§9), never origin-to-every-edge-directly — that would defeat the point of having a CDN.
 - Redraw §6.1's sequence diagram from memory — it's the single diagram that ties every component together.
 
+#### 🆕 6.2 Architecture evolution: v1 → v2 → v3
+
+Interviewers often want you to *build up* the design rather than present the finished architecture cold. Narrating it as three versions — each one only adding complexity the previous version couldn't handle — is more convincing than jumping straight to the final picture.
+
+**v1 — naive: one origin, no CDN at all.**
+```mermaid
+graph LR
+    U1[User - US] --> O[(Single Origin<br/>us-east-1)]
+    U2[User - Europe] --> O
+    U3[User - Asia] --> O
+```
+Every user, everywhere, pays the full WAN RTT to one data center (§2's "without a CDN" row). Works for a small user base, falls over at global scale.
+
+**v2 — a handful of regional edge caches + DNS routing.**
+```mermaid
+graph LR
+    U1[User - US] --> D{DNS routing}
+    U2[User - Europe] --> D
+    U3[User - Asia] --> D
+    D -->|nearest region| E1[Edge Cache<br/>US]
+    D -->|nearest region| E2[Edge Cache<br/>EU]
+    D -->|nearest region| E3[Edge Cache<br/>Asia]
+    E1 -->|miss| O[(Origin)]
+    E2 -->|miss| O
+    E3 -->|miss| O
+```
+Most requests now get answered close to the user, and DNS decides which region to send them to. But each of these 3 edge caches independently hits origin on a miss — fine at 3 PoPs, but this doesn't survive a jump to hundreds of PoPs (§3, §12): origin would see hundreds of independent "first miss" spikes instead of one.
+
+**v3 — production shape: anycast + origin shield + pub/sub purge.**
+```mermaid
+graph TB
+    U1[Users worldwide] -->|1 anycast IP| BGP{BGP routes to<br/>nearest PoP}
+    BGP --> E1[Edge PoP 1]
+    BGP --> E2[Edge PoP 2]
+    BGP --> E3[Edge PoP ...N]
+    E1 -->|miss| SH[Origin Shield]
+    E2 -->|miss| SH
+    E3 -->|miss| SH
+    SH -->|shield miss| O[(Origin)]
+    Pub[Purge pub/sub channel] -.fan-out invalidation.-> E1
+    Pub -.-> E2
+    Pub -.-> E3
+```
+At hundreds-to-thousands of PoPs, three things become necessary that v2 didn't need: **(1) anycast**, so clients skip the two-step DNS resolution and BGP does the nearest-PoP math for free; **(2) an origin shield** (§9.2), so N edges missing on the same object collapses into one origin fetch instead of N; **(3) a pub/sub invalidation channel** (§11.5), so a purge reaches every PoP in roughly the same few seconds whether there are 3 PoPs or 3,000.
+
+**Cheat-sheet:**
+- v1 → v2 → v3 = "single origin" → "DNS to a few regions" → "anycast + shield + pub/sub purge at global scale."
+- Say the progression out loud in an interview — it demonstrates you know *why* each piece exists, not just that it exists.
+
 ## 7. Push vs. Pull CDN — the central design decision
 
 This is the single most-asked CDN design question. Know it cold.
@@ -312,6 +369,70 @@ What it buys you:
 
 This is the same tree/multi-tier idea from §9.1, just given a product name: **AWS CloudFront calls this "Origin Shield," Fastly calls it "shielding,"** and Akamai's tiered-distribution parent layer serves the same purpose. Mentioning the concept *and* one real product name is what separates a strong answer from a generic one here.
 
+#### 🆕 9.3 Preventing thundering herd on a cold cache
+
+"Cold cache" shows up two ways: (a) one specific object suddenly goes viral and every edge misses on it at once, or (b) a whole PoP is cold — just spun up, empty cache, first wave of traffic. Both produce the same failure mode if unhandled: hundreds of concurrent requests for the same key each fire their own origin fetch.
+
+The fix at a single proxy is **request coalescing** (a.k.a. "single-flight" or a cache-fill lock): the first request for a missing key becomes the *leader* and actually fetches; every other concurrent request for that same key *waits* on the leader's in-flight fetch instead of starting its own.
+
+```mermaid
+flowchart TD
+    A[Request arrives at edge<br/>for key K] --> B{Is K in cache<br/>and fresh?}
+    B -->|Yes| C[Serve from cache<br/>cache hit]
+    B -->|No| D{Is there already an<br/>in-flight fetch for K?}
+    D -->|Yes| E[Join the wait list for K<br/>no new fetch started]
+    D -->|No| F[Become the leader for K<br/>mark K as in-flight]
+    F --> G[Fetch K from<br/>origin shield / origin]
+    G --> H[Populate cache with K]
+    H --> I[Serve leader + release<br/>every waiter with the result]
+    E --> I
+```
+
+**Illustrative example** (numbers are for intuition, not measured): a promo image goes viral and 200 edge PoPs each get 50 concurrent requests for it in the same second — 10,000 requests total. Without coalescing, that's up to 10,000 origin fetches. With per-PoP request coalescing, each PoP fetches at most once, so origin sees at most 200 requests — and with an origin shield in front of those 200 PoPs (§9.2), the shield coalesces *those* down to a single origin fetch. The two mechanisms stack: coalescing kills the herd *within* a PoP, the shield kills the herd *across* PoPs.
+
+**If X then Y:**
+- Many concurrent requests miss on the *same key* at the *same edge* → request coalescing — one fetch, everyone else waits.
+- Many *different edges* miss on the *same key* around the *same time* → origin shield — collapses their fetches into one.
+- A whole PoP is cold (freshly deployed, empty cache) → let it warm from a neighboring PoP or the shield tier first, rather than hammering origin directly.
+
+#### 🆕 9.4 Cache-hit vs. cache-miss (with origin shield) — sequence diagrams
+
+§6.1's combined diagram is the one to know cold, but interviewers often ask for the hit and miss paths in isolation — here they are, split out.
+
+**Cache hit:**
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant E as Edge Proxy
+    U->>E: GET /object.jpg
+    E->>E: Lookup in RAM/SSD cache
+    Note over E: Fresh, TTL not expired
+    E->>U: 200 OK — served from edge, origin never contacted
+```
+
+**Cache miss, with origin shield:**
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant E as Edge Proxy
+    participant Sh as Origin Shield
+    participant O as Origin
+    U->>E: GET /object.jpg
+    E->>E: Lookup in cache — miss
+    E->>Sh: Forward request (edge never talks to origin directly)
+    alt Shield already warm (another edge missed on this earlier)
+        Sh->>E: Return content
+    else Shield also misses
+        Sh->>Sh: Coalesce with any other in-flight<br/>edge requests for the same key
+        Sh->>O: Single fetch from origin
+        O->>Sh: Return content
+        Sh->>Sh: Cache at shield tier
+        Sh->>E: Return content
+    end
+    E->>E: Cache locally
+    E->>U: 200 OK
+```
+
 ## 10. Finding the nearest proxy server (routing mechanisms)
 
 Two factors define "nearest":
@@ -339,6 +460,25 @@ sequenceDiagram
     C->>P: HTTP request
     P->>C: Content
 ```
+
+#### 🆕 Anycast vs. DNS geo-routing, visualized
+
+```mermaid
+graph TB
+    subgraph DNS["DNS geo-routing"]
+        direction LR
+        U1[User in Tokyo] -->|"1 resolve hostname"| DNS1[CDN Authoritative DNS]
+        DNS1 -->|"2 looks up resolver's location,<br/>returns Tokyo PoP IP"| U1
+        U1 -->|"3 HTTP to that IP"| P1[Tokyo PoP]
+    end
+    subgraph ANY["Anycast routing"]
+        direction LR
+        U2[User in Tokyo] -->|"1 HTTP to the one<br/>global anycast IP"| BGP2{Internet BGP routing}
+        BGP2 -->|"2 shortest AS path<br/>happens to be Tokyo"| P2[Tokyo PoP]
+    end
+```
+
+With DNS geo-routing, the *DNS layer* makes the decision — one extra lookup, but the CDN can factor in real-time load per request. With anycast, every PoP announces the *same IP*, and ordinary internet routing (BGP) picks the topologically nearest one — no extra lookup, but the CDN gives up per-request control once BGP has converged.
 
 **Which one would you actually pick?**
 
@@ -449,6 +589,40 @@ Candidates often use these two terms interchangeably. They're not the same mecha
 | **Short** (seconds–minutes) | High — near real-time | Higher — frequent revalidation/refetch hits origin | Rapidly changing data: prices, news, near-live content |
 | **Long** (hours–days–weeks) | Lower — tolerates staleness | Lower — origin rarely bothered | Static/immutable assets: versioned JS/CSS bundles, images, video segments |
 | **Best practice** | — | — | Pair a long TTL with versioned/cache-busted URLs — you get the cost savings of a long TTL *without* the staleness risk, by bumping the URL on change instead of shortening the TTL |
+
+#### 🆕 11.5 How does a purge actually reach thousands of edges?
+
+§11.3 says purge is "near-instant, propagation-dependent" — here's the mechanism that makes that true. A naive implementation (control plane opens a connection to each edge one at a time and tells it to evict) doesn't scale past a few dozen PoPs — that's O(number of PoPs) sequential round trips. Production CDNs instead fan a purge out through a **pub/sub invalidation channel**: publish once, and a tree of subscribers (regional aggregators, then edge PoPs) receive and apply it in parallel.
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator / API
+    participant Ctrl as Control plane
+    participant Pub as Pub/sub channel
+    participant R1 as Regional aggregator A
+    participant R2 as Regional aggregator B
+    participant E1 as Edge PoP (under A)
+    participant E2 as Edge PoP (under B)
+    Op->>Ctrl: Purge /object.jpg (or surrogate key "campaign-42")
+    Ctrl->>Pub: Publish invalidation event once
+    par Fan-out, parallel
+        Pub->>R1: Deliver event
+        Pub->>R2: Deliver event
+    end
+    par Parallel evict
+        R1->>E1: Forward event
+        R2->>E2: Forward event
+    end
+    E1->>E1: Evict / mark stale locally
+    E2->>E2: Evict / mark stale locally
+```
+
+**Illustrative numbers** (label as illustrative — real figures vary by vendor): publishing once and fanning out through 2 tiers to 1,000 edge PoPs, with each hop adding tens of milliseconds, gets full propagation in the low single-digit seconds. That's roughly the ballpark real CDNs target (Fastly advertises sub-second for its instant-purge path; other vendors run tens-of-seconds). The number matters less than the **shape**: one publish, fan-out tree, parallel delivery — never "loop over every edge one at a time," which is O(PoPs) sequential calls instead of O(log PoPs) parallel hops.
+
+**If X then Y:**
+- Need to purge one specific known URL → purge-by-URL through the pub/sub channel.
+- Need to purge a whole category (e.g., every image in a campaign) without knowing every URL → tag/surrogate-key purge, so one publish evicts every object sharing that tag.
+- Propagation can't wait even a few seconds → don't rely on purge at all — use versioned URLs (§11.4) so there's nothing to invalidate in the first place.
 
 **Cheat-sheet:**
 - TTL = pull-style consistency (proxy checks); lease = push-style (origin notifies). Same push/pull duality as §7.
@@ -658,6 +832,16 @@ TTL expiry is passive and time-based — the proxy just checks the clock. Cache 
 Revalidated (back to Fresh) if a conditional GET returns 304 Not Modified; Expired/Purged if revalidation returns new content, or an explicit purge is issued. Stale-while-revalidate lets the proxy serve the stale copy immediately while this check happens in the background.
 </details>
 
+<details>
+<summary>13. Request coalescing and an origin shield both stop origin overload on a cold cache — don't they solve the same problem?</summary>
+No. Request coalescing handles many concurrent misses for the *same key at the same edge* — the first request becomes the leader and fetches, the rest wait, one fetch total per PoP. An origin shield handles many concurrent misses for the *same key across many different edges* — it collapses all of their fetches into one. They stack: coalescing kills the herd within a PoP, the shield kills the herd across PoPs.
+</details>
+
+<details>
+<summary>14. How does a purge reach thousands of edge PoPs without the control plane looping over them one at a time?</summary>
+Publish the invalidation once to a pub/sub channel; a fan-out tree (regional aggregators → edge PoPs) delivers and applies it in parallel. That's roughly O(log PoPs) parallel hops instead of O(PoPs) sequential round trips — the same shape as the distribution system's tree fan-out for content (§9.1), just applied to invalidation.
+</details>
+
 ## 19. Golden Rules
 
 Non-negotiables — if any of these is missing from your answer, the interviewer will probe until it surfaces.
@@ -670,6 +854,7 @@ Non-negotiables — if any of these is missing from your answer, the interviewer
 6. Anycast isn't just routing — it's also a free DDoS defense; mention both when it comes up.
 7. Buy vs. build is a real trade-off, not a foregone conclusion — cite Netflix Open Connect, not just "everyone uses Cloudflare."
 8. A CDN shields the origin, it doesn't replace it — the origin still exists, still gets hit on misses, and still needs its own resilience story.
+9. Thundering herd has two distinct fixes at two distinct scopes — request coalescing (same key, same edge) and an origin shield (same key, many edges) — know both, and know they stack rather than substitute for each other.
 
 ## Master Cheat Sheet
 
@@ -692,6 +877,12 @@ Non-negotiables — if any of these is missing from your answer, the interviewer
 **Consistency:** polling (TTR, wasteful) → TTL (expiry-based, standard) → leases (origin pushes notifications, fewest messages, adaptive). Stale-while-revalidate serves stale instantly while refreshing async in the background. Invalidation (active purge) ≠ TTL expiry (passive clock). Short TTL = fresh but costly; long TTL = cheap but stale — versioned URLs get both.
 
 **Placement:** on-premises (near IXPs) vs off-premises (inside ISP, Akamai/Netflix style, "one hop away"). Google uses split-TCP at IXP-level infra to avoid slow-start/handshake to distant origin. Origin shield = single consolidated tier between edge and origin that coalesces thundering-herd misses into one origin fetch (CloudFront: Origin Shield; Fastly: shielding).
+
+**Thundering herd, two scopes:** request coalescing = one edge, one key, first request leads, rest wait (single-flight). Origin shield = many edges, one key, shield collapses all their fetches into one. They stack, they don't substitute.
+
+**Purge propagation:** never loop over edges one at a time (O(PoPs) sequential) — publish once to a pub/sub channel, fan out through a tree of regional aggregators to every edge in parallel (O(log PoPs)). Same tree-fan-out shape as content distribution (§9.1), applied to invalidation instead.
+
+**Architecture evolution (how to narrate a build-up):** v1 single origin → v2 a few regional edge caches + DNS routing → v3 anycast + origin shield + pub/sub purge, once PoP count grows from a handful to hundreds/thousands.
 
 **Buy vs build:** buy (Akamai/Cloudflare/Fastly/CloudFront) unless delivery is your core product at massive, predictable scale and you need full control (Netflix Open Connect). CloudFront = Lambda@Edge/CloudFront Functions + regional edge caches. Fastly = instant (sub-second) purge via VCL + Compute@Edge (Wasm-based edge compute).
 

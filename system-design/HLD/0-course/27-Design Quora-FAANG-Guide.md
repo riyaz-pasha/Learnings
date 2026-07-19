@@ -1,5 +1,13 @@
 # Design Quora — FAANG System Design Interview Guide
 
+> **Enhancement notes:**
+> - Added a formal **🆕 API Design** table (endpoints, methods, request/response shape) under Section 4 — the original went straight from capacity estimation to architecture without one.
+> - Added **🆕 Architecture Evolution (v1 → v2 → v3)** diagrams showing the design grow from a single synchronous DB, to async vote aggregation + cache, to the full ranking/search/moderation pipeline.
+> - Added a worked **🆕 sharded-counter example** (10K upvotes / 20 shards) with its own vote → shard → async-aggregation → cache sequence diagram, plus a sync-vs-async vote-counting comparison table.
+> - Added a **🆕 recency-ranking vs. quality-signal-ranking** trade-off table and a **🆕 moderation decision flowchart** with illustrative confidence thresholds for auto-publish / flag / auto-remove, plus a matching three-way threshold flowchart for duplicate-question merge/suggest-merge/publish.
+> - Added a clearly-labeled **🆕 illustrative generic-scale example** (MAU, questions/month, answers/month, read:write ratio) alongside the source's own Quora-specific worked numbers.
+> - Existing sections, ordering, tone, and every prior diagram are untouched; only minor clarity tightening was folded into surrounding prose here and there (not individually marked — this note covers it).
+
 ## 0. Mental Model
 
 Quora is **"Stack Overflow's ranking problem + Twitter's feed problem + Reddit's voting problem"** wearing one UI.
@@ -164,6 +172,16 @@ pie title Daily Storage Breakdown (86.55 TB)
 | Long-poll hold time (Quora) | up to 60 sec |
 | Typical replica count for durability | 3 |
 
+#### 🆕 Illustrative generic-scale example (read:write ratio)
+
+The numbers above are the source material's own worked example, shaped around Quora's specific assumptions. Interviewers often hand you rounder, more generic numbers instead — here's the same drill run on those, **labeled illustrative since these aren't source-verified**:
+
+- **300M MAU**, ~30M DAU (10% daily-active is a common rule of thumb for a content-consumption app).
+- **~5M new questions/month**, **~50M new answers/month** (≈10 answers/question, illustrative).
+- **~2.5B question/answer page views/month** (people read far more than they write).
+
+That's roughly **2.5B reads : 55M writes ≈ 45:1** on content alone for this illustrative example — and real-world reported ratios for read-heavy social/UGC platforms are often quoted much higher (100:1 to 1000:1) once you count views served straight from cache/CDN that never reach a service host at all. Say the ratio out loud whenever you justify a cache: an order of magnitude (or more) more reads than writes is *why* Memcached/CDN sit in front of everything, and *why* it's fine for writes to be a little slower and stricter than reads.
+
 ### Cheat-sheet
 - Always derive RPS from DAU × actions/day ÷ 86400 — interviewers want to see the formula, not a memorized number.
 - State the servers formula as DAU ÷ per-server-RPS-capacity; 8000 RPS/server is a defensible assumption to state and move on from.
@@ -174,6 +192,22 @@ pie title Daily Storage Breakdown (86.55 TB)
 ---
 
 ## 4. High-Level Design
+
+### 🆕 API Design
+
+Name the endpoints before drawing boxes — it forces you to say out loud which calls are synchronous writes, which are reads, and which is the odd one out (long-poll). A handful of REST-ish endpoints is enough; the interviewer is checking that you know the request/response shape and the sync-vs-async split, not grading you on a full OpenAPI spec.
+
+| Endpoint | Method | Request (key fields) | Response | Notes |
+|---|---|---|---|---|
+| `/questions` | POST | `user_id, title, body, topic_ids[], image?, video?` | `question_id` | Sync DB write only; index/notify async — see 5.1 |
+| `/questions/{id}/answers` | POST | `user_id, body, is_anonymous?` | `answer_id` | Same sync/async split as above |
+| `/answers/{id}/vote` | POST | `user_id, value` (`+1 / -1 / 0`) | `200 OK` | Upsert on `(user_id, answer_id)` — idempotent, see 5.2 |
+| `/answers/{id}/comments` | POST | `user_id, body, parent_comment_id?` | `comment_id` | One level of nesting by convention |
+| `/questions/{id}` | GET | — | `question, ranked answers[]` | Cache-first read — see 5.4 |
+| `/search` | GET | `q, cursor?` | `question_ids[]` (ranked) | Cache-first, tokenized query — see 5.5 |
+| `/feed` | GET | `user_id, cursor?` | mixed feed items[] | Pre-materialized (push) or merged (pull) — see 5.4 |
+| `/updates` | GET (long-poll) | `user_id, since_token?` | notification payload or timeout | Held ≤60s — see 5.6 |
+| `/users/{id}/block` | POST | `blocker_id, blocked_id` | `200 OK` | Read-time filter only, no cascading delete — see 5.8 |
 
 ```mermaid
 flowchart TB
@@ -217,6 +251,55 @@ flowchart TB
 - Mention ZooKeeper explicitly as the piece that answers "how does a service host know which shard to query" — often forgotten.
 - Say "service hosts are combined and homogeneous" before being asked — it preempts the "why not separate web/app tiers" question.
 - Blob + CDN for media is a one-liner, don't over-engineer it: images/videos are read-heavy and immutable once posted.
+
+### 🆕 Architecture Evolution: v1 → v2 → v3
+
+Drawing the end-state diagram (above) straight away skips the part interviewers actually want to see: *why* each piece is there. Narrate it as three stages.
+
+**v1 — single DB, synchronous vote counting (naive, breaks fast):**
+
+```mermaid
+flowchart LR
+    Client[Client] --> App[App Server]
+    App -->|write question/answer| DB[(Single MySQL:<br/>content + vote counts)]
+    App -->|read-modify-write vote count<br/>in the SAME transaction| DB
+```
+
+Everything — content and vote counts — lives in one table, updated in one transaction. Fine at low volume. Breaks the moment one answer goes viral: every voter now serializes on a read-modify-write of the same row (section 5.2's lost-update race), and the vote write competes with content writes for the same DB's capacity.
+
+**v2 — async vote aggregation + cache (fixes the hot key):**
+
+```mermaid
+flowchart LR
+    Client[Client] --> App[App Server]
+    App -->|write question/answer| DB[(MySQL: content)]
+    App -->|publish vote_cast event| Queue[Vote Event Queue]
+    Queue --> Agg[Async Vote Aggregator]
+    Agg -->|atomic INCR| Cache[(Redis: vote counts)]
+    App -.->|read count| Cache
+```
+
+Vote writes move off the content DB entirely: the app server just publishes an event and returns. An async aggregator does the atomic increment and readers hit a cache, not the DB. This is the single biggest win in the whole redesign — it turns a write-time lock contention problem into a queue-depth problem, which is much easier to scale.
+
+**v3 — ranking service + search index + moderation pipeline (the source's actual end-state):**
+
+```mermaid
+flowchart TB
+    Client[Client] --> LB[Load Balancer] --> SH[Service Hosts]
+    SH --> DB[(MySQL shards: content)]
+    SH --> Cache[(Memcached / Redis)]
+    SH --> KV[(MyRocks: rank scores)]
+    SH --> Idx[(Search Index)]
+    SH --> Q[Kafka]
+    Q --> VoteAgg[Vote Aggregator] --> Cache
+    Q --> RankSvc[Ranking Service] --> KV
+    Q --> SearchIdx[Search Indexer] --> Idx
+    Q --> ModPipeline[Moderation Pipeline] --> DB
+```
+
+One event bus (Kafka), fanning out to independent async consumers — vote aggregation, ranking, search indexing, moderation — none of which block each other or the synchronous write path. This is exactly the high-level design diagram from earlier in this section; the evolution framing just explains *why* it looks the way it does.
+
+Mnemonic: **"v1 blocks on one lock, v2 removes the lock, v3 gives every side-effect its own queue."**
 
 ### Core Data Schema
 
@@ -373,6 +456,40 @@ Votes are a **state machine per (user, answer) pair**, not an unbounded counter 
 
 **Consistency choice**: vote *counts* shown to readers = eventual consistency (Redis async replication / read from cache is fine). But *whether I already voted* must be strongly consistent per-user (read from primary or a strongly consistent path) — otherwise the UI flickers between vote states.
 
+#### 🆕 Sharded counters: worked example + async aggregation flow
+
+**Illustrative example**: an answer goes viral and racks up **10,000 upvotes**. A single Redis key doing `INCR` 10,000 times spread over an hour is trivial on its own (~3/sec) — the real problem is a *burst*: a link on the front page can drive hundreds of concurrent voters at once, all contending for the same key. Split the counter into **20 shards**: each shard absorbs roughly **500 votes** (10,000 ÷ 20) instead of one key absorbing all 10,000, and the number shown to readers is `SUM(shard_0 … shard_19)`, computed periodically by an aggregator — never recomputed on every single vote.
+
+```mermaid
+sequenceDiagram
+    participant U as Voter
+    participant VS as Vote Service
+    participant Shard as Counter Shard<br/>(hash(user_id) % 20)
+    participant Q as Kafka (vote_cast event)
+    participant Agg as Async Aggregator
+    participant Cache as Redis (display count)
+
+    U->>VS: POST /answers/{id}/vote (+1)
+    VS->>VS: upsert (user_id, answer_id) -> +1 (idempotency check)
+    VS->>Shard: INCR shard[hash(user_id) % 20]
+    VS->>Q: publish vote_cast event
+    VS-->>U: 200 OK (returns before aggregation runs)
+    Q-->>Agg: consume events (async, batched)
+    Agg->>Shard: SUM all 20 shards
+    Agg->>Cache: SET display_count = sum (short TTL)
+    Note over Cache: readers see this cached sum,<br/>never a live shard read
+```
+
+| | Synchronous (naive) | Atomic `INCR` (single key) | Sharded counters + async aggregation |
+|---|---|---|---|
+| Race-safe? | No — read-modify-write loses updates | Yes — atomic at the server | Yes — atomic per shard |
+| Safe when an answer goes viral? | No | Degrades — every write serializes on one key | Yes — writes spread across N shards |
+| Read cost | Cheap (one GET) | Cheap (one GET) | One `SUM` (batched + cached), not per-read |
+| Blocks the voter's request on? | The DB write | The Redis round-trip | Nothing — ack returns before aggregation runs |
+| Use when | Never at scale | Fine until an answer *can* go viral | Default for anything that might go viral |
+
+Mnemonic: **"One key for a trickle, many shards for a flood."**
+
 #### Cheat-sheet
 - Never do GET-then-SET for counters — always atomic INCR or a sharded-counter aggregate.
 - Vote is a (user, target) state machine (none/up/down), not a raw counter — store the edge, derive the count.
@@ -401,6 +518,19 @@ flowchart LR
 **Real-world parallel — Stack Overflow**: uses a simpler, more transparent formula (Wilson score / vote age decay) rather than a black-box ML ranker, because SO explicitly optimizes for auditability of "why is this the accepted answer." Quora leans ML because it also personalizes ranking per viewer (what's "best" varies by reader's interest), which SO does not do.
 
 **Real-world parallel — Reddit**: uses a public formula (roughly `log10(max(|ups-downs|,1)) + sign(ups-downs) × age_seconds/45000`), open-sourced, no ML — optimizes for chronological freshness decay ("hot" ranking) rather than long-term quality.
+
+#### 🆕 Recency-ranking vs. quality-signal-ranking trade-offs
+
+| | Recency-weighted (Reddit "hot") | Quality-signal ML (Quora's approach) |
+|---|---|---|
+| Core signal | Vote differential, decayed by post age | Votes + views + comments + credibility + dwell time + edit recency |
+| Compute cost | Cheap — closed-form formula, computable on read | Expensive — offline feature extraction + trained model |
+| Personalized per viewer? | No — same score for everyone | Yes — can vary by reader's interests |
+| Rewards | Fresh, currently-engaging content | Durable correctness/expertise over virality |
+| Weak spot | An old-but-still-correct answer sinks over time | A new, correct answer ranks low until it accrues signal (cold start) |
+| Pick this when | Content is transient and time-ordered (a feed of new posts) | Content answers a fixed, reusable question and competes on long-term merit |
+
+**If X then Y**: if the content is a firehose of new, time-ordered posts (Reddit/Twitter feed), rank by recency-decay. If the content answers a fixed, reusable question (Quora/Stack Overflow), rank by quality signal — recency alone would let a stale-but-early wrong answer permanently outrank a better one posted later.
 
 **Signals beyond raw votes** — what actually feeds the feature extractor:
 
@@ -547,6 +677,23 @@ flowchart LR
 - **Semantic**: sentence embeddings + approximate nearest neighbor (e.g., HNSW index) catches paraphrases ("How to lose weight fast" vs "Quick ways to shed pounds") that lexical matching misses.
 - Real platforms (Quora, Stack Overflow) combine both: cheap lexical filter first (reduce candidates), expensive semantic model second (precision) — classic **coarse-to-fine funnel** to keep the expensive model off the hot path.
 
+#### 🆕 Duplicate-question decision thresholds: merge vs. suggest vs. publish
+
+A binary merge/no-merge decision is too blunt — a near-miss shouldn't silently swallow a genuinely different question. Use three bands instead (**illustrative cutoffs**, tune per corpus in practice):
+
+```mermaid
+flowchart TD
+    Score[Combined lexical + semantic<br/>similarity score] --> D1{Score >= 0.85?}
+    D1 -->|Yes| Merge[Auto-merge:<br/>redirect to canonical question]
+    D1 -->|No| D2{Score >= 0.6?}
+    D2 -->|Yes| Suggest["Publish + show a non-blocking<br/>'Did you mean...?' banner"]
+    D2 -->|No| Publish[Publish as new,<br/>independent question]
+```
+
+- **≥ 0.85** — confident duplicate: auto-merge, redirect to the canonical question (the flow below).
+- **0.6 – 0.85** — plausible near-duplicate: publish anyway, but surface a "did you mean...?" suggestion so the asker can self-merge without the system guessing wrong.
+- **< 0.6** — treat as a genuinely new question.
+
 **The merge flow, concretely** — what happens the instant a duplicate is detected at submission time:
 
 ```mermaid
@@ -644,6 +791,25 @@ stateDiagram-v2
 
 - Publish-then-verify (optimistic) beats verify-then-publish (pessimistic) for latency — most content is fine, so don't block the write path on a moderation model; screen asynchronously via Kafka, retract if flagged.
 - Rate limiting (see the Rate Limiter building block) at the API layer throttles spam-posting accounts before they ever reach the moderation pipeline — cheapest first line of defense.
+
+#### 🆕 Moderation: how content gets flagged for review
+
+The state diagram above shows the lifecycle; this is what decides which branch a piece of content takes at the `AutoScreened` step (**illustrative confidence thresholds**, not source-verified):
+
+```mermaid
+flowchart TD
+    Submit[Content submitted] --> Classify[Async spam/abuse<br/>classifier score]
+    Classify --> D1{Confidence >= 0.95<br/>violation?}
+    D1 -->|Yes| AutoRemove[Auto-remove,<br/>notify author, log for appeal]
+    D1 -->|No| D2{Confidence >= 0.5?}
+    D2 -->|Yes| Flag[Flag for human/ML review queue]
+    D2 -->|No| Publish[Auto-publish,<br/>keep monitoring signals]
+    Flag --> Review{Reviewer decision}
+    Review -->|Violation confirmed| Remove[Remove + strike on account]
+    Review -->|Cleared| Publish
+```
+
+The three-way split is the point to say out loud: high-confidence violations never see daylight, low-confidence content publishes immediately (optimistic, matching the state diagram above), and only the uncertain middle band costs a human reviewer's time.
 
 **Rate limiting, concretely**: token-bucket limiter per `(user_id, action_type)` — e.g. max 10 answers/hour, max 100 votes/hour, max 5 questions/hour — with a secondary IP/device-fingerprint bucket to catch multi-account abuse from one source. Limiter state lives in Redis, using the same atomic-`INCR`-with-TTL primitive as vote counters (section 5.2) — one mechanism, two use cases.
 

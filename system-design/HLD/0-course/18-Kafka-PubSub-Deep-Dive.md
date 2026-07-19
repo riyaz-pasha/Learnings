@@ -1,5 +1,14 @@
 # Apache Kafka as Pub-Sub — Deep Dive & Production Guide
 
+> **Enhancement notes:** this pass added the pub-sub internals that were
+> thin or missing, marked `🆕` at each new heading. Existing sections,
+> voice, and structure are untouched otherwise.
+> - Added offset management & delivery semantics (at-most/at-least/exactly-once), with a sequence diagram covering produce → fetch → process → commit.
+> - Added the consumer-group rebalancing protocol (JoinGroup/SyncGroup, eager vs. cooperative-sticky, session/poll-interval timeouts) as its own flowchart.
+> - Added a topic/partition/broker/replica cluster-layout diagram, an explicit "ordering is per-partition only, never global" section, and a retention-vs-compaction subsection.
+> - Added comparison tables (no-key vs. key-based vs. salted keying; at-most/at-least/exactly-once trade-offs) plus quick-recall "if X then Y" lines and one mnemonic for offset-commit timing.
+> - Folded the new concepts into the Golden rules and Cheat sheet; left the cross-region, mistakes, and internals (page cache/zero-copy, purgatory, ISR) sections as-is since they were already solid.
+
 Companion deep-dive to `18-Pub-sub-FAANG-Guide.md`. This file goes past "Kafka
 has partitions" into the internals, the exact knobs you configure to create
 and shard topics correctly, how real companies run Kafka across regions, and
@@ -22,6 +31,47 @@ subscribers, and subscribers that crash and restart all just rewind/resume
 without affecting anyone else or the producer.
 
 ## How it works internally
+
+### 🆕 Cluster layout: topics, partitions, brokers, and replicas
+
+Before the request pipeline and log format below, here's the picture those
+details live inside. A **topic** is just a name. A **partition** is the unit
+of parallelism and ordering. Each partition has copies (**replicas**) spread
+across different **brokers**, and exactly one replica is elected **leader**
+per partition at any time.
+
+```mermaid
+flowchart TB
+    subgraph Broker1["Broker 1"]
+        P0L["orders-P0 (Leader)"]
+        P1F1["orders-P1 (Follower)"]
+        P2F1["orders-P2 (Follower)"]
+    end
+    subgraph Broker2["Broker 2"]
+        P0F1["orders-P0 (Follower)"]
+        P1L["orders-P1 (Leader)"]
+        P2F2["orders-P2 (Follower)"]
+    end
+    subgraph Broker3["Broker 3"]
+        P0F2["orders-P0 (Follower)"]
+        P1F2["orders-P1 (Follower)"]
+        P2L["orders-P2 (Leader)"]
+    end
+```
+
+Concrete example: topic `orders` has 3 partitions, replication factor 3, on a
+3-broker cluster. The controller spreads leadership so each broker leads
+roughly a third of the partitions and follows the rest — no single broker
+carries all the write traffic. Producers and consumers only ever talk to a
+partition's **leader**; followers exist purely for durability (see
+Replication below).
+
+This is also *why* partitioning buys parallelism: a partition is a single
+append-only log, served by one leader at a time. Partition count is therefore
+a hard ceiling on both how many consumers in one group can do useful work at
+once, and how many brokers can share the write load for one topic. More
+partitions → more parallelism, up to however many consumers/brokers you
+actually run.
 
 ### Broker request pipeline
 
@@ -96,6 +146,26 @@ sequenceDiagram
     Note over B,C: Kafka's zero-copy path
     Disk->>C: sendfile() — page cache to socket, JVM never touches the bytes
 ```
+
+#### 🆕 Retention vs. compaction
+
+Retention (`cleanup.policy=delete`, the default) drops whole old segments
+once they age out. **Compaction** (`cleanup.policy=compact`) is a different
+cleanup strategy entirely: instead of deleting by age, it keeps only the
+**latest value per key**, forever — a background log-cleaner thread drops
+older values for a key once it compacts that segment.
+
+| `cleanup.policy` | What survives | Use it for |
+|---|---|---|
+| `delete` (default) | Records within `retention.ms` / `retention.bytes`; the whole segment is dropped after that | Event streams — order-created, click, log events — where you need recent history, not every past version |
+| `compact` | Only the newest value per key, kept indefinitely | "Latest state per key" topics — e.g. keyed by `user_id` holding the current profile, backing a KTable or rebuilding a cache from scratch |
+| `compact,delete` | Compacted by key **and** still capped by time/size | Compacted topics that also need a hard retention ceiling |
+
+A record with a **null value** for a key is a **tombstone** — after a delay
+(`delete.retention.ms`), compaction removes that key entirely. Compaction
+only runs over already-closed (non-active) segments, so there's always some
+lag before a superseded value is actually reclaimed — don't rely on
+compaction for immediate deletion.
 
 ### Replication: leader, ISR, and the controller
 
@@ -181,6 +251,33 @@ flowchart TD
   buckets," which is usually an acceptable relaxation (e.g., process-then-
   reconcile patterns, or accept bounded reordering for non-financial events).
 
+**Side by side:**
+
+| Strategy | Ordering guarantee | Load balance | Watch out for |
+|---|---|---|---|
+| No key (sticky partitioning) | None across records | Even, adapts per batch automatically | Fine only when consumers don't care about per-entity order |
+| Key-based (`murmur2(key) % N`) | Strict order per key | Even *if* keys are evenly distributed | One hot key (viral order, celebrity account) can overload a single partition |
+| Salted/composite key | Order only within a bucket | Even even under a hot key | Relaxes strict per-entity order — needs reconciliation logic downstream |
+
+#### 🆕 Ordering guarantees: per-partition only, never global
+
+Kafka only guarantees order **within a single partition**: records written to
+partition P are read back by a consumer of P in exactly the order they were
+appended. There is **no ordering guarantee across partitions** of the same
+topic — a topic with 12 partitions is 12 independent logs, unordered with
+respect to each other.
+
+That's exactly why key-based partitioning matters: keying by `order_id`
+doesn't create a magic "ordered stream for this order" — it just forces
+every event for that key onto the *same* partition, and then rides that
+partition's natural order. Ordering is a side effect of partition placement,
+not a separate feature.
+
+Quick recall:
+- Need strict order for one entity → key by that entity's ID (forces same partition).
+- Need global order across the *entire* topic → use exactly 1 partition (and give up parallelism — one leader, one consumer at a time).
+- Don't care about order → no key, let sticky partitioning balance the load.
+
 ### Consumer groups — this is where "pub-sub, not queue" actually shows up
 
 ```mermaid
@@ -213,6 +310,11 @@ topic, three independent "queues," each processing the full stream at its
 own pace. This diagram is the single best whiteboard artifact for answering
 "how is Kafka pub-sub, not just a queue?"
 
+Concrete example: a topic with 50 partitions and a consumer group of 10
+consumers → the group coordinator hands each consumer exactly 5 partitions.
+Scale down to 5 consumers and each gets 10; add an 11th consumer past 50 and
+it sits idle — partition count is still the hard ceiling on parallelism.
+
 **Producer/consumer code (concise, Python + `confluent-kafka`):**
 
 ```python
@@ -241,6 +343,86 @@ while True:
     print(msg.key(), msg.value())
     c.commit(msg)
 ```
+
+#### 🆕 Consumer-group rebalancing: the protocol
+
+Partition assignment inside a group isn't static — it's recomputed by a
+**rebalance** whenever membership or topic metadata changes. Each group has a
+**group coordinator** (a broker) that tracks membership via heartbeats.
+
+```mermaid
+flowchart TD
+    Trigger{"What triggered this?"}
+    Trigger -->|"New consumer subscribes and polls"| Join["Consumer sends JoinGroup\nto the Group Coordinator"]
+    Trigger -->|"No heartbeat within\nsession.timeout.ms"| Detect["Coordinator marks member dead"]
+    Trigger -->|"poll() loop exceeds\nmax.poll.interval.ms\n(stuck processing)"| Detect
+    Trigger -->|"Consumer calls close() cleanly"| Leave["Consumer sends LeaveGroup"]
+    Trigger -->|"Topic partition count changes"| Meta["Coordinator sees new metadata"]
+
+    Join --> Rebalance["Rebalance starts —\ncoordinator picks a group leader\n(first member to join)"]
+    Detect --> Rebalance
+    Leave --> Rebalance
+    Meta --> Rebalance
+
+    Rebalance --> Strategy{"Assignor configured?"}
+    Strategy -->|"range / round-robin\n(eager protocol)"| Eager["ALL members revoke ALL\npartitions first,\nthen everything is reassigned\n-> whole group pauses"]
+    Strategy -->|"cooperative-sticky\n(incremental protocol)"| Coop["Only the partitions that must\nmove are revoked;\nunaffected members keep consuming"]
+
+    Eager --> Assign["Group leader computes the\nnew assignment, sends via SyncGroup"]
+    Coop --> Assign
+    Assign --> Resume["Members resume fetching\nwith their new assignment"]
+```
+
+- **Eager (`range`, `round-robin`)**: the historical default — simple, but
+  every rebalance is stop-the-world for the *entire* group, which hurts
+  during autoscaling or rolling deploys (see Mistake #6 below).
+- **`cooperative-sticky`**: incremental — a member gives up only the specific
+  partitions that need to move; everyone else keeps processing uninterrupted.
+  Prefer this for any group that scales up/down regularly.
+- Two knobs govern how fast a dead consumer is detected: `session.timeout.ms`
+  (missed heartbeats) and `max.poll.interval.ms` (the caller took too long
+  between `poll()` calls — usually slow processing, not a dead process). Set
+  `max.poll.interval.ms` above your worst-case processing time per batch, or
+  Kafka will treat a slow-but-alive consumer as dead and rebalance away from
+  it.
+
+#### 🆕 Offset management and delivery semantics
+
+Kafka doesn't track "has this consumer read this message" inside the data
+log itself — each consumer group **commits its offsets** (the position it
+has finished reading, per partition) to an internal compacted topic called
+`__consumer_offsets` (50 partitions by default). Committing an offset is
+just another write to Kafka.
+
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant L as Partition Leader
+    participant C as Consumer
+    participant GC as Group Coordinator (offsets topic)
+
+    P->>L: produce(key="order-42", acks=all)
+    L-->>P: ack (offset 10482 written + replicated)
+
+    C->>L: poll() — fetch from last committed offset
+    L-->>C: records up through offset 10482
+    C->>C: process records
+    C->>GC: commitSync(offset=10483)
+    GC-->>C: ack — offset persisted
+
+    Note over C,GC: Crash between "process" and "commit"?<br/>Next consumer resumes from the LAST<br/>COMMITTED offset and reprocesses 10482<br/>-> at-least-once, not exactly-once
+```
+
+| Semantic | How you get it | What can go wrong | Typical use |
+|---|---|---|---|
+| At-most-once | Commit offset *before* processing (or a stray auto-commit fires ahead of finishing) | Crash after commit, before processing finishes → message silently skipped | Rarely intentional; tolerable for best-effort metrics |
+| At-least-once (default, most common) | `enable.auto.commit=false`, commit *after* processing completes | Crash after processing, before commit → message reprocessed | Default for most pipelines — pair with idempotent downstream writes |
+| Exactly-once (Kafka-to-Kafka) | Idempotent producer (`enable.idempotence=true`, on by default since 3.0) + transactions (`transactional.id`, consumer `isolation.level=read_committed`) | Only covers Kafka-to-Kafka; a side effect to an external DB/API in the same step isn't automatically covered | Kafka Streams / ksqlDB, consume-transform-produce pipelines |
+
+Mnemonic: **commit-after = redo risk (at-least-once), commit-before = skip
+risk (at-most-once)** — pick the failure mode you can tolerate; "exactly
+once" is a real but narrower guarantee (idempotent producer + transactions),
+not a magic default you get for free.
 
 ### Growing a topic's partitions — the ordering gotcha
 
@@ -426,6 +608,10 @@ flowchart TD
 - **Multiple consumer groups is what makes Kafka pub-sub instead of a
   queue** — a single group behaves exactly like a queue; that's not a bug,
   it's the mechanism.
+- **Order is per-partition, not global** — keying gives you per-key order by
+  forcing one partition; never assume order across partitions.
+- **Commit-after vs. commit-before offset is your delivery-semantics
+  choice** — know which failure mode (duplicate vs. skip) you're accepting.
 
 ## Cheat sheet
 
@@ -438,12 +624,25 @@ flowchart TD
   factor 3). ISR membership gates leader-election eligibility.
 - Controller: KRaft quorum (Kafka 3.3+ production, mandatory 4.0+) — no more
   ZooKeeper dependency.
+- Retention vs. compaction: `delete` expires whole segments by age/size;
+  `compact` keeps only the latest value per key forever — use compaction for
+  "current state per key" topics, not event streams.
 - Keying: no key → sticky partitioning (efficient batches); with key →
   `murmur2(key) % partitions` (per-key order, watch for hot keys → salt the
   key to spread).
+- Ordering: guaranteed **within a partition only**, never across partitions
+  of the same topic. Global order requires exactly 1 partition (no
+  parallelism).
 - Consumer groups: one group = queue-like load balancing; multiple
   independent groups on one topic = true pub-sub fan-out — this is the
   mechanism, not a workaround.
+- Rebalancing: eager assignors (`range`/`round-robin`) pause the whole group
+  on every join/leave; `cooperative-sticky` only moves the partitions that
+  must move — prefer it.
+- Offsets and semantics: committed to `__consumer_offsets`, not the data log.
+  Commit-after-processing = at-least-once (default, expect duplicates);
+  commit-before = at-most-once (expect gaps); idempotent producer +
+  transactions (`read_committed`) = exactly-once, Kafka-to-Kafka only.
 - Cross-region: MirrorMaker 2 between **separate regional clusters**
   (active-passive for simplicity, active-active for local write latency,
   aggregate cluster for global analytics) — never stretch one cluster across

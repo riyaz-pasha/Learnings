@@ -1,5 +1,24 @@
 # Design WhatsApp — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added material the original guide didn't
+> cover, without touching the sections that already worked.
+> - New Deep Dive 7 — **presence & online/last-seen fan-out**, distinguishing
+>   "which server is this socket on" (routing presence, already covered) from
+>   "should Bob's contacts see him online" (social presence, was missing).
+> - New **key-management subsection** inside the E2E deep dive — prekey
+>   bundles, so a sender can start a Signal session with a recipient who is
+>   currently offline (the guide had X3DH/Double Ratchet but not this).
+> - New **protocol comparison table** — WebSocket vs long polling vs MQTT —
+>   since MQTT is a common "why not just..." follow-up for mobile chat apps.
+> - New **delivery-decision flowchart** (online vs push-fallback vs
+>   store-and-forward) making explicit the branching logic the existing
+>   sequence diagram already implied.
+> - Left the capacity estimation, architecture-evolution narrative, sharding,
+>   group fan-out, media pipeline, and cheat sheets as-is — they were already
+>   concrete, numbers-driven, and clear.
+> - All new headings are marked with 🆕; everything else is untouched or only
+>   lightly reworded for clarity.
+
 ## Mental model
 
 WhatsApp is **not a database problem, it's a connection-management problem.**
@@ -55,6 +74,7 @@ flowchart TD
     E --> E4[Group fan-out]
     E --> E5[Media pipeline + dedup]
     E --> E6[E2E encryption / Signal Protocol]
+    E --> E7[Presence + online/last-seen fan-out]
     E --> F[6. Trade-offs: CAP stance, latency vs security]
     F --> G[7. Failure modes + mitigations]
     G --> H[8. Wrap up: what you'd do with more time]
@@ -464,8 +484,8 @@ quadrantChart
 
 ## Deep dives
 
-Pick 2–3 based on interviewer signal. Below are six — know all of them, lead
-with whichever the interviewer's team would care about.
+Pick 2–3 based on interviewer signal. Below are seven — know all of them,
+lead with whichever the interviewer's team would care about.
 
 ### 1. Connection scaling — the C10M problem
 
@@ -487,6 +507,30 @@ flowchart LR
         C3 --> C4[Millions of connections per box]
     end
 ```
+
+#### 🆕 Protocol choice: WebSocket vs long polling vs MQTT
+
+An interviewer who wants to check you're not just naming "WebSocket" by
+reflex will ask "why not long polling, why not MQTT?" — both are real
+choices other chat systems made (Facebook Messenger ran MQTT for years on
+mobile; long polling is what Stage 1 of this guide's evolution used before
+it broke).
+
+| | Long polling | WebSocket | MQTT (over TCP or WS) |
+|---|---|---|---|
+| Connection model | Client re-opens an HTTP request after every response | One persistent full-duplex socket | One persistent socket, pub/sub topics layered on top |
+| Server push | Simulated — server holds the request open, replies, client re-asks | Native — server writes to the socket anytime | Native, plus topic-based fan-out and QoS levels (0/1/2) |
+| Per-message overhead | A full HTTP request/response cycle each time | Just a frame on an already-open socket | Just a frame; slightly more than raw WS due to topic/QoS header |
+| Battery/mobile cost | High — repeated radio wake-ups on a lossy network | Lower — one socket held open, occasional keep-alives | Lowest of the three — designed for constrained, flaky, battery-limited devices |
+| Delivery semantics built in | None — app decides | None — app decides | QoS 1 ("at least once") and QoS 2 ("exactly once" via handshake) are part of the protocol |
+| Why WhatsApp doesn't need it | — | This is the choice made (Stage 2 of the evolution) | Gives you QoS and topics for free, but WhatsApp already owns a custom message service + Mnesia mailbox that does the same job with more control over per-conversation ordering |
+
+**If asked "why not MQTT" specifically:** MQTT's QoS levels are attractive
+because they look like they solve delivery guarantees for free — but
+WhatsApp still needs a custom durable per-conversation mailbox for the
+30-day offline window and per-chat ordering, so adopting MQTT would mean
+running its broker *in addition to*, not instead of, the message service —
+extra moving parts for guarantees you're building anyway.
 
 **How a connection actually gets established and registered:**
 
@@ -612,6 +656,36 @@ sequenceDiagram
         Note over B: Bob's OS wakes the app, it reconnects<br/>and calls getMessage() to drain the queue in order
     end
 ```
+
+#### 🆕 Delivery decision flowchart: online vs push vs store-and-forward
+
+The sequence diagram above shows one path branching on Bob's state. Here's
+that same decision pulled out as explicit logic — this is the shape to draw
+if an interviewer asks "how does the system *decide* what to do with a
+message":
+
+```mermaid
+flowchart TD
+    A[Message persisted to Mnesia,<br/>sender already ACKed] --> B{WS Manager:<br/>is recipient's socket open<br/>on any server, right now?}
+    B -->|yes| C[Forward over the open socket<br/>to that server]
+    C --> D{Recipient device<br/>ACKs receipt within a<br/>short timeout?}
+    D -->|yes| E[Mark Delivered,<br/>delete from Mnesia mailbox]
+    D -->|no, e.g. socket died mid-flight| F[Fall through to offline path]
+    B -->|no| F[Recipient offline:<br/>message stays queued in Mnesia]
+    F --> G{Push notification<br/>service reachable?}
+    G -->|yes| H[Send silent/alert push via<br/>APNs or FCM — wake-up hint only]
+    G -->|no, e.g. push service down| I[No wake-up sent,<br/>message still safely queued]
+    H --> J[Recipient's OS wakes the app]
+    I --> K[Recipient eventually opens app<br/>on its own, e.g. next launch]
+    J --> L[App reconnects, calls getMessage<br/>to drain mailbox in FIFO order]
+    K --> L
+    L --> E
+```
+
+**The one-sentence version:** *online → direct socket forward; offline →
+push is only a doorbell, Mnesia is the actual mailbox.* A push failure is
+never a durability failure — the message was already safe the moment it was
+persisted, before any delivery attempt was made.
 
 **The tick states are a state machine, worth drawing separately when asked
 about delivery guarantees:**
@@ -788,6 +862,57 @@ flowchart TD
     SRV --> DEC[Recipient decrypts client-side]
 ```
 
+#### 🆕 Key management: how X3DH works when the recipient is offline
+
+The flowchart above says "X3DH key agreement" as if both parties are online
+to shake hands — they usually aren't. Bob might be asleep with his phone off
+when Alice messages him for the first time. The trick is that Bob
+pre-publishes his key material to the server *before* he needs it, so Alice
+can establish a session unilaterally:
+
+- **At registration/reconnect, each of Bob's devices uploads a "prekey
+  bundle"** to a key-directory service: one long-lived **identity key**, one
+  medium-lived **signed prekey** (rotated periodically), and a batch of
+  **one-time prekeys** (each consumed once, then the client tops up the
+  batch).
+- **Alice, sending the first message, fetches Bob's bundle from the server**
+  — not from Bob directly — and runs X3DH locally to derive a shared secret,
+  then immediately starts the Double Ratchet for that shared secret.
+- **The server's role here is a key-value directory it cannot exploit**: it
+  hands out public keys, never private ones, so it can enable an offline
+  handshake without ever seeing plaintext or being able to forge a session.
+
+```mermaid
+sequenceDiagram
+    participant B as Bob (offline, phone off)
+    participant KS as Key Server (public prekeys only)
+    participant A as Alice
+
+    Note over B,KS: earlier, while online
+    B->>KS: upload identity key + signed prekey + 100 one-time prekeys
+
+    Note over A: later, Bob is offline
+    A->>KS: fetch Bob's prekey bundle
+    KS-->>A: identity key + signed prekey + one one-time prekey<br/>(consumed, won't be handed out again)
+    A->>A: run X3DH locally → shared secret → start Double Ratchet
+    A->>B: first message, carries Alice's ephemeral key<br/>so Bob can derive the same secret once he's back online
+    Note over B: Bob comes online, downloads the message,<br/>completes the same X3DH math, session established
+```
+
+**One-time prekeys running out is a real operational number worth naming:**
+if a device is offline long enough to burn through its uploaded batch, new
+senders fall back to using just the signed prekey (weaker forward-secrecy
+guarantee for that one session) until the device reconnects and replenishes
+its one-time prekey stock — a small, honest gap in an otherwise offline-safe
+design, worth mentioning if pushed on "what if the recipient is offline for
+weeks."
+
+**Key-change detection:** because the identity key is long-lived, WhatsApp
+shows a "security code changed" notice when it changes (new phone, reinstall)
+and offers an out-of-band **safety number** comparison — this is the
+user-facing seam that turns "trust the key server" into "verify independently
+if you're paranoid."
+
 **Two distinct encryption layers — a classic confused pair:**
 
 | | Transport encryption | End-to-end encryption |
@@ -835,6 +960,76 @@ multi-device, that cost multiplies by the number of linked devices. This is
 a genuine, named trade-off: WhatsApp accepts a latency (and battery) tax for
 a security guarantee. Say this pairing explicitly if asked to justify E2E
 encryption's cost.
+
+### 🆕 7. Presence — online/last-seen, and why it's a *different* problem than routing
+
+Everything earlier that used the word "presence" (the WS manager,
+`user_id → server:port`) is **routing presence** — an internal lookup no
+user ever sees directly. **Social presence** — the green dot, "online," or
+"last seen 2:14 PM" that Bob's contacts see in their chat list — is a
+separate feature built on top of it, and conflating the two is a common
+interview stumble.
+
+The difference matters because the *audience* is completely different:
+- Routing presence is looked up by **one sender at send time** — a single
+  read of "where is Bob."
+- Social presence must be **pushed to every contact who currently has Bob's
+  chat open or contact list visible** — a fan-out, every time Bob's status
+  changes.
+
+**Concrete numbers:** an average user has on the order of **150–250
+contacts/group-mates**. If every connect/disconnect broadcast presence to
+*all* of them unconditionally, 700M concurrent users each toggling status a
+few times a day would generate **tens of billions of presence events/day**
+just from connects — most of them wasted, because most contacts don't have
+that chat screen open at that instant. The fix is to fan out only to
+**active subscribers**: contacts who currently have the conversation open
+subscribe to that user's presence channel; everyone else pulls a one-time
+"last seen" value on demand instead of getting pushed live updates.
+
+```mermaid
+sequenceDiagram
+    participant B as Bob's device
+    participant WS as WS Server (Bob's)
+    participant PUB as Presence Pub/Sub (per-user channel)
+    participant WSc as WS Server (Carol's, has Bob's chat open)
+    participant Carol as Carol's device
+
+    Note over Carol: Carol opens her chat with Bob →<br/>subscribes to Bob's presence channel
+    Carol->>WSc: subscribe(presence:bob)
+    WSc->>PUB: SUBSCRIBE presence:bob
+
+    Note over B: Bob's socket opens (comes online)
+    B->>WS: connect
+    WS->>PUB: PUBLISH presence:bob "online"
+    PUB-->>WSc: online
+    WSc-->>Carol: Bob is online
+
+    Note over B: Bob closes the app (goes offline)
+    B--xWS: disconnect
+    WS->>PUB: PUBLISH presence:bob "offline, last_seen=now"
+    PUB-->>WSc: offline + timestamp
+    WSc-->>Carol: Bob last seen just now
+```
+
+**Privacy is a first-class design constraint here, not an afterthought:**
+WhatsApp lets users hide "last seen" (and, symmetrically, hides others' last
+seen from anyone who hides their own) and mutes typing indicators per chat.
+That means the presence service needs a **visibility check per (viewer,
+subject) pair** before publishing, not just a raw broadcast — a small but
+real piece of business logic sitting in front of what would otherwise be a
+pure pub/sub fan-out.
+
+**Batching, worth mentioning if asked about a thundering herd:** a
+region-wide reconnect storm (e.g., after an outage) would otherwise cause a
+burst of presence-changed events all at once; WhatsApp debounces/batches
+rapid online→offline→online flaps (e.g., a flaky connection reconnecting
+every few seconds) so contacts see one stable status instead of a flicker of
+events.
+
+**Mnemonic:** *routing presence answers "where," social presence answers
+"is anyone allowed to know."* One is an internal lookup table; the other is
+a subscription feed gated by a privacy setting.
 
 ## Key design decisions and trade-offs
 
@@ -934,6 +1129,14 @@ encryption's cost.
 - **The connection tier's efficiency is a runtime/OS problem before it's a
   "how many servers" problem** — squeeze the box (event-driven IO, cheap
   per-connection state) before you multiply the fleet.
+- **🆕 Routing presence and social presence are different problems** — one
+  is an internal single-reader lookup (WS manager), the other is a
+  privacy-gated fan-out to subscribed contacts. Don't design them as the
+  same system.
+- **🆕 Async E2E handshakes need pre-published key material** — X3DH only
+  works with an offline recipient because prekey bundles were uploaded to
+  the server ahead of time; the server hands out public keys it can't
+  exploit, never private ones.
 
 ## Interview strategy cheat-sheet
 
@@ -1001,6 +1204,8 @@ media bandwidth = (messages/day × media share × avg media size) ÷ 86,400
 - Sent (server persisted) vs Delivered (device acked) vs Read (chat opened) — three distinct ACKs, not one
 - Shard by `user_id` (presence/routing) vs shard by `conversation_id` (message storage/ordering)
 - Consistent hashing (bounded reshuffle) vs naive `hash % N` (reshuffles almost everything on node join/leave)
+- Routing presence (WS manager: which server) vs social presence (online/last-seen shown to contacts, privacy-gated pub/sub)
+- WebSocket (raw persistent socket) vs MQTT (persistent socket + built-in topics/QoS) — WhatsApp's custom message service + Mnesia already provides the durability MQTT's QoS would give you
 
 **Golden rules, one more time**
 - Size connections from concurrency, not total users.

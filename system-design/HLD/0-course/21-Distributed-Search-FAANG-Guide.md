@@ -2,6 +2,14 @@
 
 *Chapter 21: Design a distributed search system (Google Search / Elasticsearch / YouTube search style)*
 
+> **Enhancement notes:** This pass adds material a FAANG interviewer would probe for that the original draft only implied. Specifically:
+> - Added a **Data Model** section (document schema + index/shard metadata) and expanded the **API design** beyond a single `search()` line to include the write-path (index/delete/bulk).
+> - Added a **v1 → v2 → v3 architecture evolution** diagram set (single-node → sharded + coordinator → decoupled real-time pipeline + ranking service) so the "why we ended up here" story is visible at a glance.
+> - Added a **scatter-gather / shard-routing deep dive** with a decision flowchart (full fan-out vs. routing-key targeting) and explicit timeout/partial-result budget guidance.
+> - Added a **decision flowchart for incremental (NRT) update vs. full reindex** — previously implied by the batch-vs-real-time table but never spelled out as a procedure.
+> - Added a **Relevance Tuning & A/B Testing** section (offline metrics like NDCG/MRR, online A/B/interleaving, click-log feedback loop, guardrail metrics) — this was missing entirely and is a common FAANG deep-dive.
+> - Left the Mental Model, Requirements, worked capacity estimates, Sharding, core Ranking (TF-IDF/BM25/hybrid retrieval), Query Understanding, Bottlenecks, and Cheat Sheet sections untouched — they already covered the material well. New subsections are marked with 🆕.
+
 ---
 
 ## 1. Mental Model
@@ -148,6 +156,18 @@ Shard count (partitions)    = Total index size / Max comfortable shard size (kee
 Total nodes                 = Shard count × Replication factor (typically 3)
 Bandwidth                   = QPS × avg request/response payload size
 ```
+
+### 🆕 Quick illustrative snapshot
+
+Before working through a full derivation, it helps to anchor on a rough shape of the numbers. These are illustrative, not derived from any real system — a sanity-check anchor, not a formula result:
+
+- **~1B documents** indexed (a mid-size product or content catalog, well short of full web scale)
+- **~50K search QPS** at peak
+- **~2TB** total inverted index size, split across **~100 shards** (~20GB/shard — comfortably fits in a node's RAM/cache)
+- **Replication factor 3** → ~300 shard-copies spread across the fleet
+- **p99 search latency budget: ~200ms** end-to-end — with ~100ms reserved for shard scatter-gather (see the latency table below) and the remainder for merge, re-ranking, and network overhead
+
+Keep this shape in your head, then *derive* the real numbers from whatever scale the interviewer states in the worked examples below — the derivation is what's graded, not this specific example.
 
 ### Worked example — YouTube-style video search (matches source, extended)
 
@@ -317,6 +337,24 @@ stateDiagram-v2
 
 **Mnemonic for index update strategies:** *"Rebuild, Append, or Merge"* — full **rebuild** (batch, expensive, simple), **append** new segments (fast, but fragments the index, needs periodic merge), **merge** compacts fragments back down (background cost to keep query-time cost low). Elasticsearch literally does append-then-background-merge (this is Lucene's segment merge policy).
 
+#### 🆕 Decision: incremental (NRT) update vs. full reindex
+
+Not every change deserves the same path. A single new document and "we changed the tokenizer for every field" are very different operations, and treating them the same either wastes compute or silently corrupts relevance:
+
+```mermaid
+flowchart TD
+    Change[Something changed] --> What{What changed?}
+    What -->|Single doc added,\nupdated, or deleted| NRT["Incremental NRT path:\nappend new segment /\nwrite tombstone --\nsearchable in seconds"]
+    What -->|Bulk backfill of many docs,\nno schema/analyzer change| Delta["Delta batch job:\nMapReduce over just the\nchanged doc subset"]
+    What -->|Analyzer, tokenizer, ranking\nfeature, or shard-count change| Full["Full reindex:\nMapReduce/Spark over the\nentire corpus, publish as a\nnew index version"]
+    NRT --> Merge[Background segment merge\nkeeps read-time cost bounded]
+    Full --> Cutover["Atomic cutover:\nswap index alias/version --\nold index stays live and\nservable until the new one\nis fully built and verified"]
+```
+
+**Why full reindex still exists even with NRT available:** NRT only *appends*; it can't retroactively fix how *existing* documents were tokenized or scored. Change the analyzer (e.g., add stemming you didn't have before) or the shard count, and every existing document's postings are now inconsistent with the new documents until reprocessed — that requires a full pass. This is why real systems (Elasticsearch's reindex API, Lucene) keep both paths available side by side rather than picking one and dropping the other.
+
+**If X then Y recall:** *if it's new or changed data → NRT append; if it's new logic applied to old data → full reindex.*
+
 ### Push-based vs. pull-based index updates
 
 | | Push-based | Pull-based |
@@ -343,6 +381,51 @@ Indexing is a batch/streaming *data processing* problem, not a *database write* 
 ---
 
 ## 7. High-Level Design
+
+### 🆕 Architecture evolution: v1 → v2 → v3
+
+Walking the interviewer through an evolution — instead of jumping straight to the final design — shows *why* each piece exists, not just what it is.
+
+```mermaid
+flowchart LR
+    subgraph V1["v1 -- single-node prototype"]
+        Doc1[Documents] --> Node1["One machine:\ncrawler + indexer + searcher\n+ in-memory inverted index"]
+        Node1 --> Q1[Query]
+    end
+```
+*Breaks because:* the index stops fitting in RAM past a few GB of docs, the one box is a single point of failure, and a re-index job pauses live search on the same machine (Section 10's colocation problem).
+
+```mermaid
+flowchart LR
+    subgraph V2["v2 -- sharded index + coordinator"]
+        Q2[Query] --> Coord[Coordinator / Load Balancer]
+        Coord --> Sh1[Shard 1 searcher]
+        Coord --> Sh2[Shard 2 searcher]
+        Coord --> ShN[Shard N searcher]
+        Sh1 --> Merge2[Merger]
+        Sh2 --> Merge2
+        ShN --> Merge2
+    end
+```
+*Fixes:* RAM ceiling and SPOF, via document partitioning (Section 8) plus replication (Section 9). *Still missing:* indexing and search live on the same shard's machines, so a batch re-index still competes with query serving, and freshness is only as good as the last batch run.
+
+```mermaid
+flowchart LR
+    subgraph V3["v3 -- decoupled fleets + streaming freshness + ranking service"]
+        NewDocs[New/changed docs] --> Stream["Streaming ingest\n(e.g. Kafka)"]
+        Stream --> RTIdx["Real-time indexer\n(NRT segments)"]
+        FullCorpus[Full corpus] --> BatchIdx["Batch reindexer\n(MapReduce/Spark)"]
+        RTIdx --> DS[(Distributed storage:\nindex segments)]
+        BatchIdx --> DS
+        DS --> Searchers["Searcher fleet\n(scales independently)"]
+        Q3[Query] --> Searchers
+        Searchers --> Rank["Ranking / re-rank service\n(BM25 + ML features)"]
+        Rank --> Q3
+    end
+```
+*Fixes:* indexer and searcher fleets are now fully decoupled (Section 10), freshness is handled by a streaming path for hot updates plus periodic batch reindex for schema/ranking changes (Section 6), and ranking is pulled into its own stage so retrieval and re-ranking can each scale — and be A/B-tested — independently (Section 11). This is the design the rest of the chapter builds toward.
+
+The diagram below is the detailed view of v2/v3 combined — offline crawl+index, online search — that the rest of this section expands on.
 
 ```mermaid
 flowchart TB
@@ -381,11 +464,46 @@ flowchart TB
 
 ### API design
 
+**Read path (query-time, client-facing):**
 ```
-search(query: string, filters?: dict, page_token?: string) -> { results: [doc_id...], next_page_token }
+search(query: string, filters?: dict, page_token?: string, top_k?: int)
+    -> { results: [{doc_id, score, snippet}], next_page_token }
 ```
 
-Kept intentionally minimal at the client boundary — nearly all complexity is server-side (tokenization, fan-out, ranking).
+**Write path (index-time) — usually internal, called by the crawler/ingestion pipeline, not end users:**
+```
+indexDocument(doc_id: string, fields: dict, boost?: dict) -> ack
+deleteDocument(doc_id: string) -> ack
+bulkIndex(documents: [dict]) -> { accepted: int, failed: [doc_id...] }
+```
+
+The read path is kept intentionally minimal at the client boundary — nearly all complexity is server-side (tokenization, fan-out, ranking). The write path is where freshness decisions get made (Section 6): a single `indexDocument` call typically goes down the NRT append path, while `bulkIndex` over a large batch is what feeds a delta or full reindex job.
+
+### 🆕 Data model
+
+Two schemas matter here — the **document schema** (what gets indexed) and the **index/shard metadata** (how the system finds the right shard). Interviewers rarely demand a full schema, but sketching one for a minute shows you're not treating "index the document" as a black box.
+
+**Document schema (source record → index-time record):**
+
+| Field | Example | Purpose |
+|---|---|---|
+| `doc_id` | `video:8f3a2b` | Stable identity; used for updates, deletes, and dedup |
+| `fields` | `{title, description, transcript, channel}` | Raw text fields to tokenize; each field can have its own analyzer |
+| `boost` | `{title: 3.0, description: 1.0}` | Field-level weight multiplier fed into scoring — a title match should outrank a transcript match |
+| `structured_fields` | `{price: 19.99, in_stock: true, published_at: ...}` | Not tokenized — used for filters/facets and business-signal ranking (Section 11) |
+| `version` / `updated_at` | monotonic counter or timestamp | Lets the indexer detect stale writes and lets searchers reason about segment freshness |
+
+**Index/shard metadata (kept in a small, highly-available control-plane store — e.g. ZooKeeper/etcd — not in the index itself):**
+
+| Field | Example | Purpose |
+|---|---|---|
+| `shard_id` | `shard-042` | Identifies a partition of the document space |
+| doc→shard rule | `hash(doc_id) mod N`, or ring position | Lets any node compute "which shard owns this doc" without a per-document lookup table |
+| `segment_list` | `[seg-001, seg-002, ...]` | Ordered, immutable index files a shard is built from (Lucene-style) |
+| `replica_set` | `[node-3 (primary), node-7, node-11]` | Physical nodes serving this shard |
+| `routing_key` (optional) | `customer_id`, `channel_id` | For multi-tenant search, colocates one tenant's docs on one shard so their queries never fan out cluster-wide (see the routing decision below) |
+
+**Mnemonic:** *the document schema tells you what to search inside; index metadata tells you where to look.* Putting shard-assignment fields inside the document schema itself is a common interview tell that you haven't separated the write path from the routing layer.
 
 ### Sequence: a single search request
 
@@ -412,11 +530,32 @@ sequenceDiagram
     M-->>U: ranked results
 ```
 
+### 🆕 Scatter-gather query execution: which shards get queried?
+
+The sequence diagram above fans a query out to every shard — that's the default and correct behavior under document partitioning (Section 8) for an open-ended free-text query. But it's wasteful when the data model carries a `routing_key` (e.g., multi-tenant product search, where one customer's whole catalog lives on one shard). The router should decide, per query, whether it can skip shards entirely:
+
+```mermaid
+flowchart TD
+    Q[Incoming query] --> HasKey{Query carries a\nrouting key?\ne.g. tenant_id, channel_id}
+    HasKey -->|Yes, maps to\nknown shard(s)| Targeted["Targeted fan-out:\nquery only the 1-few shards\nowning that key"]
+    HasKey -->|No -- open-ended\nfree-text search| Full[Full fan-out:\nquery all N shards]
+    Targeted --> Gather[Gather partial results]
+    Full --> Gather
+    Gather --> Budget{All shards responded\nwithin the timeout budget?}
+    Budget -->|Yes| Merge[Merge + rank full result set]
+    Budget -->|No| Partial["Merge + rank whatever\narrived; flag response\nas partial"]
+```
+
+**Timeout budget rule of thumb:** if the end-to-end search budget is 200ms, give shard fan-out a hard sub-budget (e.g., 100ms) and reserve the rest for merge/re-rank and network overhead (Section 5's latency table). A shard that blows its sub-budget is dropped from the merge, not waited on — a search that's 95% complete in 100ms beats one that's 100% complete in 2s.
+
+**Mnemonic:** *"A key skips the scatter."* A routing key present on the query narrows fan-out; its absence means paying the full scatter-gather cost.
+
 ### Interview cheat-sheet — High-Level Design
 - Draw two clearly separated phases: offline (crawl → store → index → store) and online (query → fan-out → merge → rank → return).
 - State that the API surface is thin; all complexity is server-side.
 - Show the merger/scatter-gather explicitly — it's the piece people forget and it's where p99 latency comes from (tail latency = slowest shard).
 - Mention that distributed storage (blob store) is the shared substrate for both raw docs and index segments — reuse of a building block, not a new system.
+- Name the routing decision explicitly: full fan-out by default, targeted fan-out only when a routing key narrows the shard set — don't imply every query always hits every shard.
 
 ---
 
@@ -763,6 +902,45 @@ flowchart TD
 
 Real systems: Google augments classic indexing with dual-encoder/BERT-based dense retrieval; Amazon and Google product search use semantic matching to bridge vocabulary gaps between query and listing; vector databases — FAISS (Meta, who invented it), Pinecone, pgvector — serve the ANN layer; Elasticsearch has shipped native `dense_vector`/kNN search since v8, making hybrid retrieval a first-class feature rather than a bolt-on.
 
+### 🆕 Relevance tuning & A/B testing
+
+Ranking is never "done" — it's tuned continuously against measured user behavior. A FAANG interviewer who has shipped search will often probe: *"how do you know your new ranking model is actually better?"*
+
+**Offline evaluation (before anything ships to real users):**
+
+| Metric | What it measures | Notes |
+|---|---|---|
+| **Precision@k** | Of the top k results, how many are relevant | Simple, but ignores ordering within the top k |
+| **MRR (Mean Reciprocal Rank)** | `1 / rank of the first relevant result`, averaged over queries | Good when there's usually one right answer (navigational queries) |
+| **NDCG@k (Normalized Discounted Cumulative Gain)** | Rewards relevant results more when they rank higher, using graded (not binary) relevance | The industry-standard offline metric for ranked search |
+
+Offline metrics need labeled data — human relevance judgments, or (far more common at scale) historical click logs treated as noisy relevance labels.
+
+**Online evaluation (after it ships, on real traffic):**
+
+| Technique | How it works | Trade-off |
+|---|---|---|
+| **A/B test** | Split traffic between control (old ranker) and treatment (new ranker); compare business metrics (CTR, conversion, dwell time, query-reformulation rate) | Simple to reason about, but needs a lot of traffic per arm to reach statistical significance — slow to iterate |
+| **Interleaving** | Merge results from both rankers into one result list per query, shown to the same user; attribute clicks back to whichever ranker contributed each clicked result | Needs far less traffic than A/B for the same statistical power — a single query gives a signal, not just a whole user session |
+
+**The feedback loop:**
+
+```mermaid
+flowchart LR
+    Serve[Ranked results served] --> Clicks["User clicks / dwell time /\nreformulations logged"]
+    Clicks --> Labels["Treated as (noisy)\nrelevance labels"]
+    Labels --> Offline["Offline eval:\nNDCG / MRR on a\nheld-out query set"]
+    Offline --> Candidate[New ranking model candidate]
+    Candidate --> AB["Online: A/B test or\ninterleaving on live traffic"]
+    AB -->|Wins on guardrail +\nbusiness metrics| Ship[Ship as new default]
+    AB -->|Regresses| Discard[Discard / iterate]
+    Ship --> Serve
+```
+
+**Guardrail metrics matter as much as the primary metric.** A ranking change that improves CTR but tanks a guardrail — e.g., pushes more sponsored/low-margin results, or increases p99 query latency — should not ship. Always name at least one guardrail alongside your primary metric; it signals you're not chasing a single number in isolation.
+
+**Mnemonic:** *"Offline tells you it might be better; online tells you it is better."* Never ship on offline metrics alone — click behavior is the only signal that reflects real user intent.
+
 ### Golden rule (Ranking)
 Retrieval finds candidates cheaply; ranking orders them expensively. Never run your expensive ranker over the full corpus — only over the retrieval stage's small candidate set.
 
@@ -775,6 +953,7 @@ Retrieval finds candidates cheaply; ranking orders them expensively. Never run y
 - If asked about synonyms/semantic gap (query and doc use different words for the same thing), pivot to embeddings + ANN (HNSW or IVF-PQ) — don't try to solve it with more BM25 tuning.
 - Default to **hybrid retrieval** (lexical + vector, fused with RRF) as your production answer — pure vector-only is rare because it sacrifices exact-match precision (SKUs, IDs).
 - Name FAISS/HNSW/IVF-PQ and RRF by name — these are the concrete, checkable signals that you know modern retrieval, not just classic IR.
+- If asked "how do you know a change is better," give the full loop: offline NDCG/MRR gate first, then A/B or interleaving on live traffic, checked against a guardrail metric before shipping — not just "we A/B test it."
 
 ---
 
@@ -872,6 +1051,8 @@ In a scatter-gather system, your p99 latency is dominated by your slowest shard 
 | Update strategy | Append new segments + background merge | Rebuild full index on every change | +Read-time overhead of merging segments / −No downtime, no full-corpus reprocessing per update |
 | Retrieval semantics | Hybrid (lexical BM25 + vector/ANN, fused via RRF) | Lexical-only (BM25) | +Extra index (embeddings + ANN) and fusion step to run / −Catches semantic/synonym matches lexical-only misses (e.g. "affordable laptop" ~ "budget notebook") |
 | Autocomplete computation | Precomputed top-K per prefix (offline, refreshed periodically) | Live query per keystroke | +Staleness until next refresh, extra offline job / −Sub-millisecond hashmap-style lookup instead of a live search per keystroke |
+| 🆕 Query routing (shard fan-out) | Full fan-out by default; targeted fan-out when a routing key exists | Always full fan-out | +Routing metadata to maintain / −Skips shards entirely for multi-tenant workloads, cutting fan-out cost |
+| 🆕 Ranking rollout | Offline metrics (NDCG/MRR) gate a candidate, then A/B/interleaving on live traffic before shipping | Ship directly on offline metrics | +Slower rollout / −Avoids shipping a ranking regression that only real click behavior would reveal |
 
 ---
 
@@ -968,6 +1149,9 @@ Bandwidth             = Requests/sec × Payload size
 - "Ring, not modulus" — consistent hashing remaps ~1/N of keys on a node change; plain `hash % N` remaps ~100%.
 - "Lexical finds the same words; vector finds the same meaning; hybrid finds both and lets fusion pick the best of each."
 - Autocomplete = "precompute the top-K at every prefix" — a hashmap lookup, not a live search per keystroke.
+- 🆕 "A key skips the scatter" — a routing key on the query narrows shard fan-out; its absence means paying full scatter-gather cost.
+- 🆕 "New data → NRT append; new logic on old data → full reindex."
+- 🆕 "Offline tells you it might be better; online tells you it is better" — never ship a ranking change on offline metrics alone.
 
 **Golden rules, one per section:**
 1. Search is the textbook AP (eventual consistency) system — don't over-engineer strong consistency.
@@ -978,6 +1162,7 @@ Bandwidth             = Requests/sec × Payload size
 6. Retrieval finds candidates cheaply; ranking orders them expensively — never run the expensive ranker over the full corpus.
 7. Query-time smarts — autocomplete, fuzzy matching, caching — trade a little staleness/precomputation for a lot of latency savings.
 8. Design for tail latency (slowest shard), not average latency, in any scatter-gather system.
+9. 🆕 Ship ranking changes only after online A/B or interleaving confirms the offline win, checked against a guardrail metric — offline metrics alone are not enough.
 
 **One-liner answers for common interviewer probes:**
 - "Why not just grep/LIKE query the documents?" → O(N) per query; doesn't scale past thousands of docs. Inverted index makes term lookup O(1)-ish.
@@ -987,3 +1172,6 @@ Bandwidth             = Requests/sec × Payload size
 - "How do you keep it available?" → Replicate across AZs (RF=3), asynchronous index propagation, load-balancer-driven failover, pull-based updates so a new node self-heals from durable storage.
 - "How would you support semantic/synonym search?" → Add a vector/embedding retrieval path (ANN over HNSW or IVF-PQ) alongside BM25, fuse both ranked lists with Reciprocal Rank Fusion, then feed the fused set into the existing re-ranking stage.
 - "How do you build autocomplete / handle typos?" → Autocomplete: precomputed top-K completions per prefix in a trie (offline, from query logs), not live search. Typos: Levenshtein automaton (bounded edit distance) or n-gram/trigram indexing over the term dictionary, e.g. Lucene's `FuzzyQuery`.
+- 🆕 "How do you decide which shards to query?" → Full fan-out by default; if the data model has a routing key (tenant/channel), narrow to only the shards owning that key.
+- 🆕 "How do you decide between an incremental update and a full reindex?" → New or changed data → NRT append (searchable in seconds). Changed tokenization, ranking features, or shard count → full reindex with an atomic version cutover, because NRT can't retroactively fix how existing documents were processed.
+- 🆕 "How do you know a new ranking model is actually better?" → Gate it offline first (NDCG/MRR on a held-out query set), then confirm online via A/B test or interleaving on live traffic, and only ship if it also clears a guardrail metric (latency, revenue mix) — not just the primary metric.

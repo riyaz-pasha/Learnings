@@ -1,5 +1,7 @@
 # Designing Twitter — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added (1) a retweet-vs-quote-tweet data modeling subsection with a worked numeric example and a decision flowchart — the one functional gap in an otherwise very thorough guide, (2) a trending-topic aggregation-window trade-off table (1 min vs 5–15 min vs 1 hr+) with an "if asked, say this" recall line, (3) a lighter, bulleted rewrite of the dense continuous-ring load-balancing paragraph in §7.5, and (4) a new row in the Master Cheat Sheet reflecting the retweet/quote-tweet distinction. Everything else — mental model, capacity math, the three-stage architecture evolution, fan-out/celebrity/search/trending/graph deep dives, all existing diagrams, mnemonics, and cheat-sheets — was already strong and is left untouched. New material is marked with 🆕.
+
 ## 1. Mental Model
 
 Twitter is not a storage problem. It's a **fan-out problem** wearing a storage costume.
@@ -306,11 +308,37 @@ erDiagram
 | LIKE, RETWEET | Sharded KV, existence-check indexed by `(user_id, tweet_id)` | Very high write volume; count is denormalized onto TWEET via sharded counters (§7.4), not computed by `COUNT(*)` |
 | MEDIA (blob bytes) | Blobstore + CDN | Large binary objects, cheap cold storage, edge-cached for reads — see §7.7 |
 
+#### 🆕 Retweet vs Quote Tweet — Data Modeling
+
+A retweet and a quote tweet are **the same TWEET row shape** — no seventh entity needed. The only difference is which columns get filled in:
+
+| | Simple retweet | Quote tweet |
+|---|---|---|
+| New TWEET row created? | Yes (a thin new row) | Yes |
+| `text` | Empty/null — no added content | Non-empty — the quoting user's own commentary |
+| `retweet_of_id` | Set → points at the original tweet | Set → points at the original tweet |
+| Renders as | "user_A retweeted" + embedded original | "user_A: [new text]" + embedded original |
+| RETWEET table row | Yes — needed for undo + existence-check ("did I already retweet this?") | Optional — the new TWEET row with `text` + `retweet_of_id` set is often record enough on its own |
+
+Mnemonic: **empty `text` = plain retweet, non-empty `text` = quote tweet.** Same foreign key (`retweet_of_id`), one column decides which UI it renders as. Nothing else in the schema branches on it.
+
+```mermaid
+flowchart TD
+    RT["User taps Retweet"] --> Q{"Added their own text?"}
+    Q -->|"No"| SIMPLE["Simple retweet<br/>text = null, retweet_of_id = original_id"]
+    Q -->|"Yes"| QUOTE["Quote tweet<br/>text = comment, retweet_of_id = original_id"]
+    SIMPLE --> FANOUT["New TWEET row → same fan-out path<br/>as any tweet post (§7.2)"]
+    QUOTE --> FANOUT
+```
+
+**Worked example:** a tweet gets retweeted 50K times and quote-tweeted 5K times. That's 55K new TWEET rows at ~400 bytes each (§4) — about 22 MB, trivial. The trap: each quote tweet fans out **independently**, exactly like a brand-new tweet. A quote tweet from a celebrity account re-triggers the full celebrity-pool path from §7.2 — it is not a lightweight "retweet event," it's a new tweet that happens to embed another one.
+
 **Section cheat-sheet:**
 - `like_count`/`retweet_count`/`reply_count` on TWEET are **denormalized counters**, not live aggregates — they're fed by the sharded-counter pipeline (§7.4), never a `COUNT(*)` over LIKE rows at read time.
 - FOLLOW_EDGE needs to be queried in **both directions** (followers of X, followees of X) — plan for a forward and a backward index, not one table scanned two ways.
 - `deleted` is a flag, never a `DROP ROW` — consistent with the "never delete" reliability requirement from §3.
 - Existence checks ("did I already like this tweet?") need `(user_id, tweet_id)` as an indexed/composite key — this is the classic idempotency-check pattern reused in §7.6 and §7.9.
+- 🆕 Quote tweets aren't a separate entity — a TWEET row with `text` populated and `retweet_of_id` set is a quote tweet; the same row with `text` empty is a plain retweet. Both re-enter fan-out as a normal new tweet, celebrity-threshold included.
 
 ---
 
@@ -611,6 +639,16 @@ flowchart LR
 
 Sliding window mechanics: as the window moves, hashtags drop out of the top-K as fresher ones overtake them (e.g. `#life` → `#art` → `#food` → `#science` rotating out over time) — this is why trends feel "live."
 
+#### 🆕 Choosing the aggregation window
+
+| Window size | Pro | Con | Use for |
+|---|---|---|---|
+| 1 minute | Feels instantly "live" | Noisy — one bot burst can fake a trend | Breaking-news spike detection, abuse alerts |
+| 5–15 minutes | Balances freshness and stability | Still misses slow-building trends | Default "Trending now" panel — the common answer |
+| 1 hour+ | Smooths out noise, cheap to recompute | Feels stale, misses fast-moving news | Daily/weekly trend digests, analytics |
+
+If-X-then-Y recall: **if asked "how fresh should trends be" → say "short window (1–5 min) for the live panel, plus a minimum-count floor so 10 bot accounts can't fake a trend, and a longer window only for stability reporting."** Naming the bot-floor unprompted is the detail that separates this answer from a generic one.
+
 **Section cheat-sheet:**
 - Name the problem explicitly: **"heavy hitter" / "hot key" problem** — a single celebrity tweet or viral hashtag can create a hotspot that a naive single-counter design cannot survive.
 - Sharded counters trade a small amount of read-side aggregation complexity for massive write-side scalability — that's the trade-off to state.
@@ -660,7 +698,12 @@ flowchart TD
     DAc --> FINAL["Scalable + fair + cost-effective<br/>= Twitter's production solution"]
 ```
 
-**Deterministic aperture (continuous ring), how it actually works:** clients and servers are placed on a shared ring. A client claims a contiguous arc (offset, offset+width) sized to its own request concurrency (a feedback controller adjusts width). Arcs from different clients can partially overlap a server — that's fine and expected; P2C is applied *within* the client's arc (comparing two random points/instances in-range) to pick the least-loaded instance for a session. Minimal disruption on scale-up/down, minimal coordination required between clients and servers.
+**Deterministic aperture (continuous ring), how it actually works:**
+- Clients and servers all sit on one shared ring — picture a clock face with every instance placed at some angle.
+- Each client claims a contiguous arc of that ring: a start point plus a width. Width scales with how many concurrent requests the client is sending; a feedback controller grows or shrinks it over time.
+- Arcs from different clients can overlap the same server. That's expected, not a bug.
+- Inside its own arc, a client runs P2C — pick 2 instances, send to whichever has less load — to choose who serves each session.
+- Net effect: scaling a service up or down barely disturbs existing arcs, and no central coordinator is needed to keep things fair.
 
 **Section cheat-sheet:**
 - Lead with **why**: centralized LB = extra hop + bandwidth bottleneck + SPOF at Twitter's service-mesh scale — this justifies the whole detour.
@@ -998,6 +1041,7 @@ flowchart TD
 | Feed generation | Hybrid fan-out: push for typical users, pull + merge-at-read for celebrities |
 | Celebrity problem | Threshold-based skip of synchronous push; fetch + blend at read time |
 | Data model | 6 entities: User, Tweet, Follow-edge, Like, Retweet, Media — counts on Tweet are denormalized, fed by sharded counters |
+| 🆕 Retweet vs quote tweet | Same TWEET row shape: `text` empty = plain retweet, `text` populated = quote tweet; both point at the original via `retweet_of_id` and both re-enter fan-out (celebrity threshold included) as a normal new tweet |
 | Hot counter problem | Sharded counters, periodic aggregation, region-local placement; concurrent likes need atomic INCR, never read-modify-write |
 | Trending topics | Sliding-window count-min sketch + top-K heap over sharded counters |
 | Search | Two-tier Lucene inverted index: real-time RAM tier (~15s) + full batch-built historical index |

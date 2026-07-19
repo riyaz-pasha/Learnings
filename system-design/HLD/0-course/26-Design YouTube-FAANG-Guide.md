@@ -1,5 +1,7 @@
 # Design YouTube — FAANG System Design Interview Guide
 
+> **Enhancement notes:** This pass adds material on top of the existing guide without touching what already worked. New additions: (1) an API design table and an architecture-evolution walkthrough (v1 single server → v2 async transcode + CDN → v3 adaptive streaming + multi-tier cache + recs) in section 5; (2) a view-count tracking & anti-fraud deep dive folded into section 6.5; (3) two new decision flowcharts — CDN edge-vs-origin tiering by popularity, and ABR segment-quality selection by buffer/bandwidth — in section 6.3; (4) `VIEW` and `PLAYLIST` entities added to the data-model ER diagram in section 6.2; (5) a hot-vs-long-tail CDN strategy table and a concrete transcoding-output example (6 resolutions × 2 codecs = 12 files). A few dense paragraphs (6.3, 6.6, 6.7) were also tightened into shorter sentences for readability. New headings are marked 🆕; everything else — structure, numbers, existing diagrams, and voice — is unchanged.
+
 ## 1. Mental Model
 
 YouTube is two systems bolted together, with wildly different traffic shapes:
@@ -50,6 +52,7 @@ flowchart TD
 - Like/dislike videos
 - Comment on videos
 - View thumbnails
+- Save videos to playlists
 
 **Out of scope unless asked**: live streaming, monetization/ads, DRM, recommendations UI, subscriptions/notifications — mention them, then explicitly park them.
 
@@ -164,6 +167,24 @@ This is a simplification (assumes uniform load); in reality you'd size by peak Q
 
 ## 5. High-Level Design
 
+#### 🆕 API Design
+
+Before drawing boxes, pin down the contract the client actually calls — interviewers will ask for this if you don't offer it first. Keep it small; it should map 1:1 onto the functional requirements in section 3.
+
+| Endpoint | Method | Purpose | Key request fields | Key response fields |
+|---|---|---|---|---|
+| `/videos` | `POST` (chunked, resumable) | Initiate/continue an upload | `upload_id` (empty on first call), `chunk_index`, `chunk_bytes`, `channel_id`, `title`, `visibility` | `upload_id`, `next_expected_chunk`, `status` |
+| `/videos/{video_id}` | `GET` | Fetch metadata + manifest URL for playback | `video_id` | `title`, `duration_sec`, `manifest_url`, `status`, `channel` |
+| `/videos/{video_id}/manifest` | `GET` (signed if private) | Resolve the HLS/DASH manifest from the nearest CDN edge | `video_id`, `signature` (private only) | `.m3u8` / `.mpd` body |
+| `/search` | `GET` | Query videos by title/metadata | `q`, `page_token` | ranked list of `video_id`, `title`, `thumbnail_url` |
+| `/videos/{video_id}/comments` | `POST` / `GET` | Write or paginate comments | `text`, `parent_comment_id` (optional) | `comment_id`, `created_at` |
+| `/videos/{video_id}/like` | `POST` | Like/dislike a video | `reaction_type` | `202 Accepted` (counter updates async — see 6.5) |
+| `/videos/{video_id}/thumbnail` | `GET` | Fetch a thumbnail variant | `size_variant` | image bytes / CDN redirect |
+
+**One line to say out loud:** uploads are the only endpoint that isn't a simple request/response — it's chunked and stateful (`upload_id` threads the chunks together), because a multi-GB POST over a flaky connection cannot be a single atomic call.
+
+#### Architecture Diagram
+
 ```mermaid
 flowchart TD
     U["User / Client"] -->|upload or watch| LB[Load Balancer]
@@ -184,11 +205,67 @@ flowchart TD
 
 **Why upload goes to the server, not straight to the encoder** (a classic follow-up question): the server owns validation, auth, quota checks, dedup checks, and metadata writes atomically with acceptance — bypassing it would mean the encoder has to reimplement all of that, and you lose a clean retry/resume point for chunked uploads.
 
+#### 🆕 Architecture Evolution: v1 → v2 → v3
+
+Interviewers often want to see *how* you'd arrive at the diagram above, not just the end state — walking through the evolution shows you understand which pain point each new component fixes.
+
+```mermaid
+flowchart TD
+    subgraph V1["v1 — single server (whiteboard starting point, breaks fast)"]
+        direction LR
+        C1[Client] --> S1["One server\n(accepts upload, encodes inline, serves file)"]
+        S1 --> D1[("Local disk")]
+    end
+```
+
+*v1 problem*: one process does upload, encode, and serve. A single slow encode blocks new uploads; a disk failure loses videos; there's no way to scale reads and writes independently.
+
+```mermaid
+flowchart TD
+    subgraph V2["v2 — decoupled storage + async encode + CDN"]
+        direction LR
+        C2[Client] --> AS2[App Server]
+        AS2 --> BLOB2[("Blob Storage")]
+        AS2 --> Q2[Encode Queue]
+        Q2 --> ENC2[Encoder Farm]
+        ENC2 --> BLOB2
+        ENC2 --> DB2[("Metadata DB")]
+        BLOB2 --> CDN2[CDN]
+        CDN2 --> C2
+    end
+```
+
+*v2 fix*: upload and encode are decoupled by a queue (upload spikes no longer stall on transcode capacity); bytes move out of the app server onto durable blob storage; a CDN sits in front of blob storage so reads don't hammer origin. *Still missing*: every video gets one fixed bitrate (no adaptive quality), and the CDN treats every video the same regardless of popularity.
+
+```mermaid
+flowchart TD
+    subgraph V3["v3 — adaptive streaming + popularity-aware CDN + recommendations"]
+        direction LR
+        C3[Client] --> GLB[GeoDNS / Global LB]
+        GLB --> EDGE["CDN Edge\n(tiered: hot push / long-tail pull)"]
+        EDGE -->|manifest + segments| C3
+        EDGE -->|miss| ORIGIN[("Origin: Blob Storage")]
+        AS3[App Server] --> BLOB3[("Blob Storage")]
+        AS3 --> Q3[Encode Queue]
+        Q3 --> ENC3["Encoder Farm\n(bitrate ladder: HLS/DASH)"]
+        ENC3 --> BLOB3
+        ENC3 --> DB3[("Metadata DB")]
+        BLOB3 --> EDGE
+        REC[Recommendation Service] --> C3
+        DB3 --> REC
+    end
+```
+
+*v3 additions*: encoder now produces a full resolution/bitrate ladder (adaptive bitrate streaming, section 6.3) instead of one fixed rendition; the CDN tier is popularity-aware (push hot content ahead of demand, pull the long tail on miss — see the new decision flowchart below); a recommendation service personalizes what's surfaced, separate from what's cached. This is the diagram at the top of this section, arrived at incrementally.
+
+**If asked "how would this design change at 10x scale," this evolution *is* the answer** — name the next bottleneck (MySQL write throughput → Vitess; single-tier CDN → popularity-aware tiering; fixed bitrate → ABR) rather than describing v3 from scratch.
+
 ### Interview Cheat-Sheet
 - Draw upload path and playback path as two distinct flows through the same diagram — don't conflate them.
 - Blob storage stores bytes; metadata DB stores *pointers + attributes*; never put video bytes in a relational DB.
 - CDN sits between blob storage and the user — it's a cache layer, not a replacement for origin storage.
 - Bigtable/wide-column store for thumbnails is a deliberate choice: many small objects (<10 MB), high throughput, not much need for joins.
+- If you have time, sketch the v1→v2→v3 evolution before the final diagram — it demonstrates you can justify *why* each component exists, not just that you memorized the picture.
 
 ---
 
@@ -257,6 +334,8 @@ flowchart LR
 | When used | New device support, quality ladder generation, compression | Adapting same encoded stream to different delivery protocol (e.g., MP4 → HLS segments) |
 | Example | H.264 1080p → VP9 480p | H.264 MP4 → H.264 in .ts segments for HLS |
 
+**🆕 Concrete example — "a video is a matrix," with real numbers**: take a 10-minute 1080p upload (~1.5 GB raw). Encode it into a typical ladder of 6 resolutions (1080p, 720p, 480p, 360p, 240p, 144p) × 2 codecs (H.264 for compatibility, VP9 for modern devices) = **12 output files**, roughly **2 GB total** across all renditions combined (lower resolutions are far smaller than the source, so the total isn't 12× the original). Each of those 12 files is then chopped into a few hundred HLS/DASH segments. One upload, twelve stored renditions, hundreds of servable chunks — this is the "matrix, not a file" idea from section 1 made concrete.
+
 **Per-shot/per-segment encoding**: instead of encoding the whole 5-minute video at one bitrate ladder, split into short segments (shots) and encode *each segment* at a bitrate suited to its visual complexity (a static talking-head segment compresses far more than a fast-action segment). This is functionally the same idea as **Netflix's per-title/per-shot encoding** using perceptual quality metrics (Netflix uses VMAF; YouTube's equivalent pipeline optimizes similarly) — same bit budget, meaningfully better perceived quality, smaller files.
 
 **Memory hook** for encoding formats: *"H.264 is the lingua franca (universal compatibility), VP9/AV1 are the diet versions (same quality, ~30–50% smaller, more CPU to encode, used for modern devices only)."*
@@ -324,6 +403,11 @@ erDiagram
     VIDEO ||--o{ LIKE : receives
     USER ||--o{ LIKE : gives
     COMMENT ||--o{ COMMENT : "has replies"
+    VIDEO ||--o{ VIEW : "watched in"
+    USER ||--o{ VIEW : generates
+    USER ||--o{ PLAYLIST : owns
+    PLAYLIST ||--o{ PLAYLIST_ITEM : contains
+    VIDEO ||--o{ PLAYLIST_ITEM : "included in"
 
     USER {
         bigint user_id PK
@@ -377,9 +461,30 @@ erDiagram
         string reaction_type
         timestamp created_at
     }
+    VIEW {
+        bigint view_id PK
+        bigint video_id FK
+        bigint user_id FK
+        int watched_seconds
+        string session_id
+        timestamp created_at
+    }
+    PLAYLIST {
+        bigint playlist_id PK
+        bigint owner_user_id FK
+        string title
+        string visibility
+    }
+    PLAYLIST_ITEM {
+        bigint playlist_id FK
+        bigint video_id FK
+        int position
+    }
 ```
 
 Note what lives where: `VIDEO` and `RENDITION`/`THUMBNAIL` rows are *pointers* (`blob_path`, `manifest_url`) — the pixels themselves are never in this schema, only in blob storage. `RENDITION` is a one-to-many child of `VIDEO` because that's the "matrix, not a file" mental model made literal: one video row, N rendition rows. `COMMENT` self-references (`parent_comment_id`) for threaded replies — the same table, no separate "replies" table needed.
+
+**🆕 `VIEW` and `PLAYLIST`, and why they're not as simple as they look**: `VIEW` is deliberately a row-per-event log, not a counter column — `watched_seconds` is what feeds both the raw view count (see 6.5) and watch-time-based ranking (see 6.4); a counter column alone can't answer "did they actually watch it." `PLAYLIST_ITEM` is a join table (composite key `playlist_id` + `video_id`, with `position` for ordering) because a video can sit in many playlists and a playlist holds many videos — a plain FK on either side can't express that many-to-many relationship.
 
 #### Interview Cheat-Sheet
 - Justify MySQL for user/metadata (need ACID, structured queries) vs. Bigtable/wide-column for thumbnails (huge count of small immutable blobs, high throughput).
@@ -417,6 +522,34 @@ flowchart LR
 | YouTube's actual use | Home page trending / viral videos pushed ahead of time | Vast majority of long-tail catalog |
 
 **Memory hook**: *Push = "ship it before anyone asks" (like stocking shelves before a sale). Pull = "fetch it the first time someone asks, then keep it" (like a library holding a book after the first checkout).*
+
+#### 🆕 Hot vs. long-tail: the CDN strategy table
+
+| | Hot / viral video | Long-tail video |
+|---|---|---|
+| Example | Cricket highlights, 2M views/hour and climbing | A 4-year-old tutorial with 40 views/month |
+| CDN strategy | **Push** — pre-warm many edge PoPs ahead of demand | **Pull** — fetch to edge only on first request, evict on idle |
+| Origin storage tier | Flash/SSD (low-latency, worth the cost) | Spinning disk (dense, cheap, latency matters less) |
+| Cache hit ratio | 90–95%+ (illustrative — this is the pie chart below) | Lower; more origin round-trips per view |
+| Failure cost if wrong | Wasted edge storage if prediction misses | A cold-cache first request is slow but rare — few users affected |
+| "If X then Y" | If view-velocity crosses a trending threshold → push to regional PoPs proactively | If a video sits below the popularity threshold → leave it pull-only, don't waste edge capacity |
+
+#### 🆕 CDN tier decision flowchart — origin vs. edge, by popularity
+
+```mermaid
+flowchart TD
+    A["New view event / velocity update for video_id"] --> B{"View velocity above\ntrending threshold?"}
+    B -->|Yes| C{"Already pushed to\nregional edges?"}
+    C -->|No| D["Push to top N PoPs\nin the trending region(s)"]
+    C -->|Yes| E["No action — already warm"]
+    B -->|No| F{"Any recent edge\nrequests for this video?"}
+    F -->|Yes, recently| G["Keep in edge cache\n(pull-warmed, normal TTL)"]
+    F -->|No / cold| H["Evict from edge if present\n— serve future requests via\npull-on-miss from origin"]
+    D --> I["Origin tier: keep on flash/SSD\n(low-latency source for pushes)"]
+    H --> J["Origin tier: fine on spinning disk\n(density over latency)"]
+```
+
+**One line to say out loud**: the decision isn't per-request, it's per-video and re-evaluated on a schedule (or on a velocity trigger) — you don't want to recompute "is this hot" on every single view.
 
 **HLS vs. DASH** (the two adaptive streaming protocols):
 
@@ -468,13 +601,36 @@ sequenceDiagram
 
 ABR depends on four inputs: **end-to-end available bandwidth**, **device capability**, **encoding technique used**, and **client buffer occupancy**.
 
+#### 🆕 Adaptive bitrate selection flowchart — what the client decides at each segment boundary
+
 ```mermaid
-pie title CDN Cache Hit vs Miss (popular content)
+flowchart TD
+    A["Segment N finishes downloading"] --> B["Measure: buffer occupancy (seconds queued)\n+ recent download throughput"]
+    B --> C{"Buffer below\nlow-water mark?"}
+    C -->|Yes, buffer low/draining| D["Step DOWN one rung\n(prioritize: no rebuffer over quality)"]
+    C -->|No, buffer healthy| E{"Measured throughput ≥\nnext rung's bitrate\nwith safety margin?"}
+    E -->|Yes| F["Step UP one rung\n(if buffer has headroom to absorb a bad guess)"]
+    E -->|No| G["Hold current rung"]
+    D --> H["Request segment N+1\nat chosen rung, same manifest"]
+    F --> H
+    G --> H
+```
+
+**If X then Y, the whole ABR algorithm in one line**: if the buffer is draining, drop quality immediately regardless of bandwidth (never let it hit zero — that's a rebuffer, the worst UX outcome); else if bandwidth comfortably covers the next rung up, climb one step at a time (never jump straight to the top rung — a bad guess at max bitrate empties the buffer fast). This is why quality ramps up gradually after a video starts, and drops fast when a connection degrades.
+
+```mermaid
+pie title CDN Cache Hit vs Miss (popular content, illustrative)
     "Cache Hit (Edge)" : 92
     "Cache Miss (Origin fetch)" : 8
 ```
 
-**Content placement hierarchy** (closest to farthest from user): CDN edge/colocation inside ISP PoPs → Internet Exchange Points (IXPs, where no direct ISP deal exists) → YouTube's own data centers (origin). Within origin storage, **flash/SSD servers** hold popular/moderately popular content for low-latency serving; **spinning-disk storage servers** hold the long tail, optimized for density over latency. Off-peak hours are used to push large content batches into ISP caches to avoid daytime network congestion.
+**Content placement hierarchy**, closest to farthest from the user:
+
+1. **CDN edge / colocation inside ISP PoPs** — the fastest hop, content sits inside the ISP's own network.
+2. **Internet Exchange Points (IXPs)** — used when there's no direct deal with that ISP.
+3. **YouTube's own data centers (origin)** — the fallback for everything else.
+
+Origin storage itself is tiered by popularity: **flash/SSD** servers hold popular and moderately-popular content, because low latency is worth the extra cost there; **spinning-disk** servers hold the long tail, where density (cost per GB) matters more than latency. YouTube also pushes large content batches into ISP caches during off-peak hours, to avoid competing with daytime network traffic.
 
 **CDN/region failover** — the other half of the cache-miss story is a *PoP* miss, not just a content miss:
 
@@ -513,6 +669,8 @@ sequenceDiagram
 - ABR happens client-side by requesting differently-encoded segments — there is no per-user server-side transcoding at request time.
 - Draw the hit/miss + fallback-to-origin path — interviewers want to see you handle the cache-miss case, not just the happy path.
 - Mention the flash-vs-storage-server origin tiering — it shows you understand cost/latency trade-offs even within "the origin."
+- If asked "how does the CDN decide what to cache where," walk through the tier decision flowchart: view velocity drives push, recency of requests drives pull-cache retention.
+- If asked "how does the player pick quality," the one-liner is: drop fast on a draining buffer, climb slow when bandwidth allows headroom — never jump straight to the top rung.
 
 ---
 
@@ -573,7 +731,7 @@ Stage 1 (**candidate generation**) narrows millions of videos down to hundreds u
 
 ---
 
-### 6.5 Comments, Likes & Engagement Counters at Scale
+### 6.5 Comments, Likes, Views & Engagement Counters at Scale
 
 Functional requirements mention these on day one, but they're a genuine deep dive: a single viral video can take **thousands of like/comment writes per second against one `video_id`** — the same hot-shard problem as section 8, but for OLTP writes instead of reads.
 
@@ -612,10 +770,38 @@ Three ideas make this scale:
 
 **Memory hook**: *"Count fast, count approximately, reconcile within seconds"* — never make a like button synchronously fight a hot row.
 
+#### 🆕 View-count tracking & anti-fraud at scale
+
+View counting looks like "increment a number on play" until you notice two problems: (1) it's the same hot-row problem as likes/comments above, and (2) unlike a like button, a view count is a fraud target — bot farms and click-rings inflate it directly for ad revenue or virality, so it needs validation, not just scale.
+
+**What actually counts as "one view"** (illustrative rule, exact thresholds are a YouTube trade secret): a client-side ping after some minimum watched duration (e.g., several seconds of actual playback, not just a page load) — a raw HTTP request to `/videos/{id}` is not a view, only a playback-confirmed watch event is.
+
+```mermaid
+flowchart TD
+    A["Client sends 'view' ping\n(after N seconds watched)"] --> B{"Passes basic checks?\n(rate limit, known bot signature,\nsession looks human)"}
+    B -->|Suspicious| C["Log to VIEW table for audit,\nDO NOT count toward public view_count"]
+    B -->|Looks legitimate| D{"Same user_id/session_id\nalready viewed this video\nrecently?"}
+    D -->|Yes, duplicate| E["Log VIEW row (for watch-time/analytics),\nskip incrementing view_count"]
+    D -->|No, new view| F["Buffer increment in counter cache\n(same buffered-counter pattern as likes)"]
+    F --> G["Batch flush to view_count\nevery few seconds"]
+    C --> H["Async fraud-scoring job\n(pattern: many views, same IP range,\nno real watch-time distribution)"]
+    H -->|Confirmed bot traffic| I["Retroactively adjust count,\nflag account for abuse review"]
+```
+
+Three ideas make this trustworthy, not just fast:
+
+1. **Log every raw event, count only validated ones.** Every ping lands in the `VIEW` table (section 6.2) regardless of outcome — that data feeds fraud detection and watch-time-based ranking (section 6.4) even when it doesn't move the public counter.
+2. **Dedup within a window.** The same user replaying a video 50 times in a minute is one view for public display purposes (exact rules vary), even though every play still contributes to watch-time analytics.
+3. **Buffer and batch the increment**, exactly like the like/comment counters above — a viral video's view counter is a hot row for the same reason a viral video's like counter is.
+
+**Memory hook**: *"Log everything, count validated views only, reconcile fraud after the fact — never let the public number be the fraud checkpoint."* The count you show users is a best-effort real-time estimate; the audit trail (the `VIEW` table) is the source of truth that can correct it later.
+
 #### Interview Cheat-Sheet
 - The interviewer follow-up "what happens when a video goes viral and everyone likes it at once" is really asking about this section — answer with buffered/async counters, not "the DB scales horizontally."
 - Comments thread via self-reference (`parent_comment_id`) in the same table — no separate replies table.
 - Rate limiting belongs *before* the app server touches the DB, not as a DB-level throttle.
+- View count is not just a scale problem, it's a fraud problem — a "view" is a validated playback event (minimum watch duration, dedup, bot-scoring), not a raw request.
+- Keep the raw event log (`VIEW` rows) separate from the public-facing counter — that's what lets you retroactively correct fraud without ever having under-counted honestly.
 
 ---
 
@@ -623,7 +809,11 @@ Three ideas make this scale:
 
 Two distinct concerns get conflated if you're not careful: **who can upload** (abuse prevention) and **who can watch** (access control).
 
-**Upload-side abuse prevention**: token-bucket rate limiting per account (and per IP, to catch multi-account abuse) caps uploads/minute; quota checks reject before a single byte hits upload storage; the same LSH/fingerprinting mentioned in section 8 for dedup doubles as a spam/repost filter; new/unverified accounts get tighter limits than established channels (mirrors "priority queues for verified creators" in the encoder-backlog mitigation).
+**Upload-side abuse prevention** — four checks, in the order they run:
+1. **Rate limit per account and per IP** (token-bucket) — caps uploads/minute, catches both single-account spam and multi-account abuse from one source.
+2. **Quota check before any bytes land** — reject over-quota uploads before they touch upload storage, not after.
+3. **Dedup/fingerprint check** — the same LSH fingerprinting used for storage dedup (section 8) doubles as a spam/repost filter.
+4. **Tiered limits by trust** — new/unverified accounts get tighter limits than established channels (the same idea as "verified creators get priority in the encoder backlog," from the bottlenecks table).
 
 **Playback-side access control** — every video has a visibility level, enforced *before* a CDN edge ever serves a byte:
 
@@ -681,7 +871,10 @@ Proactive scanning (fingerprint match against a claimed-content database at uplo
 
 **Memory hook**: *"If you can't name time-to-first-frame and rebuffer ratio unprompted, you haven't actually designed the playback SLO"* — these two numbers are what "smooth streaming" (a stated non-functional requirement in section 3) cashes out to concretely.
 
-**Multi-region / disaster recovery story**: metadata is replicated across regions via Vitess's multi-cell topology (each cell = a region-local set of shards, with cross-cell replication for durability, not just cross-shard within a cell); blobs are replicated to at least two geographically separate regions at write time — the same 3x replication factor from section 4 is usually spread across failure domains, not just disks in one building. On a full region failure: global LB reroutes traffic to the next-nearest healthy region within seconds (detected via the same health checks used for PoP failover in 6.3); metadata writes that were in-flight to the failed region's primary are the only at-risk data, bounding **RPO** (Recovery Point Objective) to whatever async replication lag existed at failure time; **RTO** (Recovery Time Objective) is dominated by DNS/LB reroute time, typically low minutes, not the time to physically recover the failed region.
+**Multi-region / disaster recovery story**, broken into the three things to say when asked:
+- **Metadata**: replicated across regions via Vitess's multi-cell topology — each cell is a region-local set of shards, with cross-cell replication on top of the cross-shard replication already inside a cell.
+- **Blobs**: replicated to at least two geographically separate regions at write time. The same 3x replication factor from section 4 is spread across failure domains — different buildings, not just different disks in one building.
+- **On a full region failure**: the global LB reroutes traffic to the next-nearest healthy region within seconds, using the same health checks as the PoP failover in 6.3. The only at-risk data is metadata writes that were in-flight to the failed region's primary — that bounds **RPO** (Recovery Point Objective) to the async replication lag at failure time. **RTO** (Recovery Time Objective) is dominated by DNS/LB reroute time — typically low minutes, not the time to physically recover the failed region.
 
 **Memory hook**: *RPO = how much data could you lose; RTO = how long until you're back.* State both numbers explicitly if asked about DR — "we replicate" alone isn't a DR story, a bounded RPO/RTO is.
 

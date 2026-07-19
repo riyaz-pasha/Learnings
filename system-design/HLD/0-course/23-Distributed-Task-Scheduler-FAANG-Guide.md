@@ -1,5 +1,15 @@
 # Distributed Task Scheduler — FAANG System Design Interview Guide
 
+> **Enhancement notes:** this pass added material the original draft was missing or left thin, without touching what already worked. New content is marked 🆕 in headings.
+> - **API design** (§6A) and an explicit **data model / schema** table (§6B) — the original had components and flows but no concrete request/response shapes or column list.
+> - **Architecture evolution** (§6C): v1 single-node cron + DB polling → v2 timing-wheel + leader election → v3 partitioned shards + worker pool + DLQ, with diagrams for each step.
+> - A dedicated **timing wheel deep dive** (§9) with worked bucket-count numbers — "how jobs get picked up without polling everything" was previously a one-line table row, now it's the full mechanism plus a polling-vs-priority-queue-vs-timing-wheel recall table.
+> - A **job-claim flowchart** and a **retry-backoff decision flowchart** (§11) to complement the existing sequence diagrams — same information, but as decision logic you can whiteboard under pressure.
+> - A **time-bucket vs job-ID partitioning** subsection (§14) for scaling the schedule store past millions of jobs — distinct from the worker-fleet partitioning that was already there.
+> - A handful of dense paragraphs were tightened for plain-language clarity (no content removed). Everything else — mental model, playbook, capacity math, state machine, all other deep dives, golden rules, master cheat sheet — is unchanged.
+
+---
+
 > Think: cron-at-datacenter-scale. Airflow, Chronos, Kubernetes CronJob, AWS EventBridge Scheduler, Google Borg, Temporal/Cadence — all answers to the same question: **"given millions of tasks and thousands of machines, who runs what, when, and what happens when it fails?"**
 
 ---
@@ -202,6 +212,134 @@ Insert (1) + status transitions (assume 3: dispatched, running, terminal) = 4 wr
 
 ---
 
+## 6A. 🆕 API Design
+
+Most candidates jump straight from requirements to architecture and skip this — naming the actual endpoints in a sentence or two buys you credibility cheaply.
+
+| Endpoint | Purpose | Notes |
+|---|---|---|
+| `POST /v1/tasks` | Submit a one-off task | Body: `payload`, `run_at` (or `delay_seconds`), `priority`, `max_retries`, `idempotency_key`, `dag_id`/`depends_on` (optional) |
+| `POST /v1/schedules` | Register a recurring (cron) schedule | Body: `cron_expr`, `timezone`, `payload_template`, `concurrency_policy` (Allow/Forbid/Replace) |
+| `GET /v1/tasks/{task_id}` | Fetch one task's status | Returns state machine status (Section 8), attempt count, last error |
+| `GET /v1/tasks?tenant_id=&status=&cursor=` | List/paginate a tenant's tasks | Cursor-based, not offset — offset pagination falls over past a few million rows |
+| `DELETE /v1/tasks/{task_id}` | Cancel a task | Cascades to dependents if part of a DAG (Section 12) |
+| `PATCH /v1/schedules/{schedule_id}` | Pause / resume / edit a recurring schedule | Pausing must stop new materialization without touching already-materialized in-flight tasks |
+| `POST /v1/tasks/{task_id}/replay` | Manually replay a dead-lettered task | The operational escape hatch every DLQ needs (Section 11) |
+
+Example submit request/response (illustrative shape, not a spec):
+
+```json
+POST /v1/tasks
+{
+  "payload": { "type": "send_email", "template_id": "t_42" },
+  "run_at": "2026-07-18T14:30:00Z",
+  "priority": "delayable",
+  "max_retries": 3,
+  "idempotency_key": "welcome-email-user-9182"
+}
+
+201 Created
+{ "task_id": "01H...snowflake-id", "status": "waiting" }
+```
+
+There's also a small **internal, worker-facing API** that clients never see — `POST /internal/lease/claim`, `POST /internal/lease/heartbeat`, `POST /internal/lease/complete` — this is what backs the CAS-based claiming and lease-renewal mechanics covered in Section 11. Worth one sentence: "there are two APIs here, a public submission API and an internal dispatch/lease API, and they have very different QPS and consistency needs."
+
+**Cheat sheet**
+- Cursor-based pagination, not offset — say this explicitly, it's a common trip-up at "millions of rows" scale.
+- Cancel must state its cascade behavior (Section 12's failure-propagation policy) — don't leave it undefined.
+- Naming the internal lease/heartbeat API separately from the public API shows you're already thinking control-plane vs data-plane (Section 1) at the API layer, not just the architecture layer.
+
+---
+
+## 6B. 🆕 Data Model (Schema Sketch)
+
+Keep this rough — the point is showing you know what fields actually need to exist, not designing a production DDL.
+
+**`tasks` table** (the durable system of record from Section 7):
+
+| Column | Type | Notes |
+|---|---|---|
+| `task_id` | Snowflake-style ID (PK) | Time-sortable, globally unique (Section 7's Sequencer) |
+| `tenant_id` | ID | Sharding/fairness key (Section 13) |
+| `schedule_id` | nullable FK | Set if this task instance was materialized from a cron schedule |
+| `dag_id`, `parent_ids` | nullable | Set if part of a dependency graph (Section 12) |
+| `status` | enum | `waiting / queued / dispatched / running / succeeded / failed / retrying / dead_lettered / killed` (Section 8) |
+| `priority`, `delay_tolerance_ms` | | Feeds the EDF ordering (Section 9) |
+| `payload_ref` | pointer/blob key | Large payloads live in blob storage, not inline — keeps rows small |
+| `attempt_count`, `max_retries` | int | Retry bookkeeping |
+| `next_run_at` | timestamp, indexed | The field the whole scheduler pivots on |
+| `lease_owner`, `lease_expiry` | worker/RM ID, timestamp | Backs CAS-based claiming (Section 11) |
+| `idempotency_key` | string, unique-indexed | Dedup on retry/resubmit |
+| `created_at`, `updated_at` | timestamp | Also the audit trail |
+
+**`schedules` table** (cron templates, distinct from task instances — Section 9's point that recurring schedules are templates, not eternal records):
+
+| Column | Type | Notes |
+|---|---|---|
+| `schedule_id` | PK | |
+| `cron_expr`, `timezone` | | |
+| `next_fire_time` | timestamp, indexed | What the cron materializer scans |
+| `paused` | bool | |
+| `concurrency_policy` | enum | Allow / Forbid / Replace (Kubernetes CronJob's terms, Section 19) |
+
+**The one index the entire system leans on:** a composite index on `(status, next_run_at)`. Every "what's due" query — the cron materializer, the dispatcher, the crash-recovery scan (Section 15) — is a range scan on that index. If asked "what index would you add first," this is the answer.
+
+**Cheat sheet**
+- Large payloads (video metadata, big JSON blobs) go in blob storage with a pointer in the row — keeping `tasks` rows small keeps the write-heavy metadata DB fast (remember: ~3-4 writes/task from Section 5).
+- `(status, next_run_at)` composite index is worth naming by name — it's the index every "what's due" query in this system depends on.
+- Schedule template vs task instance is two tables, not one — conflating them is a common design smell to avoid saying out loud.
+
+---
+
+## 6C. 🆕 Architecture Evolution (v1 → v2 → v3)
+
+Interviewers like watching you build up complexity only as the requirements demand it, rather than jumping straight to the full Section 7 diagram. Narrate it as three stages:
+
+```mermaid
+flowchart LR
+    subgraph v1["v1 — single node, good enough for ~thousands of jobs"]
+    C1["Cron process"] -->|"poll every tick"| DB1[("Single DB\ntask table")]
+    DB1 -->|"due rows"| C1
+    C1 --> Run1["Run in-process"]
+    end
+```
+**v1 limits:** one process is a single point of failure; polling the whole table doesn't scale past a modest row count; nothing stops the same due row from being picked twice if you ever run two copies for HA.
+
+```mermaid
+flowchart LR
+    subgraph v2["v2 — HA + efficient pickup, still one active brain"]
+    L1["Scheduler replica\n(leader)"] <-.leader election.-> L2["Scheduler replica\n(standby)"]
+    L1 --> TW["Timing wheel /\npriority queue\n(in-memory, near-term jobs)"]
+    DB2[("Metadata DB\nsystem of record")] --> TW
+    TW -->|"due now"| L1
+    L1 --> Run2["Worker(s)"]
+    end
+```
+**v2 fixes:** leader election (Section 10) removes the SPOF; a timing wheel or priority queue (Section 9) replaces "poll everything" with O(1) amortized pickup. **v2 still limits:** one active leader caps total dispatch throughput, and the metadata DB is a single shard — fine for millions of jobs, not for the tens-of-millions-plus scale Section 5 estimated.
+
+```mermaid
+flowchart LR
+    subgraph v3["v3 — partitioned, matches Section 7's full design"]
+    S1["Scheduler shard 1\n(own timing wheel)"] --> W1["Worker pool"]
+    S2["Scheduler shard 2\n(own timing wheel)"] --> W2["Worker pool"]
+    S3["Scheduler shard N\n(own timing wheel)"] --> W3["Worker pool"]
+    DB3[("Sharded metadata DB\nby hash(task_id)")] --> S1
+    DB3 --> S2
+    DB3 --> S3
+    W1 -->|"exhausted retries"| DLQ3["Dead Letter Queue"]
+    W2 -->|"exhausted retries"| DLQ3
+    W3 -->|"exhausted retries"| DLQ3
+    end
+```
+**v3 fixes:** partition by `hash(task_id)` (or time bucket, Section 14) so no single leader or single DB shard is the ceiling; each shard runs its own mini-leader-elected timing wheel; a shared DLQ is the terminal safety net for every shard. This is the architecture the rest of this guide (Section 7 onward) assumes.
+
+**Cheat sheet**
+- Narrate this as a story, not a static diagram: "start with cron + a DB, add HA via leader election, then partition once one leader's throughput becomes the ceiling." It shows you understand *why* each piece exists, not just that it exists.
+- The trigger to move v1→v2 is availability (SPOF). The trigger to move v2→v3 is throughput (one leader's dispatch rate can't keep up) — say the trigger, not just the destination.
+- v3's per-shard "mini-leader" is the same leader-election machinery from Section 10, just run N times instead of once — no new concept, just repetition at smaller scope.
+
+---
+
 ## 7. High-Level Design
 
 ```mermaid
@@ -252,7 +390,7 @@ flowchart TD
 | Monitoring | Health checks, alerting, feeds autoscaler | Pull metrics from all of the above |
 | Dead letter queue | Holds tasks that exhausted retries | Manual/automated inspection & replay |
 
-**Why a DB *and* a queue (the "Point to Ponder" from the source, answered properly):** The queue is optimized for fast, ordered, ephemeral hand-off to workers — it is *not* meant to be an audit-durable system of record, and most queue implementations either drop messages under certain failure modes or make querying "all pending tasks for tenant X" expensive/impossible. The DB is the durable **system of record** (survives queue crashes, supports rich queries, supports resuming a crashed scheduler by re-reading state); the queue is a **dispatch cache** of "ready to run right now" work. Writing to DB first, queue second, means a crash between the two steps only loses *dispatch speed*, never the task itself — a re-scan of the DB for "waiting but not queued" tasks recovers it.
+**Why a DB *and* a queue (the "Point to Ponder" from the source, answered properly):** They do different jobs. The queue is fast and ephemeral — great for handing a ready task to a worker right now, bad at surviving a crash and bad at answering "show me all pending tasks for tenant X." The DB is the opposite: durable, queryable, but not built for high-throughput hand-off. So: **DB = system of record, queue = dispatch cache.** Write to the DB first, then to the queue. If the process crashes between those two writes, the task is never lost — it just missed getting queued. A periodic re-scan of the DB for "waiting but not queued" rows catches it and re-queues it, which costs a small delay, never a lost task.
 
 **Cheat sheet**
 - Draw control plane (submitter, RM leader, cluster manager) separate from data plane (workers) — call this out verbally.
@@ -329,6 +467,42 @@ flowchart LR
 | Timer wheel (custom, e.g., Kafka's own internal delayed operation purgatory, or Netty's HashedWheelTimer pattern) | Bucketed by time slot, O(1) amortized insert/expire | Best for *very* high volume delayed scheduling; more code to own |
 | Database polling (poll `WHERE next_run_at <= now()` with index) | Simple, durable by construction | Doesn't scale past low thousands/sec without careful sharding; risk of hot-row contention |
 
+### 🆕 Timing wheel deep dive: how millions of jobs get picked up without polling everything
+
+The core problem: you have 10 million scheduled jobs sitting in a DB. At any given second, maybe a handful of them are due. Scanning all 10 million rows every tick to find "what's due right now" is the naive approach every candidate reaches for first — and it's the thing interviewers want you to reject with a better data structure.
+
+**The idea (same one inside a mechanical clock, and inside Kafka's own internal purgatory / Netty's `HashedWheelTimer`):** don't sort every job — bucket it. Picture a circular array of slots, one slot per second, and a pointer that advances one slot per tick. A job due in 47 seconds goes into slot `(now + 47) mod wheel_size`. Advancing the pointer and draining "whatever's in this slot" is **O(1) amortized**, regardless of how many total jobs exist elsewhere in the system.
+
+```mermaid
+flowchart TD
+    subgraph "Second wheel (86,400 slots = 24h, 1s resolution)"
+    direction LR
+    S1["slot 0"] --> S2["slot 1"] --> S3["..."] --> S4["slot 86399"] --> S1
+    end
+    P["Tick pointer\n(advances 1 slot/sec)"] -.points at.-> S2
+    Overflow["Day wheel\n(90 slots, 1-day resolution)\nfor jobs >24h out"] -->|"job enters 24h horizon,\ndemote into second wheel"| S1
+    DBTier[("DB — jobs\n>90 days out\nnot loaded yet")] -->|"background loader,\nruns every few min"| Overflow
+```
+
+**Worked numbers (illustrative, but this is the shape to reason with):**
+- 10M scheduled jobs total in the system.
+- Of those, only jobs due in the **next 24 hours** get loaded into the second-resolution wheel — say that's ~50,000 jobs (the rest are further out).
+- Wheel size: 86,400 slots (one per second of a day) → **~0.6 jobs per slot on average**. Draining a slot is checking a short linked list, not scanning a table.
+- Jobs due 1–90 days out sit in a coarser **day wheel** (90 slots, 1-day resolution); as a job's fire time crosses into the 24h horizon, a background sweep **demotes** it into the second wheel.
+- Jobs due beyond 90 days never leave the DB until the day-wheel loader picks them up — you don't pre-load 10M jobs into memory, only the sliver that's actually about to fire.
+
+This is a **hierarchical timing wheel**: coarse wheel for the far future, fine wheel for the near future, jobs cascade down as their deadline approaches. It's the same trick a mechanical clock uses (seconds hand ticks 60x more often than the minute hand) applied to scheduling.
+
+**🆕 Job-pickup mechanism, at a glance:**
+
+| Mechanism | Pickup cost | Scales to | Weakness |
+|---|---|---|---|
+| **DB polling** (`WHERE next_run_at <= now()`) | O(rows scanned), even with an index this re-checks everything not-yet-due | Low thousands/sec | Hot-row/index contention; wasted work re-scanning far-future rows every tick |
+| **Priority queue / sorted set** (Redis ZSET, heap) | O(log n) insert, O(1) peek-min | Tens of thousands/sec per shard | Still one global ordering to contend on; single-node memory bound unless sharded |
+| **Timing wheel** (hierarchical) | O(1) amortized insert + drain | Millions/sec in aggregate (per-shard, Section 14) | More moving parts to build/own; needs a demotion/cascade mechanism for hierarchy levels |
+
+**If asked "why not just a priority queue everywhere":** a priority queue is the right answer at moderate scale and is far simpler to build — reach for a timing wheel only once you've established the scale genuinely needs O(1) inserts (say, tens of thousands of new delayed jobs per second). Don't reach for the fancier structure before the numbers justify it — this is the kind of restraint interviewers notice.
+
 ### Cron parsing: how "periodic" becomes "waiting" (the algorithm interviewers may ask you to sketch)
 
 A cron expression is 5 fields — `minute hour day-of-month month day-of-week` (Quartz adds a 6th `seconds` field). Each field is one of: `*` (any), a value (`5`), a range (`1-5`), a step (`*/15`), or a list (`1,15,30`).
@@ -375,6 +549,7 @@ The `herd` bar is the point to call out unprompted: every schedule anchored to a
 - Always pair priority queues with an **aging/promotion mechanism** — a priority queue alone starves low-priority work forever under sustained load.
 - Distinguish 3 queue categories from the source (urgent / delayable / periodic) and explain how periodic (cron) tasks get materialized into "waiting" instances at each firing time.
 - If asked to implement a delay queue at very high scale, mention **timer wheels** as the O(1) data structure of choice over naive sorted-set scans.
+- 🆕 Only the near-term slice of jobs (e.g., next 24h) needs to live in the wheel/memory — a **hierarchical** wheel (coarse far-future levels cascading into a fine near-future level) is how you avoid holding all 10M scheduled jobs in RAM at once.
 - Cron tasks are just periodic tasks whose "next run" is recomputed each time — mention that recurring schedules are re-materialized as new task instances, not one eternal task record.
 - Know the next-fire-time algorithm's shape: bubble up field-by-field (month → day → hour → minute), don't linear-scan minutes — a bounded loop guards against impossible expressions (Feb 30).
 
@@ -474,6 +649,41 @@ delay(n) = min(base * 2^n, max_delay) + random_jitter(0, delay(n) * 0.2)
 ```
 Jitter prevents synchronized "thundering herd" retries (the "retry storm" failure mode — see Section 16).
 
+#### 🆕 Retry-with-backoff decision flowchart
+
+The sequence diagram above shows *what* happens on repeated failure; this flowchart shows the *decision* a worker/RM makes on every single failure — the part worth reproducing on a whiteboard:
+
+```mermaid
+flowchart TD
+    F["Task attempt fails"] --> T{"Transient\n(timeout, 5xx, network)\nor deterministic\n(bad input, 4xx-like)?"}
+    T -->|"deterministic — retrying\nnever helps"| DLQ1["Skip straight to\nDead Letter Queue"]
+    T -->|"transient"| R{"attempt_count\n< max_retries?"}
+    R -->|"no"| DLQ2["Move to\nDead Letter Queue,\nalert owner"]
+    R -->|"yes"| C["delay = min(base*2^n, cap)\n+ jitter"]
+    C --> Q["Re-enqueue with\ndelay, attempt_count++"]
+    Q -->|"delay elapses"| F
+```
+
+This is the "poison message" distinction from Section 16 made concrete: a deterministic failure (malformed payload, permission denied) will fail identically on every retry, so retrying just burns capacity — route it to the DLQ immediately instead of waiting out the full backoff schedule first.
+
+#### 🆕 How exactly one worker claims a job
+
+Multiple workers (or multiple Resource Manager instances) can see the same due task at the same instant — this is the flow that prevents two of them from both executing it:
+
+```mermaid
+flowchart TD
+    Due["Task is due\n(in queue / wheel slot)"] --> Poll["Worker A and Worker B\nboth see it"]
+    Poll --> CAS["Each attempts:\nUPDATE tasks SET status='claimed', owner=me,\nlease_expiry=now()+30s\nWHERE id=X AND status='queued'"]
+    CAS --> Won{"Rows affected = 1?"}
+    Won -->|"yes (I won the race)"| Run["Dispatch & execute"]
+    Won -->|"no (someone else\nalready claimed it)"| Back["Back off,\nmove to next task\n— do NOT retry this one"]
+    Run --> Done{"Finished before\nlease_expiry?"}
+    Done -->|"yes"| Complete["Mark succeeded/failed,\nrelease claim"]
+    Done -->|"no — lease expired"| Reclaim["Any worker may\nre-claim via the same CAS\n(Section 15 crash recovery)"]
+```
+
+The load-bearing line is the `WHERE status='queued'` clause — it's a **compare-and-swap**, not a plain update. Exactly one of the two racing `UPDATE`s affects a row; the database's own row-level locking is the distributed lock here, no separate lock service required. This is the same mechanism as the Redis `SET NX PX` example below, just expressed as a conditional DB write instead of a cache key — pick one, not both, for a given design.
+
 ### Idempotency implementation patterns
 
 | Pattern | How it works | Best for |
@@ -504,7 +714,7 @@ sequenceDiagram
 
 `SET key value NX PX 30000` is atomic in Redis: "set if not exists, expire in 30s." The TTL is the safety net if RM1 dies holding the lock. This is the same shape as the CAS-based DB claim (`UPDATE ... WHERE status='queued'`) from the table above — pick whichever store you've already justified elsewhere in the design (don't introduce Redis *just* for locking if Postgres is already your metadata store).
 
-**Nuance worth stating out loud (the "Redlock debate"):** a single-instance Redis lock is not safe against a leader that stalls past its TTL (GC pause, network partition) and then wakes up believing it still holds the lock — it can dispatch after a *second* node has already acquired the lock and dispatched too. The fix is the same **fencing token** pattern from Section 10 (attach a monotonically increasing token to the lock grant; the worker/DB rejects a stale token) — mention this if asked "is a Redis lock enough," because "it depends on fencing, not just the lock" is the senior-level answer.
+**Nuance worth stating out loud (the "Redlock debate"):** a Redis lock's TTL is a guess about how long the holder needs, not a guarantee. If RM1 stalls past the TTL — GC pause, slow network — Redis expires the lock and hands it to RM2. RM1 then wakes up, still thinks it holds the lock, and dispatches anyway. Now two nodes have both dispatched the same task. The fix is the same **fencing token** from Section 10: every lock grant carries a monotonically increasing number, and the worker/DB refuses any dispatch carrying an older token than the last one it saw. If asked "is a Redis lock enough," the senior answer is: "the lock alone isn't — it needs fencing on top."
 
 **Answering the source's "Point to Ponder" — task that can never finish (infinite loop):** enforce the **execution cap** as a hard resource-level timeout (SIGKILL / container teardown), not an application-level check — you cannot trust the payload to self-terminate. Pair with a monitoring heartbeat: if a worker stops reporting progress within N seconds, treat as dead and reclaim, even without hitting the cap.
 
@@ -601,6 +811,19 @@ flowchart LR
 
 **Worked comparison:** with `mod N` hashing, going from 3 → 4 workers reassigns ~75% of keys. With consistent hashing (100+ virtual nodes per physical worker for even spread), the new worker only claims a slice carved out of its ring neighbors — roughly **1/N of tasks move (~25% here), not 75%**. That's the number to say out loud when asked "how do you scale the worker fleet without a rebalancing storm."
 
+### 🆕 Partitioning the schedule store itself: time-bucket vs job-ID
+
+The section above partitions the **worker fleet** (who executes). A separate question is how you partition the **schedule store** — the 10M+ scheduled jobs sitting in the timing wheel / metadata DB (who decides *when*). Two axes, often combined:
+
+| Approach | How | Good for | Weakness |
+|---|---|---|---|
+| **Job-ID hash partitioning** | `hash(task_id) % shards` (or consistent hashing) picks which shard owns a job's metadata row | Even write load across shards — no shard gets more writes than another | To answer "what's due in the next minute," you must fan out and query **every** shard, then merge |
+| **Time-bucket partitioning** | Jobs due in hour `H` all live in shard `H mod N` (or in that hour's wheel instance) | "What's due now" is a query to exactly one shard — no fan-out | Uneven load if jobs cluster at certain hours (the thundering-herd pattern from Section 9); a shard owning the current hour is hotter than others |
+
+**Worked illustrative example:** 10M total scheduled jobs. Split by time bucket into 24 hourly shards → each shard owns roughly 400K jobs "due within its hour" on average (real traffic won't be this even — top-of-hour clustering from Section 9 means some hourly shards run hotter). Jobs due further than 24h out stay in a cold DB tier and get promoted into an hourly shard as their fire time approaches — the same demotion idea as the hierarchical timing wheel above, just at the shard level instead of the in-memory slot level.
+
+**In practice, combine both:** time-bucket for the near-term "what's due soon" working set (cheap to query, feeds the timing wheel), job-ID hash for the durable metadata store underneath it (even write load, Section 5's ~3-4x-lifecycle-writes bottleneck). Neither axis alone is sufficient at this scale — say this combination explicitly if asked "how would this scale to 100M jobs."
+
 ### Backpressure & rate limiting (protecting the system from itself)
 
 Two independent knobs, easy to conflate:
@@ -613,6 +836,7 @@ Two independent knobs, easy to conflate:
 - Consistent hashing (with virtual nodes) is the correct answer to "how do you partition tasks across workers that scale up/down" — quantify it: ~1/N tasks move per resize vs. ~(N-1)/N with naive modulo hashing.
 - Rate limiting (token bucket, at admission) and backpressure (queue-depth/latency signal, from downstream) are two different mechanisms — don't conflate them in your answer.
 - Shed low-priority load before touching urgent-tier traffic; autoscale on queue-depth trend, not CPU alone.
+- 🆕 Worker partitioning (who executes) and schedule-store partitioning (who decides when) are two separate sharding decisions — combine job-ID hashing (even writes) with time-bucket sharding (cheap "what's due" queries) rather than picking just one.
 
 ---
 
@@ -869,7 +1093,9 @@ flowchart LR
 
 ## 21. Master Cheat Sheet
 
-**Opening moves:** clarify (one-shot vs recurring? DAG or independent? delivery guarantee needed?) → functional/non-functional reqs → capacity estimate (tasks/day → tasks/sec peak → queue ops → worker pool via Little's Law → DB QPS at ~3-4x task count → storage).
+**Opening moves:** clarify (one-shot vs recurring? DAG or independent? delivery guarantee needed?) → functional/non-functional reqs → capacity estimate (tasks/day → tasks/sec peak → queue ops → worker pool via Little's Law → DB QPS at ~3-4x task count → storage) → 🆕 a couple of concrete API endpoints and a `(status, next_run_at)`-indexed schema (Section 6A/6B) → 🆕 narrate the v1→v2→v3 architecture evolution (Section 6C) before landing on the full diagram.
+
+**🆕 Job-pickup mechanism, one line each:** DB polling if scale is low and simplicity wins; priority queue/sorted-set once you need ordering at moderate throughput; hierarchical timing wheel once inserts hit tens of thousands/sec and you need O(1) amortized pickup without holding all jobs in memory (Section 9).
 
 **Architecture in one line:** Client → Rate Limiter → Task Submitter (stateless) → Sequencer (unique ID) → Metadata DB (durable system of record) [+ Graph DB if DAG] → Batching/Prioritization → Distributed Priority/Delay Queue → Leader-elected Resource Manager → Worker Pool (sandboxed, resource-capped) → status feedback loop → Monitoring/Autoscaler, with a Dead Letter Queue as the terminal safety net.
 

@@ -1,5 +1,13 @@
 # Distributed Logging — FAANG System Design Interview Guide
 
+> **Enhancement notes:** this pass added material an interviewer expects but the original draft only implied. New content is marked **🆕** at the subsection level so you can spot it at a glance; everything unmarked is the original guide, untouched.
+> - 🆕 An **architecture evolution** (v1 direct-to-DB → v2 agent + Kafka → v3 tiered + indexed + backpressure-aware) so you can narrate *why* each piece exists, not just draw the final box diagram.
+> - 🆕 **API design** and a **data model / index-document** subsection — both were gaps; a FAANG interviewer will ask "what does the write call look like?" and "what's in an index document?"
+> - 🆕 An **indexing deep dive** (inverted index + time-based index partitioning) and a **tier-migration decision flowchart**, plus a **hot vs. warm vs. cold comparison table** for fast recall.
+> - 🆕 A **query-path sequence diagram** (search → hot index → warm → "restore from cold" fallback) to pair with the existing write-path diagram.
+> - Light clarity edits to a few dense sentences throughout (not individually flagged — the content is unchanged, just easier to read on a first pass).
+> - Everything else — the mental model, playbook, capacity math, failure modes, real-world examples, golden rules, and cheat sheets — is the original guide, left as-is because it already covered the ground well.
+
 > Building-block chapter. Logging is infrastructure every other system leans on — treat it like you'd treat a message queue or a cache: a reusable component you design once and reference everywhere else.
 
 ---
@@ -112,7 +120,48 @@ A **distributed logging system** is the infrastructure that collects, transports
 
 ## 5. How It Works Internally
 
-### 5.1 End-to-end architecture
+### 🆕 5.1 Architecture evolution (v1 → v2 → v3)
+
+Interviewers reward candidates who show *why* each box exists, not just candidates who can draw the final diagram from memory. Narrating the evolution below in the first few minutes does that.
+
+**v1 — naive, direct-to-DB (the thing you must NOT propose):**
+
+```mermaid
+flowchart LR
+    A1[App / service] -->|"synchronous write,\non the request's critical path"| DB1[(Shared database)]
+```
+*Breaks at any real scale:* every request now waits on a database write; one slow disk fsync on the log table slows every user-facing request; the DB has to serve both app traffic and log traffic; there's no search, no retention policy, nothing durable beyond "however long the DB keeps rows."
+
+**v2 — local agent + central Kafka (removes the critical-path problem):**
+
+```mermaid
+flowchart LR
+    A2[App / service] -->|"async, non-blocking\nin-process call"| AG2[Local agent<br/>buffers on host]
+    AG2 -->|"batch ship,\nlow-priority thread"| K2[[Kafka cluster]]
+    K2 --> C2[Consumers] --> S2[(One store — everything hot)]
+```
+*What it fixes:* the app thread never waits on I/O; Kafka absorbs bursts and decouples slow consumers from producers. *What's still missing:* every log line lives in one expensive, fully-indexed store forever — no tiering, no explicit indexing service, and no plan for what happens if Kafka backs up faster than agents can drain (backpressure).
+
+**v3 — tiered, indexed, backpressure-aware (production grade — this is the rest of this guide):**
+
+```mermaid
+flowchart LR
+    A3[App / service] -->|async| AG3["Local agent<br/>(buffer + drop/shed by priority\nif Kafka is unreachable)"]
+    AG3 -->|"batch ship"| K3[[Kafka cluster]]
+    K3 --> IDX3[Indexing service]
+    IDX3 --> HOT3[("Hot tier — ES\nfull index, ~14d")]
+    HOT3 -->|age out| WARM3[("Warm tier — compressed\ncheaper, ~90d")]
+    WARM3 -->|age out| COLD3[("Cold tier — Glacier/S3\n~10% size, ~365d")]
+```
+*What it adds on top of v2:* explicit hot/warm/cold tiering (cost control), a dedicated indexing service (query speed), and backpressure-aware sampling at the agent (survives a slow or down Kafka without an outage). Sections 5.2 onward describe this version in detail.
+
+| Version | What it solves | What's still broken / missing | Fixed by |
+|---|---|---|---|
+| v1: direct-to-DB | Nothing — it's the naive starting point | Logging blocks the request; DB can't take fleet-wide write volume; no search, no retention | v2: local agent + async buffering + durable queue |
+| v2: agent + Kafka, one hot store | Removes logging from the critical path; Kafka absorbs bursts | Storage cost grows unbounded (everything stays "hot" forever); no answer for sustained backpressure; one noisy tenant can swamp the shared index | v3: tiering, indexing service, priority-based shedding |
+| v3: tiered + indexed + backpressure-aware | Cost-controlled retention, fast search, survives ingestion spikes | This is the target architecture — see sections 5.2–5.9 and 6 for the details | — |
+
+### 5.2 End-to-end architecture
 
 ```mermaid
 flowchart LR
@@ -157,7 +206,7 @@ flowchart LR
 | **Visualizer** | Unified UI (Kibana/Grafana-style) across all services/regions |
 | **Expiration checker** | Decides what ages out to cold storage vs hard-deletes |
 
-### 5.2 Write path (sequence)
+### 5.3 Write path (sequence)
 
 ```mermaid
 sequenceDiagram
@@ -180,7 +229,7 @@ sequenceDiagram
 
 Key point to say out loud: the application thread **never blocks on network or disk I/O for logging** — it hands off to a local buffer and a low-priority async thread does the shipping. This is the single most-tested detail in this chapter.
 
-### 5.3 Redundant accumulators / failover
+### 5.4 Redundant accumulators / failover
 
 ```mermaid
 sequenceDiagram
@@ -197,7 +246,7 @@ sequenceDiagram
     Note over App,PS: Mitigation: multiple accumulators per node,<br/>short flush intervals, WAL on local disk
 ```
 
-### 5.4 Log lifecycle (state machine)
+### 5.5 Log lifecycle (state machine)
 
 ```mermaid
 stateDiagram-v2
@@ -214,12 +263,131 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
+### 🆕 5.6 API design
+
+A FAANG interviewer will often ask "what does the write call actually look like?" — have a concrete answer, not just a box labeled "accumulator."
+
+| Endpoint | Method | Called by | Purpose | Notes |
+|---|---|---|---|---|
+| `/v1/logs:batch` | POST | Local agent → ingestion service | Ship a batch of buffered log lines | Always batched — never one log line per call. A batch is typically 100s–1000s of lines, sent every 1–5s or when the buffer hits a size threshold, whichever comes first |
+| `/v1/search` | GET | Visualizer / CLI | Query logs by service, level, time range, free text, `trace_id` | Hits the hot index by default; params: `service`, `level`, `from`, `to`, `q`, `trace_id`, `limit` |
+| `/v1/restore` | POST | Visualizer / on-call tooling | Ask for a cold-tier object to be pulled back into a searchable form | **Async** — returns a `job_id` immediately; actual restore can take minutes to hours (Glacier-style retrieval), not seconds |
+| `/v1/traces/{trace_id}` | GET | Visualizer | Convenience wrapper: fetch every log line across every service for one trace, already ordered causally | Internally just `/v1/search?trace_id=...` sorted by span order, not wall-clock time |
+| `/v1/alerts/rules` | POST / GET / DELETE | On-call engineer / IaC pipeline | CRUD for alerting rules (see 6.14) | e.g. `{"expr": "rate(level=ERROR, service=checkout)[5m] > 50", "for": "2m"}` |
+| `/v1/tenants/{id}/quota` | GET / PUT | Platform team | Read or set a tenant's ingestion rate limit | Enforced at the agent and the filterer — this is the noisy-neighbor lever from 6.10 |
+
+Example batch-ingest call (what the agent actually sends):
+```json
+POST /v1/logs:batch
+{
+  "host": "ip-10-0-4-12",
+  "service": "checkout-service",
+  "batch_id": "b-7f3c2a91",
+  "events": [
+    {"ts": "2026-07-18T10:22:31.482Z", "level": "ERROR", "trace_id": "7f3c2a91", "message": "payment gateway timeout", "latency_ms": 5023}
+  ]
+}
+```
+
+Interview line: "The write path is intentionally batch-only and fire-and-forget from the app's point of view — there is no synchronous 'write one log line' API. The app hands the line to the local agent's in-process buffer and moves on; the agent decides when and how to call `/v1/logs:batch`."
+
+### 🆕 5.7 Data model
+
+Two different "shapes" of the same log event matter: what gets **stored** (the raw event) and what gets **indexed** (the searchable document). Conflating them is why cardinality problems happen (6's Common Failure Modes, F4).
+
+| Field | Stored (blob) | Indexed (search doc) | Why |
+|---|---|---|---|
+| `timestamp` | Yes | Yes, as a range-queryable field | Every query filters by time range first — this is the field that drives partitioning (below) |
+| `service`, `host`, `level` | Yes | Yes, as low-cardinality `keyword` fields | Small, bounded set of values — cheap to index, used to narrow a search fast |
+| `trace_id`, `span_id` | Yes | Yes, as `keyword` | Exact-match lookups only — never full-text analyzed |
+| `message` | Yes | Yes, full-text analyzed (tokenized) | This is the expensive part of the index — the inverted index (5.8) is built from this field |
+| `user_id_hash` | Yes | Yes, as `keyword` | Needed to join logs for one user without indexing raw PII (6.9) |
+| Arbitrary extra fields (payload, stack trace, request body) | Yes | Usually **not** indexed, or indexed only as a truncated prefix | Indexing every free-form field is exactly how cardinality explosions happen — stored-only fields stay searchable indirectly via `trace_id` |
+
+Partitioning key: logs are stored and indexed **one index per service per day**, e.g. index name `logs-checkout-service-2026.07.18`. This is the same "time-based partitioning" idea as sharding a database by date — see 5.8 for why it matters for both query speed and tier migration.
+
+### 🆕 5.8 Indexing deep dive: inverted index + time-based partitioning
+
+**Inverted index, in one sentence:** instead of storing "document 42 contains these words," you store "the word 'timeout' appears in documents 12, 42, 981, …" — a map from *term* to *list of matching log lines*. A search for `"timeout" AND service=checkout` becomes an intersection of two short posting lists instead of a scan of every log line ever written.
+
+```text
+Term            → Posting list (doc IDs)
+"timeout"       → [42, 981, 1204, ...]
+"checkout"      → [12, 42, 55, 981, ...]
+service=checkout → [12, 42, 55, ...]
+
+Query: "timeout" AND service=checkout → intersect([42,981,1204,...], [12,42,55,...]) = [42, ...]
+```
+
+**Why time-based partitioning (index-per-day-per-service) matters — two separate payoffs:**
+1. **Query speed:** almost every log query has a time range (`last 15m`, `last 24h`). If today's logs live in a different index from last month's, the query engine never even opens last month's index — it prunes whole indices instead of scanning filtered rows out of one giant one.
+2. **Cheap tier migration:** moving "everything older than 14 days" from hot to warm becomes *delete/relocate a handful of whole indices*, not a row-by-row delete matching a date filter. This is exactly how Elasticsearch ILM (Index Lifecycle Management) and Loki's chunk-based storage both work under the hood.
+
+#### 🆕 Tier-migration decision flowchart
+
+```mermaid
+flowchart TD
+    A[Nightly ILM sweep checks every index's age] --> B{age <= hot_TTL?}
+    B -->|"yes (e.g. <= 14d)"| C[Leave on hot ES nodes,\nfull index, fastest search]
+    B -->|no| D{age <= warm_TTL?}
+    D -->|"yes (e.g. 14-90d)"| E[Relocate index to warm nodes,\nforce-merge segments, still searchable]
+    D -->|no| F{age <= cold_TTL?}
+    F -->|"yes (e.g. 90-365d)"| G[Export compressed snapshot to S3/Glacier,\ndelete from ES entirely - restore-on-demand only]
+    F -->|no| H{compliance / legal hold active?}
+    H -->|yes| I[Keep in cold tier past normal retention]
+    H -->|no| J[Hard delete]
+```
+
+#### 🆕 Hot vs. warm vs. cold storage
+
+| | Hot | Warm | Cold |
+|---|---|---|---|
+| Retention window (illustrative) | ~14 days | ~15–90 days | ~90–365+ days |
+| Backing store | ES hot nodes, SSD | ES warm nodes or S3 Standard-IA | S3 Glacier / Deep Archive |
+| Searchable how | Full-text, sub-second | Full-text, slower (fewer replicas, force-merged) | Not searchable in place — must restore first |
+| Relative size vs. raw compressed | ~1× (plus replication + index overhead) | ~1× data, less compute around it | ~10% or less after re-compression, no replica overkill |
+| Cost per GB (relative) | Highest | Mid | Lowest (10-20x cheaper than hot) |
+| Typical query latency | Milliseconds–seconds | Seconds | Minutes–hours (restore job) |
+| When you'd read from it | Active incident, live debugging | "What happened last week" | Audit, compliance, rare forensic digs |
+
+Mnemonic: *"Hot is for firefighting, warm is for last week, cold is for lawyers."*
+
+### 🆕 5.9 Query path (sequence diagram)
+
+```mermaid
+sequenceDiagram
+    participant U as On-call engineer
+    participant VIS as Visualizer / Search API
+    participant HOT as Hot index (ES)
+    participant WARM as Warm index
+    participant COLD as Cold archive (Glacier/S3)
+
+    U->>VIS: search(service=checkout, level=ERROR, last 24h)
+    VIS->>HOT: query hot index (today's + yesterday's index)
+    HOT-->>VIS: matching log lines
+    VIS-->>U: results (typically < 1s)
+
+    Note over U,VIS: Later — same engineer searches 6 months back
+    U->>VIS: search(service=checkout, last 6 months)
+    VIS->>HOT: query hot indices (none match — too old)
+    VIS->>WARM: query warm indices (partial match, e.g. last 90 days)
+    WARM-->>VIS: matching log lines (slower)
+    VIS->>COLD: remaining range only in cold archive
+    COLD-->>VIS: "not searchable in place — restore required"
+    VIS-->>U: partial results now + "restore job started, ready in ~2h"
+```
+
+Interview line: "The search API doesn't need to know which tier a log lives in — it fans a query out across whatever tiers overlap the requested time range, and if part of the range is cold, it kicks off an async restore instead of failing the whole query."
+
 ### Cheat-sheet
 - Draw producer → accumulator → pub-sub → fan-out consumers → blob → index → visualizer, in that order, every time.
 - Name all 9 components from memory: accumulator, pub-sub, filterer, error aggregator, alert aggregator, blob storage, indexer, visualizer, expiration checker.
 - State explicitly: async write, low-priority thread, no blocking I/O on the app's critical path.
 - Mention accumulator redundancy as the fix for "single point of loss" before the interviewer asks.
 - The lifecycle has an explicit **Lost** state — acknowledging this shows you understand logging's availability-over-durability trade-off.
+- Narrate the v1 → v2 → v3 evolution if asked "how would you design this from scratch?" — it shows you understand *why* each component exists, not just what it's called.
+- Have one concrete write API call and one search API call ready — "batch POST from the agent, GET with time-range + service + level filters" is enough.
+- Time-based index partitioning (one index per service per day) is what makes both fast range queries *and* cheap tier migration possible — say this connection out loud, it's the kind of detail that separates senior candidates.
 
 ---
 
@@ -881,6 +1049,9 @@ total network ≈ ingest_bw × (1 + (RF−1) + num_consumers)
 - PII: mask what identifies, hash what correlates, drop what's radioactive (secrets/credentials) — GDPR erasure needs an API + audit trail within 30 days.
 - Schema evolution: additive-only; consumers ignore unknown fields; never rename/retype in place.
 - Query languages: Splunk SPL (most powerful, $$$) · Kibana KQL/Lucene (mid) · Loki LogQL (cheapest, label-indexed only) — same cost/power order as Splunk > ELK > Loki elsewhere in this guide.
+- 🆕 Evolution: v1 direct-to-DB (blocks requests) → v2 agent + Kafka (all hot, unbounded cost) → v3 tiered + indexed + backpressure-aware (the target design).
+- 🆕 Indexing: inverted index (term → posting list) built per time-partitioned index (one per service per day) — enables both fast range queries and cheap whole-index tier migration.
+- 🆕 Tiers, one line each: hot = firefighting (ms search, priciest) · warm = last week (slower search, mid cost) · cold = for lawyers (restore-only, 10-20x cheaper).
 
 **Real-world anchors:** Kafka (LinkedIn, born for log aggregation) · ELK/EFK (open-source default) · Loki (cheap label-indexed alternative to ES) · Splunk (enterprise/SIEM, expensive) · Google Dapper (tracing ancestor) · WAS (grep-based alternative, no central store) · Log4Shell (logging pipeline as attack surface) · Facebook (sampling-mandatory scale) · OpenTelemetry (unifies logs/metrics/traces under one agent).
 

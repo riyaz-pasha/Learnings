@@ -1,5 +1,18 @@
 # Redis Pub/Sub — Deep Dive & Production Guide
 
+> **Enhancement notes:** this pass added a 🆕 capacity-limits subsection
+> (message size via `proto-max-bulk-len`, channel count, subscriber count via
+> `maxclients`) that was previously thin; a 🆕 concrete "disconnected
+> subscriber loses ~250 messages in 5 seconds at 50 msg/sec" diagram + worked
+> number right where the mental model is introduced; a 🆕 three-way Pub/Sub
+> vs Streams vs Kafka comparison table plus a 🆕 decision flowchart to
+> complement the existing two-way Pub/Sub-vs-Streams table; two new rows in
+> "Numbers worth knowing"; and one extended memory-hook analogy. The RESP3
+> paragraph was tightened into shorter sentences for clarity. Everything
+> else — the chat fan-out worked example, cluster/sharding mechanics,
+> keyspace notifications, multi-region section, mistakes/golden
+> rules/cheat sheet — was already strong and is left untouched.
+
 Companion deep-dive to `18-Pub-sub-FAANG-Guide.md`. That guide covers pub-sub
 as a concept; this one covers **one specific implementation** in the depth a
 "tell me about a pub-sub system you've actually used" follow-up demands.
@@ -37,6 +50,26 @@ flowchart LR
     R -->|delivered live, if listening| S2[Subscriber B]
     R -.->|never recorded anywhere| X[(No storage)]
 ```
+
+#### 🆕 What "lost if not connected" looks like, concretely
+
+Same picture, but one subscriber drops mid-stream — this is the diagram to
+draw when an interviewer asks "what happens if a subscriber isn't there":
+
+```mermaid
+flowchart TD
+    Pub["Publisher\n(publishing ~50 msg/sec)"] --> R[(Redis)]
+    R -->|"every message, live"| S1["Subscriber A — connected throughout\nreceives everything"]
+    R -.->|"B is disconnected right now"| Lost["🚫 Dropped —\nnever queued, never replayed"]
+    R -->|"resumes here, at 'now'"| S2["Subscriber B — network blip,\ndisconnected 5s, then resubscribes"]
+    R -->|"every message, live"| S3["Subscriber C — connected throughout\nreceives everything"]
+```
+
+Concrete numbers (illustrative, to reason about scale, not a benchmark): at
+~50 messages/sec, a 5-second blip for Subscriber B means roughly **250
+messages gone for good** — no error returned to the publisher, nothing
+waiting for B when it reconnects. B just starts receiving whatever gets
+published *after* it resubscribes.
 
 ## How it works internally
 
@@ -76,14 +109,13 @@ sequenceDiagram
     Note over C2: Connection B is untouched,\nfree to run normal commands
 ```
 
-**RESP3** (opt-in via `HELLO 3`) relaxes this: pub/sub messages arrive as
-out-of-band **push messages** multiplexed onto the same connection that's
-also running regular commands — modern client libraries (recent redis-py,
-Jedis, node-redis v4+) use this to avoid the two-connection dance under the
-hood, but the underlying constraint (a RESP2 subscriber connection is
-single-purpose) is what every interview-level mental model should start
-from, since it's still what you hit with `redis-cli` or older client
-versions.
+**RESP3** (opt-in via `HELLO 3`) relaxes this rule. Pub/sub messages arrive
+as out-of-band **push messages** on the same connection that's also running
+regular commands — no second connection needed. Modern client libraries
+(recent redis-py, Jedis, node-redis v4+) use RESP3 under the hood for
+exactly this reason. Still, start your mental model from RESP2: it's what
+`redis-cli` and older client versions use, and "a subscriber connection is
+single-purpose" is the rule that actually gets tested in interviews.
 
 ### The event loop delivers synchronously, in your request path
 
@@ -120,6 +152,35 @@ sequenceDiagram
   itself from a slow consumer eating server memory — and it means a slow
   subscriber doesn't just lag, it gets **dropped**, silently losing every
   message published from the moment of disconnect to reconnect+resubscribe.
+
+### 🆕 Capacity limits: message size, channel count, subscriber count
+
+Three limits worth having numbers for, since "what's the capacity of this
+component" is a standard FAANG follow-up:
+
+- **Message size.** Hard ceiling is `proto-max-bulk-len` (default **512MB**),
+  but that's a safety valve, not a target. Redis is single-threaded — a 5MB
+  message takes real, measurable time to copy into every subscriber's socket
+  buffer, and every other client on that Redis process (including your
+  ordinary `GET`/`SET` traffic) waits behind that copy. In practice, keep
+  pub/sub payloads small: a few hundred bytes to a few KB (a JSON event like
+  `{"orderId":42,"status":"shipped"}`) is the sweet spot. Treat anything over
+  ~100KB as a smell — publish an ID/reference instead and let the subscriber
+  fetch the full payload from elsewhere (illustrative threshold, not a
+  documented Redis limit).
+- **Number of channels.** No hard cap. A channel is just a string key in an
+  internal subscription table, so the real ceiling is memory, not a config
+  value — millions of distinct live channels on one node is realistic
+  (illustrative, not a benchmarked figure). This is why per-user channels
+  (`user.{id}.inbox`) scale fine on channel *count* alone; the real limit,
+  covered later, is subscribe/unsubscribe churn, not the number of channels
+  that exist.
+- **Number of subscribers.** Bounded by `maxclients` (default **10,000**
+  concurrent connections per Redis process, tunable) and by OS file
+  descriptor limits — a real, hard ceiling a fleet of app servers each
+  holding one subscriber connection can hit long before message volume ever
+  becomes the bottleneck. Sharded Pub/Sub in Cluster mode spreads this
+  connection count across shards, same as it spreads publish cost.
 
 ### Replication: replicas relay live, but still don't persist
 
@@ -577,6 +638,42 @@ flowchart LR
     Q -->|No| ST[Use Streams:\ndurable, replayable, consumer groups]
 ```
 
+#### 🆕 Pub/Sub vs Streams vs Kafka — the three-way version
+
+The table above answers "durable or not, within Redis." The bigger interview
+question is often "would you even use Redis here, or reach for Kafka?" —
+same trade-offs, Kafka added to the frame (see `18-Kafka-PubSub-Deep-Dive.md`
+for Kafka internals; this is just the comparison you need to pick correctly):
+
+| | Redis Pub/Sub | Redis Streams | Kafka |
+|---|---|---|---|
+| Persistence | None | Yes — in Redis memory (+AOF/RDB) | Yes — on disk, replicated |
+| Replay | No | Yes, from any ID | Yes, from any offset |
+| Consumer groups | No | Yes (`XREADGROUP`) | Yes — core primitive |
+| Ordering | Best-effort per channel; no guarantee across a disconnect | Guaranteed within a stream | Guaranteed within a partition |
+| Throughput ceiling | One Redis process | One Redis process (shares CPU/memory with your cache) | Scales horizontally across brokers/partitions |
+| Retention | None | Bounded by memory (`XTRIM`/`MAXLEN`) | Days to indefinite, on disk |
+| Ops cost | Lowest — it's Redis you already run | Low — same instance, more memory | Highest — its own cluster, its own on-call |
+| Best for | Ephemeral fan-out: presence, typing indicators, cache-invalidation broadcast | Durable-but-small event log, single-node scale: job queues, per-room chat history | High-volume, long-retention, many-independent-consumer backbone: analytics pipelines, cross-service event bus |
+
+#### 🆕 Decision flowchart: Pub/Sub, Streams, or Kafka?
+
+```mermaid
+flowchart TD
+    A{Can a subscriber miss\na message and nobody cares?} -->|Yes| PS[Redis Pub/Sub]
+    A -->|No, must not lose it| B{Does it need to outlive\nRedis's memory, or scale past\none node's throughput/retention?}
+    B -->|No — fits in one Redis,\nshort retention is fine| ST[Redis Streams]
+    B -->|Yes — high volume,\nlong retention, many\nindependent consumer groups| KF[Kafka]
+```
+
+**If X then Y, condensed:**
+- If a missed message is a shrug → **Pub/Sub**.
+- If a missed message is a bug, but the data is small and already lives
+  next to your cache → **Streams**.
+- If a missed message is a bug **and** you need weeks of retention, many
+  independent consumer groups, or throughput past one Redis process →
+  **Kafka**.
+
 ## Multi-region / production distribution
 
 Plain Redis Pub/Sub has **no native cross-region fan-out** — a
@@ -646,11 +743,18 @@ on every publish.
 | Cluster hash slots (used by both keys and sharded channels) | 16,384 |
 | Classic `PUBLISH` cost in an N-node cluster | O(N) — every node checked, regardless of subscriber location |
 | Sharded `SPUBLISH` cost | O(1) relative to cluster size — only the owning shard is touched |
+| 🆕 Message size ceiling (`proto-max-bulk-len`) | 512MB default — design for a few KB, not this limit |
+| 🆕 Max concurrent connections (`maxclients`) | 10,000 default, tunable — this caps subscriber count before message volume does |
 
 ## Memory hooks
 
 - **Live radio vs. podcast** — Pub/Sub is live (miss it, it's gone forever);
   Streams/Kafka is a podcast (recorded, rewind anytime within retention).
+- **🆕 Extend the analogy for the three-way choice**: Pub/Sub is live radio,
+  Streams is a podcast on one person's phone (recorded, but storage-bound
+  and single-owner), Kafka is the podcast network's master archive
+  (recorded, replicated across many machines, weeks of back-catalog, many
+  independent listeners each at their own pace).
 - **A subscribed connection is a one-way walkie-talkie** — once you key
   `SUBSCRIBE`, that connection can only listen/unsubscribe/ping — it can't
   also place a normal order (`GET`/`SET`) until it lets go of the button.

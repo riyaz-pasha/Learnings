@@ -1,5 +1,7 @@
 # Rate Limiter — FAANG System Design Interview Guide
 
+> **Enhancement notes:** This pass added an explicit **data model** for the rule DB and counter store (§8), an **architecture-evolution walkthrough** — v1 naive per-server counters → v2 centralized Redis → v3 local cache + async sync + fail-open circuit breaker (§10), a **clock-skew** deep dive for timestamp-based algorithms in a distributed setting (§10), and a **fail-open/fail-closed decision flowchart** built around a circuit breaker with a failure threshold and half-open probe (§16). It also added a couple of trade-off rows and cheat-sheet lines that reference this new material. Everything else — the algorithm deep dives, capacity math, race-condition fixes, real-world examples, and cheat sheets — was already solid and is left as-is. New material is marked with 🆕.
+
 ## 1. Mental Model
 
 A rate limiter is a **bouncer with a clipboard**, not a wall. It doesn't block traffic categorically — it counts, compares against a rule, and lets through only what the rule allows, rejecting (or queuing) the rest. The clipboard (counter state) is the hard part of this problem, not the door.
@@ -184,6 +186,43 @@ POST /rate_limit_check
 ```
 
 This is a small, stateless, horizontally-scalable RPC — deliberately dumb. All the hard state lives in the cache/store behind it, not in the service itself.
+
+### 🆕 Data model
+
+Two stores, two very different shapes and access patterns — don't design them the same way.
+
+**Rule database — source of truth, low QPS, read through the cache**
+
+| Field | Type | Example |
+|---|---|---|
+| `rule_id` (PK) | string | `rl_messaging_marketing` |
+| `domain` | string | `messaging` |
+| `descriptor_key` | string | `message_type` |
+| `descriptor_value` | string | `marketing` |
+| `requests_per_unit` | int | `5` |
+| `unit` | enum | `DAY` |
+| `algorithm` | enum | `sliding_window_counter` |
+| `updated_at` | timestamp | — |
+
+This table is tiny — hundreds to low thousands of rows for an entire company's worth of rules — so it's cheap to cache in full, in memory, on every gateway node (that's the "throttle rules cache" from the component diagram above).
+
+**Counter store — the hot path, Redis, illustrative key layout for a sliding window counter:**
+
+```
+key:   ratelimit:{domain}:{descriptor_key}:{descriptor_value}:{window_start}
+value: integer counter
+TTL:   2 × window_size   (window auto-expires; no cleanup job needed)
+```
+
+Example: `ratelimit:messaging:user_id:42981:2026-07-18T01:00` → `12`, with a 120s TTL for a 60s window — the key deletes itself, so there's nothing to garbage-collect.
+
+Token bucket needs slightly richer state per key, since it tracks more than a count:
+
+```
+value: { tokens: 7, last_refill_ts: 1737180032 }   # a small hash, not a scalar
+```
+
+**Memory hook:** the rule DB is small and slow-changing — cache it whole. The counter store is huge and hot — shard it, TTL it, and never let a key outlive the window it belongs to.
 
 ## 9. Rate-Limiting Algorithms
 
@@ -381,6 +420,61 @@ Real systems (Envoy/Lyft `ratelimit`, Stripe) mostly land on **centralized store
 
 A second, independent axis: **shared counter vs. per-user counter.** Almost every real system uses per-key counters — a global bucket only makes sense for protecting a shared downstream resource itself (e.g. "no more than 1000 total writes/sec to this database, regardless of who's asking").
 
+### 🆕 Architecture evolution: v1 → v2 → v3
+
+Most candidates jump straight to "Redis with Lua scripts." Narrating *why* the simpler versions break first is what shows you derived the design instead of memorizing it.
+
+**v1 — in-memory counter per server (breaks first)**
+
+```mermaid
+flowchart LR
+    subgraph "v1: Per-server in-memory counters"
+    C1[Client] --> LB1[Load Balancer]
+    LB1 --> S1["Server 1<br/>local map: user_42 → 3"]
+    LB1 --> S2["Server 2<br/>local map: user_42 → 3"]
+    LB1 --> S3["Server 3<br/>local map: user_42 → 3"]
+    end
+```
+
+Each server counts in its own process memory. Zero network cost, but with 3 servers behind a round-robin LB, a client limited to 5 requests/min can actually get up to `3 × 5 = 15/min`, because each server enforces the limit only against its own third of the traffic. Breaks the moment there's more than one server — i.e., immediately, in any real deployment.
+
+**v2 — centralized Redis counter (correct, but a hop on every request)**
+
+```mermaid
+flowchart LR
+    subgraph "v2: Shared Redis counter"
+    C2[Client] --> LB2[Load Balancer]
+    LB2 --> S4[Server 1]
+    LB2 --> S5[Server 2]
+    LB2 --> S6[Server 3]
+    S4 -->|"INCR user_42<br/>(atomic)"| Redis[(Redis)]
+    S5 -->|"INCR user_42<br/>(atomic)"| Redis
+    S6 -->|"INCR user_42<br/>(atomic)"| Redis
+    end
+```
+
+All servers check/increment the same Redis key, so the limit holds regardless of which server handles the request — this fixes v1's overcounting. The cost: every request now pays a synchronous round trip to Redis (~0.5–1ms same-DC, per §14) before it can be forwarded, and Redis becomes a dependency of every single request.
+
+**v3 — local cache + async sync + fail-open circuit breaker (production shape)**
+
+```mermaid
+flowchart LR
+    subgraph "v3: Local cache, async sync, circuit breaker"
+    C3[Client] --> LB3[Load Balancer]
+    LB3 --> S7["Server<br/>local cache, short TTL"]
+    S7 --> Decision{Under limit<br/>per local cache?}
+    Decision -->|allow / reject now| C3
+    S7 -.->|"async: periodic sync<br/>e.g. every 100ms–1s"| Redis3[(Redis)]
+    S7 --> CB{"Circuit breaker:<br/>N consecutive Redis failures?"}
+    CB -->|closed, Redis healthy| Redis3
+    CB -->|"open, Redis down →<br/>fall back to fail policy (§16)"| Decision
+    end
+```
+
+Servers keep a short-lived local cache of counts, synced from Redis periodically instead of on every request — most requests are decided from local memory. A circuit breaker watches Redis health: after N consecutive failures/timeouts it "opens," and the node stops hammering a dead store and falls back to its configured fail-open/fail-closed policy (§16) instead; it periodically half-opens to probe whether Redis has recovered. This trades a small amount of precision — a client can burst slightly across one sync interval — for lower latency and resilience to store outages. It's the same accuracy-vs-cost trade-off that runs through every algorithm in §9, now applied to the architecture itself. This is also what "centralized store + local caching/approximation" (mentioned above) looks like concretely.
+
+**Memory hook:** *v1 forgets to share, v2 shares but waits on every request, v3 shares lazily and knows when to stop asking.*
+
 ### Routing a key to the right counter (consistent hashing)
 
 ```mermaid
@@ -393,6 +487,23 @@ flowchart LR
 ```
 
 When rate limiting uses per-node local state, every request for a given key must land on the *same* node to be counted correctly. Consistent hashing (or sticky sessions at the LB) achieves that — and unlike a plain `hash(key) % N`, it only remaps the fraction of keys owned by a node when it dies, instead of reshuffling everything.
+
+### 🆕 Clock skew across distributed nodes
+
+Every algorithm except a plain request-count-only fixed window leans on a timestamp: token bucket's `last_refill_ts`, sliding window log's per-request timestamps, sliding window counter's window boundaries. In a distributed rate limiter, that timestamp is often generated on whichever gateway node happened to handle the request — and machine clocks drift relative to each other.
+
+Concretely: NTP-synced servers typically stay within single-digit milliseconds of each other, but a misconfigured or unsynced node can drift by seconds or more. If node A's clock reads 5 seconds ahead of node B's:
+
+- **Token bucket** refilling "1 token/sec" can look like it refilled ~5 extra (or 5 fewer) tokens' worth of time depending on which node computed the elapsed time, letting a client slip through that should've been throttled — or the reverse.
+- **Sliding window log/counter** can place a request in the wrong window near a boundary, reintroducing the exact double-counting the sliding window design exists to avoid.
+
+**Fixes, cheapest first:**
+
+1. **Compute "now" at the store, not on the gateway node.** Redis's own `TIME` command (or `redis.call('TIME')` inside the Lua script doing the check) gives every caller the same clock — the only clock that matters is the shared store's, not each gateway's local one.
+2. **Run NTP/chrony on every node** as a production dependency, not an afterthought. This keeps drift to single-digit milliseconds, which is negligible against window sizes measured in seconds to minutes.
+3. **Prefer coarser windows where precision isn't critical.** A 60-second window swallows a few milliseconds of skew for free; only sub-second limits are meaningfully sensitive to it.
+
+**Memory hook:** *if correctness depends on "now," ask whose clock "now" is.*
 
 ### Going global: multi-region rate limiting
 
@@ -532,6 +643,8 @@ Split the work into an **online path** (check cached count, respond immediately)
 | On store failure | Fail-closed (reject) | Fail-open (allow) | Security-critical limit → fail-closed. Availability-critical service → fail-open |
 | Granularity | Single global limit | Per-user / per-IP / per-API-key / per-endpoint | Real systems almost always need multiple tiers simultaneously |
 | Global scope | Real-time centralized | Local lease + async reconcile | Cross-region real-time is a latency mistake — lease-based wins (§10) |
+| Timestamp source (🆕) | Each gateway node's local clock | Shared store's clock (e.g. Redis `TIME`) | Any distributed deployment of a timestamp-based algorithm → shared clock, to avoid drift (§10) |
+| Store-outage handling (🆕) | Block/retry until the store responds | Circuit breaker → fail-open/closed per rule | Never let a dead store hold every request hostage — trip a breaker and apply the pre-decided policy (§16) |
 
 ## 16. Failure Modes
 
@@ -557,6 +670,26 @@ stateDiagram-v2
 - **Hot key / celebrity problem** — one viral account or one shared API key can pin a single shard, degrading everyone sharing that shard. Mitigate with sharded counters (§11) or a dedicated higher-capacity tier for known-large keys.
 - **Rule cache staleness** — the rules retriever polls on an interval, so a just-changed limit takes effect with a delay. Fine for policy changes, not fine if reacting to an active attack — pair with an out-of-band "kill switch" push path for emergencies.
 - **Thundering herd on window reset** — fixed-window and token-bucket-refill both create a moment where a lot of previously-blocked traffic becomes eligible at once; the sliding window counter and leaky bucket exist partly to avoid this.
+
+#### 🆕 Fail-open vs fail-closed decision flowchart
+
+The stateDiagram above shows the *states*; this shows the *decision logic* a node actually runs, wired through a circuit breaker so a dead store doesn't hang every request while it decides:
+
+```mermaid
+flowchart TD
+    Req[Request needs a rate-limit check] --> Store{Can we reach the<br/>counter store?}
+    Store -->|Yes, healthy| Normal[Check counter normally,<br/>allow/reject per limit]
+    Store -->|No / timeout| Count{Consecutive failures<br/>≥ threshold N?}
+    Count -->|"No — still under N"| Retry[Treat as a transient blip:<br/>retry once, then decide]
+    Count -->|"Yes → circuit breaker OPENS"| Policy{What is this<br/>rule protecting?}
+    Policy -->|"Security / cost<br/>(login, payments, paid 3rd-party calls)"| FailClosed[Fail-closed:<br/>reject or queue until store recovers]
+    Policy -->|"General availability<br/>(most public API traffic)"| FailOpen[Fail-open:<br/>let traffic through unthrottled]
+    FailOpen --> Probe[Breaker periodically<br/>half-opens to test the store]
+    FailClosed --> Probe
+    Probe -->|Store responds OK| Normal
+```
+
+The threshold `N` and the per-rule policy are both config, decided in advance — the breaker just automates *when* the policy kicks in, so no single slow request has to wait out a full timeout to find out.
 
 ```mermaid
 pie title Typical rate-limiter check outcomes at steady state
@@ -614,6 +747,7 @@ Volunteering the rate limiter unprompted in these contexts is a strong signal of
 - **Pick the algorithm from the requirement, not from familiarity** — burst-tolerant vs. burst-smoothing vs. exact vs. cheap are different questions with different right answers.
 - **One limit is rarely enough.** Real systems layer per-user, per-IP, per-API-key, per-endpoint, and global limits simultaneously.
 - **Global real-time precision doesn't scale across regions — lease-and-reconcile does.**
+- **If a decision depends on "now," agree on whose clock counts.** Compute timestamps at the shared store, not on each gateway node — clock drift silently breaks token-bucket refill and sliding-window boundaries (§10).
 
 ## 21. One-Glance Mind Map
 
@@ -646,6 +780,8 @@ mindmap
       Consistent hashing for key routing
       Sharded counters for hot keys
       Global - local leases plus async reconcile
+      Clock skew - agree on the store's clock, not each node's
+      v1 to v3 evolution - per-server to Redis to local cache plus breaker
     Concurrency
       Atomic INCR over locks
       Lua scripts for multi-step atomicity
@@ -655,6 +791,7 @@ mindmap
     Failure policy
       Fail-open - availability first
       Fail-closed - security first
+      Circuit breaker - opens after N failures, half-opens to probe
     Always return
       429
       Retry-After
@@ -683,15 +820,17 @@ mindmap
 Rate = R_prev × (window − overlap)/window + R_curr
 ```
 
-**Distributed state:** centralized store (Redis/Cassandra) = correct but adds latency; per-node state = fast but needs sticky routing (consistent hashing) and tolerates momentary overage. Hot keys → sharded counters. Multi-region → local leases + async reconcile (Doorman model), never real-time cross-region checks.
+**Distributed state:** centralized store (Redis/Cassandra) = correct but adds latency; per-node state = fast but needs sticky routing (consistent hashing) and tolerates momentary overage. Hot keys → sharded counters. Multi-region → local leases + async reconcile (Doorman model), never real-time cross-region checks. Architecture matures v1 (naive per-server) → v2 (centralized Redis) → v3 (local cache + async sync + fail-open circuit breaker) (🆕 §10).
 
-**Concurrency fix:** atomic `INCR` / Lua script > locking.
+**Data model (🆕):** small rule DB (rule/domain/descriptor/limit/window), cached whole in memory; huge hot counter store keyed `ratelimit:{domain}:{key}:{value}:{window}` with a self-expiring TTL (§8).
+
+**Concurrency fix:** atomic `INCR` / Lua script > locking. Compute timestamps at the store's clock, not each node's, to avoid clock-skew bugs in token bucket / sliding window (🆕 §10).
 
 **Critical path:** online check (cache read, respond now) + offline update (persist count async).
 
 **Capacity math order:** QPS → ops/sec on store → shard count → memory/key → total memory → replication → bandwidth. Memory is cheap; ops/sec and RTT are the real constraint.
 
-**Failure policy:** fail-closed for security-critical limits, fail-open for availability-critical services — pick per rule.
+**Failure policy:** fail-closed for security-critical limits, fail-open for availability-critical services — pick per rule. Wire it through a circuit breaker (N consecutive failures → trip → apply policy → periodically half-open to probe) so no request blocks on a dead store (🆕 §16).
 
 **Always return:** `429` + `Retry-After` + `X-RateLimit-Limit/Remaining/Reset`.
 

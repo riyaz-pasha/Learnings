@@ -1,5 +1,17 @@
 # Spectacular Failures — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added — (1) a "🆕 Blast radius & the actual fix" subsection to
+> each of the three incident deep dives (§3.1–3.3) with concrete/illustrative impact numbers and
+> the real postmortem-documented remediation, distinct from the pre-existing "what would have
+> prevented it" list; (2) two new "🆕 architecture evolution" before/after diagrams (Meta §3.1, AWS
+> Dec 2021 §3.3), matching the before/after diagram your Kinesis section already had; (3) a new
+> "🆕 Postmortem data model (ER diagram)" in §4.8; (4) concrete numeric examples added to the
+> Circuit Breaker (§4.6) and Backpressure (§4.11) sections; (5) an extra "Illustrative blast radius
+> / actual fix" column added to the incident comparison table in §7; (6) one typo fix
+> ("mathermatical" → "mathematical"). Everything else — structure, section order, existing
+> diagrams, tables, and cheat-sheets — is untouched; this was already a strong, tightly-written
+> chapter with almost no hand-wavy language to clean up.
+
 > Source chapter type: **concept + real-world incident case studies**. This isn't a component or a
 > full system — it's the "resilience" muscle every system design interview eventually tests. The
 > interviewer rarely asks "tell me about the Facebook outage." They ask "what happens if this node
@@ -120,7 +132,7 @@ downtime_per_year = (1 - availability) × 365.25 × 24 × 60   minutes
 
 **Composite availability matters more than any single component's number.** If a request touches
 5 services each at 99.9%, naive series composition gives `0.999^5 ≈ 99.5%` — worse than any one
-of them. This is the mathermatical reason "add a dependency" is never free, and why the incidents
+of them. This is the mathematical reason "add a dependency" is never free, and why the incidents
 below turned single-service problems into multi-service ones: Cognito depending on Kinesis,
 CloudWatch depending on Kinesis, Lambda depending on CloudWatch — each additional hop multiplies
 down the effective availability, and a "just 99.9%" internal service becomes the ceiling for
@@ -228,6 +240,61 @@ error on the happy path and introduces a new single point of failure on the unha
 mitigation isn't "less automation," it's "make sure the *rollback* path doesn't share a dependency
 with the *forward* path."
 
+#### 🆕 Blast radius & the actual fix
+
+**Impact, concretely** (widely-reported public figures, not Meta-confirmed internal metrics):
+- **Duration**: ~6 hours of total unreachability (started ~11:40am ET, restored ~9:00pm UTC / mid-to-late
+  afternoon ET, October 4, 2021).
+- **Reach**: all of Facebook, Instagram, WhatsApp, Messenger, and Oculus went dark simultaneously —
+  services with a combined reported user base on the order of **3+ billion people**, though not all
+  were active/impacted concurrently; treat this as the *addressable* blast radius, not concurrent
+  users-affected.
+- **Revenue**: independent media estimates at the time put Facebook's lost ad revenue **on the order
+  of tens of millions of dollars** for the ~6-hour window (illustrative estimate — Meta itself never
+  published an official revenue-loss figure).
+- **Secondary blast radius**: every third-party site/app using "Login with Facebook" as its only
+  auth option also broke — a SPOF Meta's own postmortem didn't have to fix, because it wasn't
+  Meta's system, but interviewers love this detail as an example of blast radius crossing a
+  company boundary.
+
+**Actual fix (per Meta's public engineering postmortem)**:
+- Hardened the audit/review tooling so a command class that can disconnect backbone capacity gets
+  additional automated checks before it's allowed to execute.
+- Added safeguards to slow down / rate-limit this class of global network change so a single command
+  can't take effect everywhere at once.
+- Built a more robust way to stop this kind of accidental backbone/DNS-withdrawal cascade once
+  detected, instead of relying on the fail-safe to always be correctly scoped.
+- Invested in faster, more resilient methods for engineers to gain physical/emergency access to
+  data centers when the normal (network-dependent) remote tooling is unusable.
+
+**Lessons to cite in an interview** (short list, say 2-3 of these out loud):
+- "The rollback path shared a dependency with the thing that broke — that's the root design flaw,
+  not the backbone bug itself."
+- "A fail-safe designed for a partial failure fired on a total failure it was never tested against —
+  I'd explicitly game-day the 'everything is gone' case."
+- "Blast radius crossed a company boundary — third-party sites using Facebook login went down too;
+  a SPOF audit has to include how *other people* depend on you."
+
+#### 🆕 Architecture evolution — before/after the fix
+
+```mermaid
+graph LR
+    subgraph "Before: Oct 2021"
+        direction TB
+        CMD1[Global maintenance command] --> AUDIT1[Single audit tool<br/>— only gate]
+        AUDIT1 --> BB1[ALL backbone links<br/>can be touched at once]
+        BB1 -. "0-of-N reachable is an<br/>untested fail-safe trigger" .-> DNSFS1[DNS fail-safe withdraws<br/>routes GLOBALLY]
+        DNSFS1 -. "shares network with<br/>remote engineering tools" .-> ACCESS1[Break-glass access<br/>ALSO depends on the<br/>same network — SPOF]
+    end
+    subgraph "After: the fix"
+        direction TB
+        CMD2[Global maintenance command] --> AUDIT2[Hardened audit tool +<br/>staged/rate-limited rollout]
+        AUDIT2 --> BB2[Blast radius capped —<br/>can't disconnect ALL links<br/>in one shot]
+        BB2 -. "faster stop mechanism<br/>if fail-safe misfires" .-> DNSFS2[DNS fail-safe scoped /<br/>can be halted quickly]
+        DNSFS2 -. "independent of<br/>network-dependent tooling" .-> ACCESS2[Hardened out-of-band<br/>emergency physical access]
+    end
+```
+
 #### Cheat-sheet — Meta 2021
 - BGP withdrawal + DNS TTL expiry = "the internet forgets how to find you," not "the servers are down."
 - A health-check fail-safe can itself become the outage — test fail-safes against total, not partial, failure.
@@ -300,6 +367,40 @@ delays → AWS's own public status dashboard (dependent on Cognito) unable to po
 (add servers) can hit a nonlinear ceiling (O(n²) mesh cost). And when your monitoring tool is built
 on the thing that's failing, you lose eyes exactly when you need them most — this is the second
 time in this guide the same anti-pattern appears (cf. Meta's internal tools, §3.1).
+
+#### 🆕 Blast radius & the actual fix
+
+**Impact, concretely**:
+- **Duration**: the Kinesis front-end fleet itself was substantially recovered in **~5 hours**
+  (widely-cited start ~5:15am PST, core mitigation by mid-morning, November 25, 2020). Some
+  downstream, dependent services (parts of Cognito-backed auth, CloudWatch-dependent alarms/
+  dashboards) took **on the order of several more hours** to fully drain backlog and return to
+  normal — illustrative estimate, not an exact per-service figure.
+- **Reach**: dozens of well-known consumer products had visible, publicly-reported outages that day
+  — smart-home apps (e.g., iRobot/Roomba, Ring), delivery/logistics dashboards, and numerous SaaS
+  status pages lit up on Downdetector simultaneously, because they all sat on Cognito/CloudWatch/
+  Lambda without realizing those shared a single Kinesis front-end fleet.
+- **Self-inflicted wound**: AWS's own public Service Health Dashboard couldn't be updated in
+  real time during the incident, because posting to it required Cognito — the status page and the
+  outage shared a dependency.
+
+**Actual fix (per AWS's public post-event summary)**:
+- Moved to a smaller number of larger front-end servers, reducing the total thread count needed to
+  maintain the full-mesh shard map at the same fleet capacity.
+- Separated tier-0 internal consumers (Cognito, CloudWatch) onto their own isolated front-end fleet,
+  so a capacity change on the customer-facing fleet can't starve AWS's own auth/observability plane
+  — this is the bulkhead redesign shown in the diagram below.
+- Sped up the cold-start/cache-rebuild path so a fleet-wide restart doesn't require every server to
+  simultaneously rebuild its full mesh from scratch.
+- Decoupled the Service Health Dashboard's update mechanism from the services it reports on.
+
+**Lessons to cite in an interview**:
+- "A capacity add that looks linear can hit a nonlinear (O(n²)) ceiling — I'd game-day capacity
+  changes against the actual topology cost, not just functional correctness."
+- "Tier-0 internal consumers (auth, monitoring) sharing a fleet with customer traffic is a hidden
+  SPOF — I'd bulkhead them onto isolated capacity from day one, not after an outage."
+- "Even the status page can share the outage's blast radius — I'd put health reporting on a
+  dependency chain that doesn't include the thing being reported on."
 
 **Architecture evolution — before/after the fix**: this is the clearest "why the improved
 architecture survives the same failure" example in the whole guide.
@@ -416,6 +517,59 @@ and famously a long tail of consumer/IoT products) unable to create new resource
 instances stayed up), but it only pays off if the control plane's own dependencies (network,
 DNS, monitoring) are *also* isolated from the failure. Partial decoupling gives partial credit,
 not full protection.
+
+#### 🆕 Blast radius & the actual fix
+
+**Impact, concretely**:
+- **Duration**: roughly **~5-8 hours** end to end (started ~7:30am PST, core network issue mitigated
+  within a few hours, full resolution across every dependent service by early-to-mid afternoon PST,
+  December 7, 2021) — consistent with the "~8 hours" figure already used earlier in this section for
+  the full cascade.
+- **Reach**: high-profile, publicly-reported impact included Amazon's own retail site and delivery
+  operations, Ring, Amazon Prime Video/some Alexa features, and third-party services built on AWS
+  (Disney+, Doordash, and others reported degraded service on Downdetector) — illustrative of breadth,
+  not a confirmed customer count.
+- **What survived**: already-running EC2 instances and already-provisioned load balancers kept
+  serving live traffic throughout — the control-plane/data-plane split held up for existing capacity,
+  even though it failed for anything that needed to be *newly created* during the window.
+
+**Actual fix (per AWS's public post-event summary)**:
+- Added throttles/rate limits on the class of automated scaling action that triggered the initial
+  connection-activity surge, so a single automated action can't produce an unbounded spike again.
+- Expanded the capacity of the networking devices that bridge the internal and main AWS networks, so
+  the same surge size no longer saturates the bridge.
+- Improved fault isolation between the internal network's monitoring/telemetry path and its data
+  path, so operators don't lose real-time visibility the next time the internal network is
+  congested.
+- Sped up and hardened the internal DNS failover path within the internal network itself.
+
+**Lessons to cite in an interview**:
+- "Data plane survived, control plane didn't — I'd explicitly say which one my design keeps alive
+  under a dependency failure, and volunteer that distinction unprompted."
+- "A 'separate' internal network is only as isolated as its bridge capacity — I'd ask what the bridge's
+  own failure mode and capacity ceiling are before calling two networks independent."
+- "Retries without backoff amplified the very congestion they were trying to route around — I'd
+  always pair 'retry' with backoff, jitter, and a cap in the same breath."
+
+#### 🆕 Architecture evolution — before/after the fix
+
+```mermaid
+graph LR
+    subgraph "Before: Dec 2021"
+        direction TB
+        SCALE1[Automated internal-network<br/>scaling action — unthrottled] --> SURGE1[Connection-activity surge]
+        SURGE1 --> BRIDGE1[Fixed-capacity bridge<br/>internal ↔ main network]
+        BRIDGE1 -. "saturates — no headroom,<br/>no circuit breaker" .-> CONG1[Congestion collapse]
+        CONG1 -. "monitoring rides the<br/>same congested path" .-> BLIND1[Operators blind —<br/>fall back to raw logs]
+    end
+    subgraph "After: the fix"
+        direction TB
+        SCALE2[Automated internal-network<br/>scaling action — throttled] --> SURGE2[Connection activity<br/>capped at source]
+        SURGE2 --> BRIDGE2[Expanded bridge capacity<br/>+ headroom]
+        BRIDGE2 -. "surge no longer<br/>saturates the bridge" .-> CONG2[No congestion collapse]
+        BRIDGE2 -. "monitoring path isolated<br/>from data path" .-> SAFE2[Operators keep<br/>real-time visibility]
+    end
+```
 
 #### Cheat-sheet — AWS Dec 2021
 - Data plane (already-running resources) survived; control plane (creating new resources) didn't — know this distinction and volunteer it in interviews.
@@ -582,6 +736,12 @@ stateDiagram-v2
     HalfOpen: Half-Open — a few trial requests allowed through
 ```
 
+**Concrete thresholds, so this isn't abstract**: open the breaker once error rate exceeds 50% over
+a rolling window of 20 requests; stay open for a 30-second cooldown; then allow 5 trial requests
+through in half-open — if all 5 succeed, close; if any fails, reopen and double the cooldown (30s →
+60s → 120s, capped). Those numbers are illustrative starting points, not universal constants — tune
+the window size and threshold to the traffic volume of the dependency being protected.
+
 **Graceful degradation** is the companion move: when a non-critical dependency fails, serve a
 degraded response instead of an error — cached/stale data, a simplified feature set, or a default
 value — rather than failing the whole request. "Cache failure must never mean system failure" is
@@ -616,6 +776,51 @@ what happened. All three incidents above were followed by detailed public postmo
 signal of engineering maturity an interviewer will respect you citing). A good postmortem answers:
 timeline, customer impact, root cause, contributing factors, what went well, what didn't, and a
 committed list of follow-up action items with owners.
+
+#### 🆕 Postmortem data model (ER diagram)
+
+If an interviewer asks you to sketch what a postmortem/incident-tracking system actually stores,
+this is the shape — and naming it shows you think of "process maturity" as a real data model, not
+just a cultural value:
+
+```mermaid
+erDiagram
+    INCIDENT ||--o{ TIMELINE_EVENT : "has"
+    INCIDENT ||--o{ CONTRIBUTING_FACTOR : "has"
+    INCIDENT ||--o{ ACTION_ITEM : "produces"
+    INCIDENT }o--o{ SERVICE : "affects"
+    INCIDENT {
+        string incident_id
+        string severity
+        datetime detected_at
+        datetime mitigated_at
+        datetime resolved_at
+        string status
+    }
+    TIMELINE_EVENT {
+        datetime timestamp
+        string description
+        string source
+    }
+    CONTRIBUTING_FACTOR {
+        string description
+        string category
+    }
+    ACTION_ITEM {
+        string description
+        string owner
+        date due_date
+        string status
+    }
+    SERVICE {
+        string name
+        string tier
+    }
+```
+
+**Interview line**: "an incident isn't one row, it's a small graph — a timeline, one-or-more
+contributing factors, and a list of owned action items with due dates. If the action-item table is
+empty for a resolved incident, that's the actual failure — not the outage itself."
 
 ### 4.9 Slow-but-alive: the hardest failure mode
 
@@ -681,6 +886,13 @@ before user-facing reads) so headroom is preserved for what matters.
 Both are the callee-side complement to the AWS Dec-2021 lesson: the bridging devices had no way to
 push back on the connection surge or shed excess connection attempts, so every unit of offered load
 was accepted until the whole channel collapsed.
+
+**Concrete example**: a downstream stage can durably process 5K writes/sec. Upstream, during a
+burst, produces 20K writes/sec — a 15K/sec surplus. With an unbounded queue, that surplus queues up
+at 15K/sec; a 60-second burst alone queues ~900K unprocessed writes before the process runs out of
+memory. Backpressure fixes this by signaling upstream to slow to ~5K/sec at the source. Load
+shedding fixes it differently: reject the extra 15K/sec at the front door immediately (a cheap
+`503`), so the 5K/sec that gets in is served well instead of all 20K/sec being served badly.
 
 **Interview line**: "backoff+jitter is what the *caller* does; load shedding and backpressure are
 what the *callee* does — a resilient system needs both sides implemented, not just one."
@@ -981,11 +1193,14 @@ costs you.
 retries with backoff + jitter + a retry budget cap.
 
 **The three incidents, one line each**:
-| Incident | Trigger | Core failure pattern |
-|---|---|---|
-| Meta, Oct 2021 | Backbone audit command missed by review tool | Fail-safe (DNS BGP withdrawal) fired on an untested "0 of N" condition; recovery tools shared the fault's blast radius |
-| AWS Kinesis, Nov 2020 | Small front-end capacity add | O(n²) thread/mesh ceiling breached; internal control/observability consumers shared fate with customer data plane |
-| AWS US-EAST-1, Dec 2021 | Automated internal-network scaling action | Retry storm congesting the internal↔main network bridge; control plane degraded while data plane survived |
+| Incident | Trigger | Core failure pattern | 🆕 Duration (~) | 🆕 Actual fix |
+|---|---|---|---|---|
+| Meta, Oct 2021 | Backbone audit command missed by review tool | Fail-safe (DNS BGP withdrawal) fired on an untested "0 of N" condition; recovery tools shared the fault's blast radius | ~6 hrs | Hardened audit tool, rate-limited global network commands, out-of-band emergency DC access |
+| AWS Kinesis, Nov 2020 | Small front-end capacity add | O(n²) thread/mesh ceiling breached; internal control/observability consumers shared fate with customer data plane | ~5 hrs (core), longer for some dependents | Fewer/larger front-end nodes, dedicated tier-0 fleet for Cognito/CloudWatch, faster cold-start rebuild |
+| AWS US-EAST-1, Dec 2021 | Automated internal-network scaling action | Retry storm congesting the internal↔main network bridge; control plane degraded while data plane survived | ~5-8 hrs | Throttled the triggering scaling action, expanded bridge capacity, isolated monitoring path |
+
+*(Duration figures are widely-reported/illustrative — see each incident's "🆕 Blast radius & the
+actual fix" subsection in §3 for the caveats and sourcing.)*
 
 **Patterns to name unprompted**: SPOF, cascading failure, retry storm, thundering herd, control
 plane vs data plane, blast radius/bulkhead, circuit breaker, graceful degradation, chaos

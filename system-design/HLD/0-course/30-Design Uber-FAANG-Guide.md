@@ -1,5 +1,7 @@
 # Designing Uber — FAANG System Design Interview Guide
 
+> **Enhancement notes:** This pass added things a FAANG interviewer would probe for that weren't explicit yet: a `cancelRide` API, a concrete search-radius-expansion flowchart for "no driver found nearby," a surge-multiplier computation flowchart (the mechanics were described in prose but never diagrammed), and a trip-to-payment state linkage showing that `Completed` isn't really the last state once you account for async capture. It also added two failure-mode rows (rider no-show at pickup, rider disconnect mid-trip — only the driver-side case existed before) and lightly rewrote two dense paragraphs (Section 7.5 Stage 1, Section 11.3 DeepETA) into shorter sentences without changing their content or numbers. New subsections and diagrams are tagged `🆕`. Everything else — the mental model, capacity math, existing diagrams, mnemonics, and golden rules — is untouched because it already worked.
+
 ## 1. Mental model
 
 Uber is **three coupled real-time systems wearing one app icon**:
@@ -70,7 +72,7 @@ Distinguish from adjacent problems:
 | 7 | Show live trip updates | Both parties see position + time remaining |
 | 8 | End trip & charge | Driver ends trip → fare computed → payment captured |
 | 9 | Manage payments | Auth → capture → payout to driver, refunds |
-| 10 | Cancellations | Either party can cancel pre-pickup |
+| 10 | Cancellations | Either party can cancel pre-pickup; a late cancellation or rider no-show after the driver arrives can carry a fee — a common interviewer follow-up |
 
 **Explicitly out of scope unless asked:** ride pooling/UberPool matching, surge pricing UI, driver onboarding/KYC, ratings, in-app chat, multi-stop trips. Say this out loud — it shows scoping discipline.
 
@@ -269,6 +271,7 @@ Nodes needed (2 TB/node) ≈ 71 TB / 2 TB ≈ 36 nodes — far fewer than the ~1
 | Confirm pickup | `confirmPickup(driverID, riderID, timestamp)` | Marks trip start |
 | Show trip updates | `showTripUpdates(tripID, riderID, driverID, driverLat, driverLong, timeElapsed, timeRemaining)` | Live trip telemetry |
 | End the trip | `endTrip(tripID, riderID, driverID, timeElapsed, lat, long)` | Triggers fare calc + payment |
+| 🆕 Cancel a ride | `cancelRide(tripID, initiatorID, initiatorType, reason)` | Either party can call it; free before a driver is assigned, may incur a fee once the driver has arrived (no-show) — see Section 17 |
 
 ### 7.2 Data model / schema
 
@@ -413,7 +416,7 @@ flowchart LR
     API -- "sync charge call" --> PSP["PSP"]
 ```
 
-*What breaks:* a client-side poll every 5s from 3M active drivers is **600,000 polling requests/sec just to ask "any updates?"** — worse than the eventual push-based 750K/sec write load, and most of those polls return "nothing changed." Every location update is also a write into the same relational table that riders/trips/payments live in, so row-level lock contention and index bloat on a constantly-churning `driver_location` column drag down the whole DB, including trip and payment queries. One DB, one region — a single outage strands every rider globally, and payment capture blocking on the PSP inside the same request as trip-end makes the user wait 200ms-2s at the worst possible moment.
+*What breaks:* 3M active drivers polling every 5s means **600,000 requests/sec just to ask "anything new?"** Most of those calls come back "nothing changed" — wasted work, and still not far off the eventual 750K/sec push-based load, just far less useful per request. Worse, every location update writes into the same relational table as riders, trips, and payments. That churn causes row-level lock contention and index bloat on `driver_location`, which slows down unrelated trip and payment queries too. It's also one DB in one region, so a single outage strands every rider globally. And payment capture blocks on the PSP inside the same request as trip-end, so the user waits 200ms-2s at the worst possible moment — right when they're trying to get out of the car.
 
 **Stage 2 — push-based location + geo-index + async payment:**
 
@@ -690,12 +693,30 @@ flowchart TD
 - **V**ehicle type match (economy/XL/pool)
 - **E**n-route status (prefer drivers already heading that direction over one who'd need a U-turn)
 
+### 🆕 10.3 Search-radius expansion when no driver is found
+
+Sometimes the geo-index query in Section 10.2 comes back empty, or every candidate it does return rejects the offer — a sparse suburb at 2am, or a sudden local supply crunch. Don't fail the request. Widen the search net.
+
+```mermaid
+flowchart TD
+    A["Query geo-index at radius r = 1 km<br/>(k-ring 1 in H3 terms)"] --> B{"Candidate driver<br/>found and accepts<br/>within ~15s?"}
+    B -- yes --> C["Dispatch normally<br/>(Section 10.2 batched matching)"]
+    B -- no --> D{"r < r_max (e.g. 5 km)?"}
+    D -- yes --> E["Widen radius (~2-3x per step:<br/>1 km -> 3 km -> 5 km)<br/>and requery"] --> A
+    D -- no --> F["No supply nearby:<br/>show rider an honest wait estimate,<br/>or a surge-adjusted price to pull in supply"]
+```
+
+**Illustrative numbers, not a documented Uber constant** — the pattern is what matters, not the exact figures: start at a 1 km radius, retry each ring for up to ~15s, widen roughly 2-3x per step, and give up widening past ~5 km after ~30-45s of total elapsed search. Past that cap, be honest with the rider instead of hanging silently — either a queue estimate or a surge-priced offer that might pull an idle driver in from farther away.
+
+**Recall hook — "1-3-5-15":** radius steps 1 km → 3 km → 5 km, ~15s dwell per ring before expanding.
+
 **Cheat-sheet for this section**
 - Always name both dispatch models (push/pull) even if the interviewer only asked about Uber — shows you know the design space.
 - Naive nearest-driver is a fine *starting* answer; the follow-up depth is batched bipartite matching — bring it up proactively, don't wait to be asked "can you do better?"
 - Say explicitly: batching window size is a latency-vs-efficiency dial, not a fixed constant.
 - Use the D.R.I.V.E. mnemonic to enumerate ranking factors instead of just "distance."
 - Race condition to flag unprompted: two dispatch decisions targeting the same driver simultaneously — covered in Section 17 (failure modes).
+- "What if no driver is found nearby?" is a near-guaranteed follow-up — answer with radius expansion (10.3), not silence or an infinite wait.
 
 ---
 
@@ -731,7 +752,7 @@ flowchart LR
 Routing engines are good at *distance/path* but systematically mis-estimate *time* (traffic surprises, unmodeled local effects). Uber's real approach (DeepETA, described in their engineering blog):
 
 1. Routing engine produces a baseline ETA from the best path + live traffic weights.
-2. A post-processing ML model (transformer-style, quantile regression) takes spatial + temporal features (origin, destination, time of day/week, weather, real-time traffic signal, historical residuals on this exact segment) and predicts a **residual correction** on top of the routing engine's estimate.
+2. A post-processing ML model (transformer-style, quantile regression) sits on top of that baseline. It takes features like origin, destination, time of day/week, weather, live traffic, and this exact segment's historical error — then predicts a **residual correction**: how far off the routing engine's raw estimate is likely to be, and in which direction.
 3. This hybrid (deterministic routing + learned residual) beats either pure-graph-algorithm ETA or pure-ML ETA alone, and is far cheaper to retrain/redeploy than a full end-to-end model.
 
 **Cheat-sheet for this section**
@@ -758,11 +779,33 @@ Not explicitly asked for by the source material, but a very common interview fol
 - Update frequency too fast → price whiplash erodes trust; too slow → doesn't clear the market during a fast-moving event (concert letting out).
 - Surge is fundamentally a **read from the same live geo-index used for dispatch** — it's not a separate data pipeline, it's a different aggregation over the same driver-position stream.
 
+### 🆕 12.1 How the multiplier actually gets computed
+
+The prose above says "apply a multiplier" — here's the mechanism an interviewer will ask you to spell out:
+
+```mermaid
+flowchart TD
+    A["Every refresh window (1-5 min),<br/>per H3 cell"] --> B["Count open ride requests R<br/>and available drivers D in the cell"]
+    B --> C["ratio = R / max(D, 1)"]
+    C --> D{"Which band does<br/>ratio fall in?"}
+    D -- "ratio <= 1.2" --> E["target multiplier = 1.0x<br/>(no surge)"]
+    D -- "1.2 < ratio <= 2" --> F["target multiplier ~1.3x-1.5x"]
+    D -- "2 < ratio <= 4" --> G["target multiplier ~1.5x-2.5x"]
+    D -- "ratio > 4" --> H["target multiplier ~2.5x-3x+,<br/>capped by policy"]
+    E & F & G & H --> I["Smooth: clamp the change from<br/>the previous multiplier to +/- 0.1-0.2x<br/>per refresh window"]
+    I --> J["Publish: shown as rider price multiplier<br/>+ used as a driver repositioning signal"]
+```
+
+**Illustrative bands, not a published Uber formula** — the ratio thresholds and multiplier values are for demonstrating the mechanism, not exact production constants.
+
+**Recall hook — "if X then Y":** if ratio ≈ 1 (supply meets demand), no surge. If ratio doubles, the multiplier moves up a band — but never linearly and never by more than the smoothing cap in one refresh, because an instant 3x jump is a trust problem even when the math says it's justified.
+
 **Cheat-sheet for this section**
 - Ground surge in the geo-index you already built — don't invent a parallel system.
 - Name the H3-resolution choice explicitly as the surge-zone granularity lever.
 - Trade-off pair to state: cell size (targeting precision) vs. update frequency (price stability).
 - Mention the dual purpose: surge both suppresses demand and attracts supply — interviewers like hearing the two-sided effect.
+- If asked "how exactly is the number computed," don't stop at "supply and demand" — walk through the ratio → band → smoothing-cap pipeline in 12.1.
 
 ---
 
@@ -943,10 +986,28 @@ stateDiagram-v2
     Dispatched --> Offline: driver force-quits app (timeout triggers reassignment)
 ```
 
+### 🆕 15.3 Trip → payment linkage — why `Completed` isn't really the last state
+
+Section 15.1 treats `Completed` as terminal for the *trip* lifecycle, and that's the right scope for a trip state machine. But Section 13 showed that capture happens asynchronously afterward — in money terms, the trip isn't fully "done" until the ledger says so. Worth drawing this bridge explicitly if the interviewer pushes on "so when does the rider actually get charged":
+
+```mermaid
+stateDiagram-v2
+    [*] --> Completed: endTrip called (Section 15.1)
+    Completed --> Paid: async capture succeeds<br/>(Kafka pipeline, Section 13.1)
+    Completed --> PaymentRetrying: PSP timeout/failure,<br/>retry with backoff
+    PaymentRetrying --> Paid: retry succeeds
+    PaymentRetrying --> PaymentEscalated: retries exhausted -><br/>reconciliation job / manual review
+    Paid --> [*]
+    PaymentEscalated --> [*]
+```
+
+This is also why trip rows migrate MySQL → Cassandra on completion (Section 7.2) while the *ledger* entry stays in the ACID store until it's actually settled: the trip record and the money settle on two related but distinct timelines, and only one of them (money) needs years of durable, auditable history.
+
 **Cheat-sheet for this section**
 - Drawing these two state machines unprompted answers "what happens if X cancels at step Y" before it's even asked.
 - The transition guard worth calling out: `Dispatched --> Offline` (app crash / connectivity loss mid-dispatch) must trigger a timeout-based reassignment — tie this back to Section 17's failure modes.
 - Trip state lives in the strongly-consistent store (MySQL) precisely because these transitions must never race (e.g., can't be `Completed` and `Cancelled` simultaneously).
+- If asked "what happens after `Completed`," don't shrug — walk the `Completed -> Paid` bridge in 15.3, it's a natural segue back into the payments deep dive (Section 13).
 
 ---
 
@@ -982,6 +1043,8 @@ stateDiagram-v2
 | GPS spoofing (fraud) | Fake pickup/drop-off, inflated fares | RADAR anomaly detection cross-checks GPS trace vs. real traffic/road network plausibility |
 | GPS drift/noise (not spoofing — imprecise sensors, tunnels, urban canyons) | False "route deviation" fraud flags, jumpy trip-map rendering | Smoothing/dead-reckoning between pings, snap-to-road logic, and a noise-tolerance band before RADAR flags a deviation as suspicious |
 | Driver goes offline **mid-trip** (phone dies, app crash during an active ride — distinct from mid-dispatch) | Trip stuck "in progress," rider/driver's live position frozen | Trip doesn't hard-fail: last-known position + elapsed time still support fare calc; safety-check prompt to the rider; trip auto-resolves via timeout + support escalation |
+| 🆕 Rider's phone dies / app killed **mid-trip** (the other direction from the row above) | Rider sees no live updates on their own screen | No impact on the trip itself: the driver app is the source of truth for `confirmPickup`/`endTrip`, so the trip completes and charges normally off the driver's confirmation; the rider gets the receipt via push/SMS once back online |
+| 🆕 Rider **no-show** at pickup (driver arrives, rider never comes out) | Driver stuck waiting, earning nothing, can't take the next ride | Grace timer after the `Arrived` state (illustrative: ~5 min); once it expires, auto-cancel + charge the rider a no-show fee, free the driver back to `Available` — this is the concrete mechanism behind the `cancelRide` API's fee note in Section 7.1 |
 | Network partition between regions (e.g., Americas shard can't reach the EU shard or a shared global service) | Cross-region features (global trip search, corporate multi-market billing) degrade; in-region ride-hailing keeps working | Geo-sharding means each region is self-sufficient for its own riders/drivers by design — a partition should only ever affect cross-region edge cases, never in-region core dispatch. This is the direct reward for geo-sharding — name it explicitly |
 | Thundering herd on event end (stadium/concert) | Sudden massive demand spike, no supply nearby | Surge pricing to reposition supply + demand-side smoothing (queueing/ETA warning shown before confirming request) |
 
@@ -1095,10 +1158,13 @@ Naive polling QPS      = active_clients / poll_interval_seconds   (compare this 
 - ~926 avg / ~3,700 peak push notifications/sec (20M trips × ~4 events/trip) — two orders of magnitude below the location firehose.
 - Naive single-DB polling design: ~600,000 wasted poll requests/sec at 5s intervals — the number that motivates moving to WebSocket push (Section 7.5, Stage 1→2).
 - A scoped-down redo (60M riders, 1.5M drivers, 2s ping) still lands on the same 750K/sec — proves the formula, not the raw driver count, is what matters (Section 5.7).
+- 🆕 Illustrative radius expansion on no-match: 1km → 3km → 5km cap, ~15s dwell per ring (Section 10.3) — not a documented Uber constant, a pattern to reason from.
+- 🆕 Illustrative surge bands: ratio ≤1.2 → 1.0x; ≤2 → ~1.3-1.5x; ≤4 → ~1.5-2.5x; beyond → ~2.5-3x+ capped, change throttled to ±0.1-0.2x per refresh window (Section 12.1).
 
 **Mnemonics**
 - **D.R.I.V.E.** — dispatch ranking factors: Distance/ETA, Rating, Idle-time fairness, Vehicle match, En-route status.
 - **G.P.S. F.A.K.E.** — fraud categories: GPS spoofing, Padding trip, Stolen identity, Fake fees, Accept-then-abandon, Kit/vehicle mismatch, Entry falsification.
+- 🆕 **1-3-5-15** — matching radius expansion: 1km → 3km → 5km cap, ~15s per ring (Section 10.3).
 
 **Disambiguation quick answers**
 - Geohash vs Quadtree vs H3 → string-prefix grid vs density-adaptive tree vs uniform-neighbor hex grid; Uber picks H3 for undistorted radius search.

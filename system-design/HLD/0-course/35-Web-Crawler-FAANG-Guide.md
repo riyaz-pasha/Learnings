@@ -1,5 +1,7 @@
 # Design a Web Crawler — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added two new deep-dive sections — **§13 API Design** (internal frontier/worker API + a single end-to-end crawl-loop sequence diagram) and **§14 DNS Resolution at Scale** (self-hosted resolver cache, negative caching, a worked latency example) — since the original had no explicit API surface and treated DNS as a one-line footnote. It also added: a SimHash/MinHash near-duplicate walkthrough with a worked Hamming-distance example (§9), a legal/ethical compliance callout (§10), a conditional-GET (`If-Modified-Since`/ETag) recrawl-efficiency note plus a `ROBOTS_CACHE` entity in the data model (§8), and a second capacity-estimation example for *sustained* continuous crawling (§4) to complement the existing one-time-sweep example. All-new headings/subsections are marked `🆕`. Everything else — the mental model, the v0→v4 evolution story, BFS-vs-DFS, dedup, politeness, traps, trade-offs, FAQ, and the cheat sheets — is the original content, lightly tightened in a few dense spots but not restructured.
+
 ## 1. Mental Model
 
 A web crawler is **graph traversal at planet scale, under an etiquette contract you didn't write.**
@@ -22,12 +24,14 @@ flowchart TD
     A["1. Clarify requirements<br/>(crawl+store only? one domain or web-scale?<br/>text only or all MIME types?)"] --> B["2. Back-of-envelope estimation<br/>(pages, storage, bandwidth,<br/>servers to finish in target time)"]
     B --> C["3. Identify building blocks<br/>(Scheduler, DNS resolver, HTML fetcher,<br/>Extractor, Dedup, Blob store)"]
     C --> D["4. High-level design<br/>(draw the pipeline + feedback loop<br/>from Extractor back to Frontier)"]
-    D --> E["5. Walk the evolution out loud<br/>(naive → BFS → dedup → politeness → sharded)<br/>shows you can iterate, not just recite"]
+    D --> D2["4b. 🆕 API + data model<br/>(frontier enqueue/lease/complete,<br/>URL/checksum/robots-cache tables)"]
+    D2 --> E["5. Walk the evolution out loud<br/>(naive → BFS → dedup → politeness → sharded)<br/>shows you can iterate, not just recite"]
     E --> F["6. Deep dive: URL Frontier<br/>(priority + politeness + freshness)"]
     F --> G["7. Deep dive: Dedup<br/>(URL checksum + content checksum/simhash)"]
     G --> H["8. Crawler traps & robots.txt<br/>(classify, detect, mitigate)"]
     H --> I["9. Multi-worker partitioning<br/>(domain-level vs range vs per-URL)"]
-    I --> J["10. Trade-offs & failure modes<br/>(consistency, fault tolerance, self-throttling)"]
+    I --> I2["9b. 🆕 DNS resolution at scale<br/>(self-hosted cache, negative caching)"]
+    I2 --> J["10. Trade-offs & failure modes<br/>(consistency, fault tolerance, self-throttling)"]
     J --> K["11. Wrap-up<br/>(JS rendering, distributed frontier,<br/>adaptive recrawl — what you'd add with more time)"]
 ```
 
@@ -89,6 +93,23 @@ Frontier pressure (say avg 50 outlinks/page):
 
 **Reality check** (say this if you used the course's numbers — interviewers respect calibration): 2070 KB of *text* per page is high; real-world average HTML+text is closer to tens of KB, with the multi-MB figure only true if you count embedded images/video. State your assumption, then redo the chain if the interviewer changes an input — that's the actual skill being tested, not the memorized final number.
 
+### 🆕 Sustained-crawl example (illustrative)
+
+The worked example above is a one-time sweep ("crawl 5B pages in a day"). Most real crawlers instead run *continuously*, refreshing a fixed pool of pages every month. That's a different shape of number — steady pages/sec, not a server headcount — and it's worth being able to produce both in an interview.
+
+Assume a smaller, steadier target: **1 billion pages/month**, average page ≈ 500 KB (a more realistic HTML-only estimate than §4's 2070 KB):
+
+```
+Sustained rate = 1B pages / (30 days × 86,400 sec/day) ≈ 386 pages/sec
+
+Bandwidth       = 386 pages/sec × 500 KB ≈ 193 MB/sec ≈ 1.5 Gb/sec sustained
+
+Raw storage     = 1B × 500 KB ≈ 500 TB/month (before compression;
+                   gzip typically halves this for HTML)
+```
+
+Compare this to Common Crawl's real published figures below (~3–5B pages, ~250 TB/month) — 386 pages/sec is a believable, defensible number for a single mid-size crawl operation; 3,468 servers finishing the whole web in a day (§4's other example) is not something any real company actually does. Knowing *both* numbers, and which one an interviewer's phrasing implies ("crawl the whole web fast" vs. "maintain a fresh index"), is the actual signal.
+
 ### Numbers worth memorizing
 
 | Quantity | Typical value | Why it matters |
@@ -96,7 +117,7 @@ Frontier pressure (say avg 50 outlinks/page):
 | Avg HTTP fetch round-trip | 50–100 ms | Drives single-worker throughput; justifies horizontal scale-out |
 | DNS lookup (cold) | 20–200 ms | Why the DNS resolver needs its own cache |
 | DNS lookup (cached) | <1 ms | 100–1000x speedup — cache within TTL, not longer |
-| Politeness delay per host | 1 request per few sec (adaptive; historically ~1/sec for Google) | Prevents your crawler from DDoS-ing a small site |
+| Politeness delay per host | 1 request per 1–2 sec, adaptive (historically ~1/sec for Google) | Prevents your crawler from DDoS-ing a small site |
 | Checksum compute (MD5/SHA-1) | GB/s on commodity CPU | Dedup checksum cost is negligible vs. network fetch cost |
 | Blob store throughput | ~500 req/sec per blob (course figure) | Sizes how many blobs you shard content across |
 | Common Crawl monthly dataset | ~3–5B pages, ~250 TB/month | Sanity-check for "is 5B pages/day realistic" — no, that's roughly a *month* of Common Crawl's entire output |
@@ -256,11 +277,23 @@ erDiagram
         string blob_ref PK
         string mime_type
         datetime stored_at
+        string etag "for conditional GET"
+        datetime last_modified "for conditional GET"
+    }
+    ROBOTS_CACHE {
+        string hostname PK
+        text disallow_rules
+        int crawl_delay_sec
+        datetime fetched_at
+        datetime ttl_expires_at
     }
     URL ||--o{ URL_CHECKSUM : "hashes to"
     CONTENT ||--|| CONTENT_CHECKSUM : "hashes to"
     URL ||--o| CONTENT : "resolves to (once fetched)"
+    URL }o--|| ROBOTS_CACHE : "hostname governed by"
 ```
+
+`ROBOTS_CACHE` is the fourth data-model piece the frontier deep-dive below depends on (alongside `URL`, the checksum stores, and `CONTENT`) — every worker checks it before a fetch, not after (§10).
 
 Concrete example of the priority/frequency knob in action:
 
@@ -299,6 +332,25 @@ stateDiagram-v2
 ```
 
 **BFS, not DFS**: dequeue breadth-first (§7) so no single domain can monopolize a worker indefinitely.
+
+### 🆕 Re-crawl scheduling: from fixed cadence to conditional GET
+
+Two independent levers control freshness, and interviewers like candidates who name both:
+
+1. **Recrawl frequency** (how *often* a URL re-enters the queue) — start with a fixed cadence per priority tier (news: hourly, static pages: monthly), then make it adaptive: track how often a URL's *content checksum* actually changes across recrawls, and stretch the interval for pages that never change, shrink it for pages that always do. A news homepage that changes every visit stays hourly; a government filing that hasn't changed in 40 recrawls drops to a monthly check.
+2. **Fetch cost per recrawl** (how *expensive* each check is) — even a page due for a freshness check doesn't need a full re-download. Use HTTP conditional GET: send `If-Modified-Since` (or `If-None-Match` with the stored `ETag`) from the `CONTENT` table above. A `304 Not Modified` response costs one round-trip and no bandwidth; only a `200 OK` triggers a real re-fetch, re-extract, and re-dedup.
+
+```mermaid
+flowchart TD
+    T["Recrawl timer fires for URL"] --> C{"Have stored<br/>ETag / Last-Modified?"}
+    C -->|no| Full["Full GET<br/>(first crawl or metadata lost)"]
+    C -->|yes| Cond["Conditional GET<br/>(If-None-Match / If-Modified-Since)"]
+    Cond --> R{"Server response"}
+    R -->|304 Not Modified| Skip["Skip re-fetch.<br/>Bump recrawl interval slightly<br/>(page is stable)"]
+    R -->|200 OK| Changed["Re-fetch, re-extract, re-dedup.<br/>Shrink recrawl interval<br/>(page is active)"]
+```
+
+**If a page hasn't changed in N checks, then stretch its interval; if it changes every check, then shrink it.** Conditional GET is what makes running that adaptive loop cheap enough to do continuously instead of on a fixed monthly sweep.
 
 ## 9. Deep Dive: Duplicate Elimination
 
@@ -341,6 +393,23 @@ sequenceDiagram
 
 **One-byte-changed content still checksums differently** — expected and fine; exact checksums (MD5/SHA-1) only catch *exact* duplicates, by design.
 
+### 🆕 Near-duplicate detection: SimHash / MinHash in depth
+
+Exact checksums are blind to near-duplicates: the same article re-published with a different ad banner, a different timestamp footer, or a tracked-vs-untracked nav bar produces a completely different MD5, even though a human would call it "the same page." SimHash and MinHash exist to catch that fuzzy case.
+
+| | Exact hashing (MD5/SHA-1) | Near-dup hashing (SimHash/MinHash) |
+|---|---|---|
+| What it compares | Full byte content, bit-for-bit | A compact fingerprint of shingled features (words/n-grams) |
+| Output | Any 1-bit change → completely different hash (avalanche effect) | Similar documents → fingerprints that differ in only a few bits |
+| Comparison | Equality check (`==`) | Hamming distance between fingerprints |
+| Cost | One hash per document, O(1) compare | One fingerprint per document, O(1) compare, but needs a threshold, not equality |
+| Catches | Identical bytes only | Mirrors, reprints, boilerplate-only diffs, near-identical faceted-nav pages |
+| Misses | Anything not byte-identical | Documents whose fingerprints differ, by chance or design, above the threshold |
+
+**Worked example (illustrative)**: SimHash typically produces a 64-bit fingerprint per document. Two documents are treated as near-duplicates if their fingerprints differ in a small number of bits — a common threshold is **Hamming distance ≤ 3 out of 64 bits**. A syndicated news article re-published on two sites, differing only in a byline and an ad slot, might land at distance 1–2 (near-dup, discard or dedupe). An article that quotes a paragraph from another but is otherwise original might land at distance 20+ (not a duplicate — keep it).
+
+**Where it plugs into the pipeline**: SimHash runs as a second check alongside exact content-checksum dedup (§9's sequence diagram) — exact checksum first (cheap, catches most repeats), SimHash second (more compute, catches the fuzzy remainder). It's also the same signal the trap-detection circuit breaker in §12 uses ("near-duplicate content ratio rising").
+
 ## 10. Deep Dive: Politeness, robots.txt & Rate Limiting
 
 Politeness has two layers: a **published rulebook** (`robots.txt`) the crawler must fetch and obey, and an **adaptive throttle** the crawler enforces on itself regardless of what the rulebook says.
@@ -379,6 +448,17 @@ This is the same **token-bucket rate limiter** pattern as the [Rate Limiter chap
 - `robots.txt` is fetched once per host, cached within a TTL, and re-checked periodically (sites update their rules).
 - **Crawl-delay** (if published) sets a floor; the crawler's own TTFB-adaptive logic can be *more* conservative than the published delay, never less.
 - `robots.txt` stops you from touching *disallowed* pages. It does **not** stop you from wandering into an *allowed* infinite calendar page — that's the trap defense in §12, a separate mechanism.
+
+### 🆕 Legal & ethical compliance
+
+`robots.txt` is a technical convention, not a law — obeying it is table stakes, not the whole compliance story. Worth naming out loud if the interviewer probes "what could go wrong beyond engineering":
+
+- **Identify yourself.** Send a descriptive `User-Agent` with a contact URL or email (e.g. `MyCrawler/1.0 (+https://example.com/bot)`), so a site owner who wants to complain or block you can reach you instead of just banning your IP range.
+- **Honor page-level opt-outs, not just `robots.txt`.** A page can carry a `<meta name="robots" content="noindex">` tag or an `X-Robots-Tag` HTTP header even when the path itself is allowed — that's a per-page signal, not a per-host one, and it lives in the fetched response, not in robots.txt.
+- **Copyright and terms of service** govern what you can *do* with crawled content (republish, index, train on) even when the crawl itself was permitted — this is a legal question above the crawler's pay grade, but say you'd loop in legal/compliance before indexing or redistributing at scale.
+- **Personal data** encountered incidentally (emails, phone numbers on scraped pages) can trigger data-protection obligations (e.g., GDPR) depending on jurisdiction and what you store/index — another reason the crawler's output boundary (§1: "the output is the store") matters: minimize what downstream stages retain.
+
+**If X then Y**: if a host's `robots.txt` is unreachable (5xx, timeout), the safe default is to treat it as **disallow-all for that host until it resolves**, not allow-all — the cost of skipping a host briefly is far lower than the cost of an unpoliced crawl.
 
 ## 11. Multi-Worker Partitioning
 
@@ -421,7 +501,96 @@ flowchart LR
 
 Real anecdote worth citing: e-commerce "faceted navigation" (filter by color × size × brand × price-range, all as combinable query params) is one of the most common *unintentional* real-world crawler traps — it can generate literally billions of valid-looking, mostly-duplicate URLs from one product category page. This is exactly the §9 session-ID pattern generalized: different URL, same or near-identical content.
 
-## 13. Design Decisions & Trade-offs
+## 13. 🆕 API Design: Internal Frontier & Worker APIs
+
+Nobody calls this crawler from the outside — there's no end user hitting an endpoint. The "API" here is the **internal contract between the frontier service and the worker pool**, plus a thin admin surface. Naming it explicitly (even briefly) shows you think about service boundaries, not just data flow arrows.
+
+| API | Called by | Purpose |
+|---|---|---|
+| `EnqueueURL(url, priority, source)` | Extractor (new links), Admin (seeds) | Insert a URL into the frontier if it passes URL-dedup; no-op if already known |
+| `LeaseNextURL(worker_id) → (url, lease_id, ttl)` | Worker | Dequeue the highest-priority URL a worker is allowed to take (§8's lifecycle: Queued → Fetching); grants a time-boxed lease so a crash doesn't strand it |
+| `CompleteURL(lease_id, outcome, new_links[])` | Worker | Report success/failure; on success, atomically marks the URL fetched and calls `EnqueueURL` for each extracted, deduped link |
+| `RenewLease(lease_id)` | Worker | Extend the lease for a slow-but-alive fetch, so it isn't reclaimed mid-flight |
+| `GetRobotsRules(hostname) → (allow_rules, crawl_delay)` | Worker (before every fetch) | Serve cached `robots.txt` rules (§10); triggers a fetch-and-cache on a miss |
+| `SetPriorityOverride(url_pattern, priority)` | Admin | Ad-hoc recrawl / deprioritize without redeploying the scoring logic |
+
+`LeaseNextURL` + `CompleteURL` is the whole contract that makes the frontier safe under concurrent workers: a lease is a lock with a timeout, not a permanent claim, so a crashed worker (§16's failure-modes table) never blocks the URL forever.
+
+#### 🆕 End-to-end crawl-loop sequence diagram
+
+This ties every earlier deep dive into one request flow — frontier → worker → DNS → robots.txt → fetch → parse → dedup → re-enqueue — using the API calls above as the message labels:
+
+```mermaid
+sequenceDiagram
+    participant F as Frontier
+    participant W as Worker
+    participant DNS as DNS Resolver
+    participant RC as robots.txt Cache
+    participant Host as Target Host
+    participant EX as Extractor
+    participant D as Dedup
+    participant B as Blob Store
+
+    W->>F: LeaseNextURL(worker_id)
+    F-->>W: (url, lease_id, ttl)
+    W->>DNS: resolve(hostname)
+    DNS-->>W: IP (cache hit or fresh lookup)
+    W->>RC: GetRobotsRules(hostname)
+    RC-->>W: allow? crawl-delay?
+    alt disallowed
+        W->>F: CompleteURL(lease_id, "skipped-robots", [])
+    else allowed and token-bucket OK
+        W->>Host: GET url (conditional, if ETag known)
+        Host-->>W: 200 OK + content, or 304 Not Modified
+        alt 304 Not Modified
+            W->>F: CompleteURL(lease_id, "unchanged", [])
+        else 200 OK
+            W->>EX: extract(content)
+            EX-->>W: outlinks[], text
+            W->>D: checksum(url), checksum(content)
+            D-->>W: duplicate? y/n
+            alt new content
+                W->>B: store(content)
+                W->>F: CompleteURL(lease_id, "success", outlinks[])
+                Note over F: each outlink re-enters via EnqueueURL,<br/>after its own URL-dedup check
+            else duplicate
+                W->>F: CompleteURL(lease_id, "duplicate", [])
+            end
+        end
+    end
+```
+
+## 14. 🆕 Deep Dive: DNS Resolution at Scale
+
+DNS is easy to wave away as "just plumbing," but at crawl scale it's a real bottleneck: a cold lookup costs 20–200 ms (§4's numbers table), and a naive crawler re-resolves the same handful of popular hostnames millions of times a day.
+
+- **Run your own resolver cache, don't lean on a public/ISP resolver.** A shared external resolver rate-limits or throttles high-volume clients — indistinguishable, from its point of view, from an attack. A crawler-owned resolver cluster with a large in-memory cache avoids that ceiling entirely.
+- **Cache within the TTL, never past it.** Over-caching serves a stale IP after a host migrates (§16's failure-modes table calls this out); under-caching throws away the 100–1000x speedup a cache gives you. Respect the TTL the authoritative server actually published.
+- **Cache negative results too.** A hostname that just returned `NXDOMAIN` (dead domain, typo'd link from a trap) will get requested again by the next worker that meets the same URL pattern. A short negative-cache TTL (e.g., a few minutes) avoids hammering authoritative nameservers for a name that isn't going to resolve.
+- **Resolve asynchronously, ahead of need.** Since the frontier already knows which URL a worker is about to lease next, prefetching DNS for the next batch overlaps resolution latency with the current fetch instead of paying it serially.
+
+| | Public/ISP resolver | Self-hosted resolver cache |
+|---|---|---|
+| Throughput ceiling | Rate-limited as a shared resource | Scales with your own cache cluster |
+| Cold-lookup latency | 20–200 ms, same either way | 20–200 ms, same either way |
+| Cache-hit latency | Not under your control | <1 ms, tuned to your TTL policy |
+| Negative caching | Provider-dependent, opaque | You choose the NXDOMAIN TTL explicitly |
+| Failure blast radius | Provider outage stalls your whole crawl | Isolated to your own infrastructure |
+
+**Worked example (illustrative)**: a crawler revisiting a frontier of mostly-popular domains sees a high cache-hit rate — say 95% (this is the same figure as §16's DNS pie chart). Amortized DNS latency per fetch ≈ `0.95 × 0.5ms + 0.05 × 100ms ≈ 5.5 ms`. That's small next to a typical 50–100 ms HTTP fetch round-trip, which is exactly why DNS is a footnote when the cache is healthy — and a serious bottleneck the moment the hit rate drops (undersized cache, TTL policy too aggressive, or a burst of never-before-seen domains from a new seed batch).
+
+```mermaid
+flowchart TD
+    Req["Worker needs IP for hostname"] --> Hit{"In resolver cache<br/>and within TTL?"}
+    Hit -->|yes| Fast["Return cached IP<br/>(<1ms)"]
+    Hit -->|no| Slow["Cold lookup to authoritative DNS<br/>(20-200ms)"]
+    Slow --> Result{"Result"}
+    Result -->|IP found| Store["Cache IP with its TTL"]
+    Result -->|NXDOMAIN| NegCache["Cache negative result<br/>with short TTL<br/>(avoid re-hammering)"]
+    Store --> Fast
+```
+
+## 15. Design Decisions & Trade-offs
 
 | Decision | Choice made | Trade-off accepted |
 |---|---|---|
@@ -434,7 +603,7 @@ Real anecdote worth citing: e-commerce "faceted navigation" (filter by color × 
 | Extensibility axis | Modular HTML fetcher (protocol) + modular extractor (MIME type) | Clean plug points vs. more abstraction layers than a single-protocol crawler would need |
 | Politeness enforcement | Per-host token bucket, TTFB-adaptive | Slower crawl of struggling hosts vs. simplicity of a fixed global rate |
 
-## 14. Bottlenecks & Failure Modes
+## 16. Bottlenecks & Failure Modes
 
 | Failure mode | Cause | Mitigation |
 |---|---|---|
@@ -455,7 +624,7 @@ pie showData
 ```
 *A crawler re-visiting frontier domains repeatedly should see a high cache-hit rate — if it doesn't, the TTL policy or cache size is wrong.*
 
-## 15. Common Interview Follow-Up Questions
+## 17. Common Interview Follow-Up Questions
 
 **Q: How do you make the URL frontier itself horizontally scalable, not just the worker pool?**
 Shard the frontier by consistent-hashing the hostname → frontier shard, the same key used for domain-level worker partitioning, so a shard and its owning workers co-locate. Adding/removing a shard uses consistent hashing to minimize reshuffling — this is exactly §6's v3→v4 step.
@@ -481,7 +650,7 @@ The frontier's lease (§8) expires without a completion signal, and the URL is r
 **Q: How is this different from crawling content behind a login or paywall?**
 Flag it as out of scope rather than solving it live — it changes the trust model entirely (you're now crawling *with* credentials), raising authorization and data-handling questions this design deliberately doesn't address (§3).
 
-## 16. Real-World References
+## 18. Real-World References
 
 ```mermaid
 timeline
@@ -512,6 +681,8 @@ timeline
 - **Decouple discovery from freshness.** Crawling a new URL and recrawling a known one are the same mechanism running at different frequencies — don't build two pipelines.
 - **Store once, process many.** The blob store is the handoff to indexing/ranking — never make the crawler re-fetch data another stage could just read.
 - **Shard the frontier the same way you shard the workers.** One partitioning key (hostname) should drive both, or politeness and load-balancing fight each other.
+- **A lease is a lock with a timeout.** The frontier hands out a lease, not a permanent claim, when a worker dequeues a URL — a crash just means the lease expires and someone else picks it up.
+- **Cache DNS within the TTL; own the resolver.** A public resolver rate-limits you like an attacker; a self-hosted cache turns a 20–200ms cold lookup into a <1ms hit without that ceiling.
 
 ## Master Cheat Sheet
 
@@ -525,11 +696,17 @@ timeline
 
 **Crawler trap mnemonic**: Q-I-C-D-C — Query params, Internal loops, Calendar pages, Dynamic gen, Cyclic dirs. Real-world #1 cause: faceted e-commerce navigation.
 
-**Dedup split**: URL checksum catches same-address-again; content checksum catches different-address-same-content (session IDs, mirrors) — need both.
+**Dedup split**: URL checksum catches same-address-again; content checksum catches different-address-same-content (session IDs, mirrors); SimHash/MinHash (Hamming distance ≤ a few bits out of 64) catches near-duplicates exact checksums miss entirely — three tiers, not two.
 
 **Partitioning strategies**: Domain-level (politeness-friendly, default) · Range division (even but hot-range risk) · Per-URL dynamic (best balance, needs shared queue) — pick via §11's decision tree.
 
-**Politeness**: per-host token bucket + TTFB-adaptive refill, same primitive as the Rate Limiter chapter, keyed by destination host instead of client.
+**Politeness**: per-host token bucket + TTFB-adaptive refill, same primitive as the Rate Limiter chapter, keyed by destination host instead of client. Legal/ethical layer on top: identify your bot in the User-Agent, honor page-level `noindex`/`X-Robots-Tag` (not just robots.txt), treat an unreachable robots.txt as disallow-all until it resolves.
+
+**API surface**: `EnqueueURL` (frontier in) · `LeaseNextURL`/`RenewLease`/`CompleteURL` (frontier out, lease-based) · `GetRobotsRules` (politeness gate) · `SetPriorityOverride` (admin). One sequence: frontier → worker → DNS → robots.txt → fetch (conditional GET if ETag known) → extract → dedup → re-enqueue.
+
+**DNS**: self-hosted resolver cache, not a public one; cache within TTL only; cache `NXDOMAIN` too (short TTL) so trap-generated dead links don't hammer authoritative servers.
+
+**Recrawl efficiency**: adaptive interval (stretch on no-change, shrink on change) + conditional GET (`If-Modified-Since`/`ETag`) so a due-for-check page costs one round-trip, not a full re-fetch, when nothing changed.
 
 **Non-functional hooks**: Scalability → horizontal add/remove + consistent hashing on hostname (frontier *and* workers). Extensibility → modular fetcher (protocol) + modular extractor (MIME). Consistency → checksum dedup + periodic S3 checkpoint. Performance → self-throttle by TTFB, blob store ~500 req/s.
 

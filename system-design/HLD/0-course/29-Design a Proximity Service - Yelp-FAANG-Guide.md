@@ -1,5 +1,13 @@
 # Design a Proximity Service (Yelp / Nearby Places) — FAANG Interview Guide
 
+> **Enhancement notes:** This pass added material that was missing or thin, and left the rest of the guide (structure, voice, existing diagrams/tables/mnemonics) untouched.
+> - Added a formal **🆕 API Design** section (§2) — concrete endpoints/methods/params, since the original only had inline function-call-style signatures.
+> - Added a **🆕 worked QPS example** (§3) — an illustrative average/peak QPS calc and a "58K QPS at global scale" number, since the original formula chain never plugged in numbers for QPS itself.
+> - Added a **🆕 v1 → v2 → v3 architecture evolution diagram** (§6) — naive SQL range query → geohash-indexed DB → in-memory QuadTree/S2 index + cache, making the "why we ended up here" progression explicit.
+> - Added **🆕 two decision flowcharts** (§6) — dynamic grid/leaf sizing (split/merge triggers) and radius-expansion logic (walking sibling leaves when a leaf underflows).
+> - Added a **🆕 geohash precision-nesting diagram** (§6) — visualizes fixed-grid subdivision by prefix length, contrasted with QuadTree's density-adaptive split.
+> - Everything else (requirements, capacity math, schema, ranking, trade-offs, failure modes, mnemonics, cheat sheets) was already clear and load-bearing — left as-is.
+
 ## 0. Mental Model
 
 Yelp is "search, but the primary filter is geometry, not keywords." Every proximity system (Yelp, Uber driver-matching, Tinder nearby, Pokemon Go, food-delivery restaurant lists) reduces to one question:
@@ -69,6 +77,22 @@ flowchart TD
 
 **Mnemonic — "SLAC"**: **S**calability, **L**atency, **A**vailability, **C**onsistency (relaxed) — the four NFRs to recite in order.
 
+### 🆕 API Design
+
+Sketch the contract, don't just say "there's a search endpoint." Five endpoints cover the whole system — resist the urge to design a full CRUD suite:
+
+| Endpoint | Method | Key params | Returns | Notes |
+|---|---|---|---|---|
+| `/v1/search` | GET | `lat, lng, radius, category?, name?, sort=distance\|rating, page_token?` | List of `{place_id, name, category, distance, rating, thumbnail_url}` + `next_page_token` | Read path: cache → spatial index → aggregator (§4) |
+| `/v1/places/{place_id}` | GET | `place_id` | Full detail: address, hours, photos, rating breakdown | Near-static, cache-friendly |
+| `/v1/places` | POST | `name, description, category, lat, lng, photo[]` | `{place_id, status: "pending"}` | Write path; goes through verification (§9.2) before it's searchable |
+| `/v1/places/{place_id}` | PATCH | any subset, incl. `lat, lng` | `200 OK` | A location change is a delete-then-insert in the index, never an in-place move (§4) |
+| `/v1/places/{place_id}/reviews` | POST | `user_id, rating(1–5), text, photo[]` | `{review_id, status: "queued"}` | Rating aggregate is recomputed by the daily batch job, not synchronously (§7) |
+
+Two details worth saying out loud:
+- **Search is GET, not POST** — it's a read, so it's cacheable by URL (browser cache, CDN edge cache, your own cache layer) for hyper-common exact queries like "coffee near Times Square."
+- **`202 Accepted` (not `200`) on the review POST** is a more precise status if you want to signal "queued for batch aggregation, not yet reflected in the rating." `429` is what you return once §9.2's rate limiter trips on scraping or review-bombing patterns.
+
 ### Interview Cheat-Sheet
 - Say out loud: "This is read-heavy, so I'll optimize the read path aggressively and can afford eventual consistency on writes."
 - Explicitly separate **place data** (name/address/category — changes rarely) from **dynamic data** (ratings/reviews/photos — changes more, but still not real-time-critical) from **search index** (needs periodic rebuild, not per-write mutation, for Yelp; needs near-real-time mutation for Uber).
@@ -93,6 +117,27 @@ flowchart TD
 5. Bandwidth in      = (writes/day * avg_write_payload_size) / 86,400
 6. Bandwidth out     = (searches/day * results_per_search * avg_result_payload) / 86,400
 ```
+
+### 🆕 Worked QPS example (illustrative)
+
+The course's own numbers go straight from DAU to server count (`DAU / RPS_per_server`) and never plug a number into the QPS formula itself. Worth doing once out loud, labeled as illustrative since "searches per user per day" isn't given:
+
+```
+Assume 5 searches/user/day (illustrative):
+Average QPS = 60,000,000 DAU * 5 / 86,400 sec ≈ 3,472 QPS
+```
+
+Search traffic isn't flat — a places app spikes at lunch (~12 pm) and dinner (~7 pm) local time. A common rule of thumb: peak ≈ 3x average.
+
+```
+Peak QPS ≈ 3,472 * 3 ≈ 10,400 QPS at lunch/dinner
+```
+
+If the interviewer scales the problem up to "Yelp, but worldwide, every category" — have this number ready too (also illustrative): 200M businesses, 5B searches/day globally →
+```
+5,000,000,000 / 86,400 ≈ 58,000 QPS average, globally
+```
+Same math either way — the point isn't the exact figure, it's showing you can turn "DAU and searches/day" into a QPS number on the spot instead of citing one from memory.
 
 ### Worked numbers (from the course, sanity-checked)
 
@@ -364,6 +409,32 @@ erDiagram
 
 `SELECT * FROM Place WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?` — a bounding-box scan on a B-tree index over lat, then lng separately. **Problem**: a B-tree on a single column can't efficiently intersect two range predicates at once; DB ends up scanning one dimension's range fully then filtering the other in memory. At 500M rows this is too slow. This motivates a *spatial* index.
 
+### 🆕 Evolution: v1 naive SQL → v2 geohash grid → v3 QuadTree + cache
+
+Walking the interviewer through this progression — not jumping straight to the final answer — is the actual signal (§1 cheat-sheet already says this; here's the picture):
+
+```mermaid
+flowchart TB
+    subgraph V1["v1 — Naive: SQL range query"]
+        direction LR
+        A1[App Server] --> A2[("SQL DB\nWHERE lat BETWEEN..\nAND lng BETWEEN..")]
+    end
+    subgraph V2["v2 — Geohash-indexed DB"]
+        direction LR
+        B1[App Server] --> B2[("SQL/Redis, indexed by\ngeohash prefix\n(GEOADD/GEOSEARCH or sorted index)")]
+    end
+    subgraph V3["v3 — Dedicated in-memory index + cache"]
+        direction LR
+        C1[App Server] --> C2[("Cache\nhot geohash/segment keys")]
+        C1 --> C3["QuadTree / S2 Index Service\n(in-memory, replicated)"]
+        C3 --> C4[("SQL DB\nsource of truth, async-updated")]
+    end
+    V1 -->|"Fails past ~100M-500M rows:\nB-tree can't intersect 2 range\npredicates, full scan + in-memory filter"| V2
+    V2 -->|"Fails on uneven density:\nfixed cell size -> dense-city cells\nslow to scan, rural cells wasted space"| V3
+```
+
+Each arrow names the specific failure that forces the next step — that's the part worth saying out loud, not just the end state.
+
 ### 6.2 The four real options
 
 ```mermaid
@@ -410,12 +481,53 @@ stateDiagram-v2
     Merge --> Leaf
 ```
 
+#### 🆕 Dynamic grid sizing decision flowchart
+
+This is the concrete "how does the system decide cell size" logic behind the state diagram above — the answer to "what actually triggers a split, and how does it handle a dense city vs. empty rural cell differently":
+
+```mermaid
+flowchart TD
+    Start[New places land in a region\nvia insert or bulk import] --> Count{Places in this\nleaf right now?}
+    Count -->|"<= 500 (leaf capacity)"| Keep[Stays a single leaf\nno split needed]
+    Count -->|"> 500"| Split[Split into 4 quadrants\nNE / NW / SE / SW]
+    Split --> Recount{Any child\nstill > 500?}
+    Recount -->|Yes| Split
+    Recount -->|No| Leaf2[Children become leaves]
+    Keep --> Monitor[Leaf keeps taking\nasync inserts/deletes]
+    Leaf2 --> Monitor
+    Monitor --> Delta{Net effect of\nrecent writes}
+    Delta -->|Pushes a leaf over 500| Split
+    Delta -->|Drops a leaf well under threshold| Merge2[Merge with sibling leaves\noptional optimization]
+    Delta -->|Stays within a healthy band| Keep
+```
+
+Why this matters: a dense downtown block (Manhattan, 50,000 places in a naive fixed cell) recurses down to many small leaves automatically; a rural county (a handful of places) simply never splits and stays one large leaf. No one hand-tunes cell size per region — the 500-place threshold does it uniformly.
+
 ### 6.5 Search-using-QuadTree walkthrough
 
 1. Start at root, descend toward the segment containing the user's `(lat, lng)`.
 2. At the leaf, collect places; if count ≥ requested K (e.g. 20), stop.
 3. If leaf has too few, walk the **doubly-linked list** to sibling leaves outward until radius exhausted or K satisfied.
 4. Send candidate PlaceIDs to Aggregator → fetch full details from DB/cache → compute haversine distance → sort → truncate.
+
+#### 🆕 Radius/result-expansion decision flowchart
+
+Step 3 above ("walk sibling leaves if under-filled") as an explicit decision flow — the thing to draw if asked "what if the leaf doesn't have enough results":
+
+```mermaid
+flowchart TD
+    Q[Descend to leaf for\nuser's lat/lng] --> Collect[Collect places in leaf,\nfilter by category if given]
+    Collect --> Enough{Candidates >= K?\ne.g. K=20}
+    Enough -->|Yes| Rank[Send to Aggregator:\nhaversine + rank + truncate]
+    Enough -->|No| Walk["Walk doubly-linked leaf list\nto next sibling leaf outward"]
+    Walk --> Collect2[Add sibling leaf's places\nto candidate set]
+    Collect2 --> Radius{Still short of K,\nand within the radius\nthe user asked for?}
+    Radius -->|Yes, room left| Walk
+    Radius -->|Hit max radius or\nran out of neighbors| Rank
+    Radius -->|Now >= K| Rank
+```
+
+Two edge cases worth naming: if the user's radius caps expansion before K is reached, return fewer than K results rather than silently ignoring the user's stated radius. And every candidate still gets the real haversine distance check in the Aggregator — a square leaf boundary isn't a circle, so some candidates collected this way turn out to be outside the true radius and get dropped (this is exactly what happens to 3 of Maria's 23 candidates in §6.10).
 
 ### 6.6 Disambiguation: Geohash vs QuadTree vs R-Tree vs KD-Tree
 
@@ -455,6 +567,21 @@ graph LR
 | Update cost | O(1) reinsert | O(1) | O(log N), occasional split cascade | O(log N), occasional rebalance | Expensive — near-full rebuild |
 | Best query shape | Point radius via prefix match | Point radius | Point radius, point k-NN | Range/polygon, region overlap | Point k-NN (static snapshot) |
 | Typical real use | Uber H3, Redis GEO, Mongo geohash index | Naive prototypes | Yelp (per this course), Google Maps segments | PostGIS, spatial DBs, delivery zones | In-memory ML/geometry libraries |
+
+#### 🆕 Geohash precision nesting (fixed grid, not density-adaptive)
+
+Geohash subdivides by **string length**, uniformly, regardless of how many places actually live in a cell — the opposite of QuadTree's density-driven split. Picture it as nesting boxes, not a tree that only branches where it's crowded:
+
+```mermaid
+flowchart TB
+    P5["Precision 5: 9q8yy\n~4.9 km x 4.9 km"] --> P6a["Precision 6: 9q8yyk\n~1.2 km x 0.6 km"]
+    P5 --> P6b["Precision 6: 9q8yys"]
+    P5 --> P6c["Precision 6: 9q8yyt"]
+    P6a --> P7a["Precision 7: 9q8yykx\n~150 m x 150 m"]
+    P6a --> P7b["Precision 7: 9q8yyke"]
+```
+
+Every precision-6 cell subdivides into the same number of precision-7 children, whether it's downtown Manhattan or open desert — that uniformity is exactly why a naive fixed-precision geohash grid wastes space in sparse regions and gets overcrowded in dense ones (the same "uneven density" problem the static-grid row calls out below). The fix in production systems (Uber H3, Redis GEO) is to vary precision per query or per region rather than fix it globally — still simpler to operate than a full QuadTree, at the cost of manual tuning instead of automatic adaptation.
 
 ### 6.7 Disambiguation: Static Grid vs Dynamic Grid (QuadTree)
 

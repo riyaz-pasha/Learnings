@@ -1,5 +1,16 @@
 # Design Instagram — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added (1) a resumable/chunked-upload subsection for
+> large video files, which the original upload pipeline glossed over; (2) an explicit
+> cache-tier sequence diagram for the normal-user feed read (the "O(1) read" claim in
+> Section 8 meant "cache hit," which wasn't shown); (3) comment API endpoints, since
+> `COMMENT` exists in the data model and counters deep dive but was missing from the API
+> list; (4) a short discovery/explore-feed note distinguishing it from search; and (5) a
+> line tying the v3 architecture evolution explicitly back to celebrity special-casing.
+> Everything new is marked with 🆕. The mental model, capacity math, fan-out deep dive,
+> sharding, ID scheme, counters, ranking funnel, and privacy sections were already strong
+> and are left untouched.
+
 A photo/video-sharing social network: users post media, follow other users, and see a
 ranked/chronological feed of what the people they follow posted. The whole design boils
 down to one tension that shows up in almost every question the interviewer will ask:
@@ -197,17 +208,25 @@ POST /followUser(userID, target_userID)
 POST /unfollowUser(userID, target_userID)
 POST /likePost(userID, target_userID, post_id)
 POST /dislikePost(userID, target_userID, post_id)
+POST /addComment(userID, post_id, text)              🆕
+GET  /getComments(userID, post_id, generate_timeline)  🆕
 GET  /searchPhotos(userID, keyword)
 GET  /viewNewsfeed(userID, generate_timeline)
 ```
+
+🆕 `addComment`/`getComments` were the one gap between the API and the data model —
+`COMMENT` already exists in the ER diagram (Section 6) and the counters deep dive
+(Section 13) covers comment-count hotspots, but no endpoint had been listed. Comments
+paginate with the same cursor pattern as the feed.
 
 | Param | Meaning |
 |---|---|
 | `media_type` | photo or video |
 | `list_of_hashtags` | max 30 per post |
 | `caption` | max 2,200 chars |
+| `text` | comment body |
 | `keyword` | username, hashtag, or place — ranked by reach (likes + views) |
-| `generate_timeline` | timestamp marker — feed only returns posts unseen since last call (cursor-based pagination, not offset-based) |
+| `generate_timeline` | timestamp marker — feed/comments only return items unseen since last call (cursor-based pagination, not offset-based) |
 
 **Interview tip:** `generate_timeline` is a disguised **cursor/pagination token**. Say
 that explicitly — offset-based pagination ("give me posts 100-120") breaks under
@@ -377,7 +396,10 @@ This is the architecture already shown in Section 6, now labeled by *why* each n
 exists: **sharding** fixes "one DB can't hold everyone," the **async fan-out queue** fixes
 "fan-out blocks the write path," and a **dedicated graph-aware store** (TAO-style, Section
 10) fixes "the follow graph is too hot and too relational-shaped for a generic sharded
-table."
+table." 🆕 One more piece lives inside that fan-out queue and is easy to gloss over: the
+**fan-out workers apply the hybrid push/pull split from Section 8** — a 100M-follower
+account gets special-cased to skip the queue entirely (pull instead), so one celebrity
+post can never clog the same workers handling everyone else's normal-sized fan-out.
 
 **Interview signal:** narrating this evolution — and naming the breaking point at each
 stage — shows you'd build incrementally in a real job, not just recite an end-state
@@ -418,6 +440,36 @@ sequenceDiagram
 - **Con:** Read latency scales with *number of people followed* (fan-in) — slow for
   active social users, and it re-does this merge on every single feed open even if
   nothing changed.
+
+#### 🆕 Feed read with the cache tier (the piece the diagrams above skip)
+
+Section 8.2/8.3 call the push-model read "O(1) — just fetch the pre-computed list." That
+line is doing double duty: it means "cache hit," not "always instant." The pre-built
+timeline still lives in the Cassandra timeline store; the cache in front of it is what
+makes the read actually cheap. Making that explicit:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant TS as Timeline Service
+    participant Cache as Feed Cache (Redis/Memcached)
+    participant FS as Timeline Store (Cassandra)
+
+    U->>TS: GET /viewNewsfeed
+    TS->>Cache: GET timeline(userID)
+    alt cache hit (~90%+ of requests, Section 4)
+        Cache-->>TS: pre-built post-ID list
+    else cache miss
+        TS->>FS: read timeline row(userID)
+        FS-->>TS: post-ID list
+        TS->>Cache: SET timeline(userID), TTL
+    end
+    TS-->>U: hydrate post IDs → objects → return feed
+```
+
+Same cache-aside pattern as everywhere else in this design — the only thing that changes
+per feed model is *what* got written into the cached list at write time (nothing, for
+pure pull; every follower's row, for push; a mix, for hybrid).
 
 ### 8.2 Push (fan-out-on-write)
 
@@ -621,14 +673,53 @@ as async fan-out, applied one layer earlier in the pipeline.
 - **Lazy loading on the client:** only fetch media as the user scrolls into view — saves
   bandwidth and keeps perceived latency low (this is explicitly called out in the source
   material as a latency lever, not just a UX nicety).
-- **Compression:** transcode uploads into multiple resolutions/bitrates at write time
-  (thumbnail, feed-size, full-res) so the read path never serves more bytes than the
-  client viewport needs — this alone is a major lever on that 50 Tbps outbound number.
+- **Compression:** transcode uploads into multiple resolutions/bitrates at write time so
+  the read path never serves more bytes than the client viewport needs — this alone is a
+  major lever on that 50 Tbps outbound number. Illustrative renditions: photos get a
+  150×150 thumbnail (grid view), a 640×640 feed-res copy, and a 1080×1080 full-res copy
+  (zoom/profile); videos get transcoded into an adaptive-bitrate ladder (e.g. 240p/480p/
+  720p/1080p), same idea as YouTube/Netflix — the player picks whichever rendition fits
+  the viewer's current bandwidth instead of always pulling the biggest file.
+
+### 🆕 Chunked / resumable upload for large media
+
+The pipeline diagram above shows `C->>U: POST /postMedia (raw photo/video bytes)` as one
+step — fine for a 3 MB photo, risky for a 150 MB video on a flaky mobile connection. If
+that single request drops at 95% uploaded, a non-chunked client re-uploads all 150 MB
+from scratch. The standard fix: split the file client-side and upload it in pieces that
+can be retried independently.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant U as Upload Service
+    participant B as Blob Store (multipart)
+
+    C->>U: initiate upload (file size, checksum)
+    U-->>C: upload_id + chunk plan (e.g. 30 chunks × 5MB)
+    loop for each chunk (parallel or sequential)
+        C->>U: PUT chunk i (upload_id, chunk_index, bytes)
+        U->>B: store chunk i (multipart part)
+        U-->>C: ack: chunk i committed
+    end
+    C->>U: complete upload (upload_id)
+    U->>B: finalize multipart object
+    U-->>C: 202 Accepted (upload_id) — enters transcode pipeline above
+    Note over C,U: Connection drops mid-upload?<br/>Client resumes from last acked chunk_index,<br/>not from byte zero.
+```
+
+**Illustrative numbers:** a 150 MB video at 5 MB/chunk = 30 chunks. Without chunking, a
+dropped connection at chunk 29 of 30 costs a full 150 MB re-upload; with chunking, it
+costs one 5 MB retry. Chunk size is a trade-off: smaller chunks resume more cheaply but
+add per-chunk request overhead; 4–8 MB is a common middle ground. This is the same idea
+as S3 multipart upload or the `tus.io` resumable-upload protocol — name-drop either if
+asked "how do you handle a large file upload reliably."
 
 **Cheat-sheet**
 - Say "metadata in SQL, bytes in blob store, blob store optimized to minimize disk seeks per read" — that's the whole Haystack insight in one sentence.
 - CDN exists because of the *read:write ratio*, not because "CDNs are good practice" — tie it back to the 502.8 Gbps in / 50.28 Tbps out numbers.
 - Multiple resolutions generated at upload time, not at read time — never transcode on the read path.
+- Large files upload in resumable chunks, not one shot — a dropped connection should cost one chunk, not the whole file.
 
 ---
 
@@ -825,11 +916,19 @@ keep only when neither can be stale — rare in this system.
   the index and filter at query time, or simply never index a private account's posts for
   public search — only serve them through the normal follow-based feed path. See Section
   19 for the full privacy/blocking treatment.
+- **🆕 Discovery / Explore, vs. search:** search is pull-based and query-driven — the user
+  types a keyword. Explore/discovery is the opposite: no query, the system pushes content
+  it predicts you'll engage with from accounts you don't follow. Mechanically it's not a
+  new subsystem — it reuses the same candidate-generation → ranking funnel as the main
+  feed (Section 18), just swapping the candidate source from "posts by people you follow"
+  to "posts similar users engaged with." Worth naming if asked "how do users find new
+  content," but don't build it as a separate architecture from scratch.
 
 **Cheat-sheet**
 - Search index is a separate system fed asynchronously from writes — never query the primary DB with a `LIKE '%keyword%'` at this scale.
 - Ranking by reach means search is really "search + a lightweight ranking function," foreshadowing full feed ranking (Section 18).
 - Privacy checks belong in the query/filter path, not as an afterthought — a private post leaking through search is a real production bug class.
+- Search = query-driven pull; Explore/discovery = query-less push, same ranking funnel, different candidate source.
 
 ---
 

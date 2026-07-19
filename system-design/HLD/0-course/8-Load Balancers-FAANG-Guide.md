@@ -1,5 +1,15 @@
 # Load Balancers — FAANG System Design Interview Guide
 
+> **Enhancement notes:** this pass filled gaps that were thin or missing in the original: TLS
+> termination vs. passthrough vs. re-encryption (§4), health-check *recovery* (re-adding a node,
+> not just removing it, with slow-start) (§4), the concrete cost of sticky sessions — uneven load
+> and blocked scale-down (§7), and an explicit active-passive vs. active-active comparison for LB
+> HA (§2). It also adds a new v1 → v2 → v3 architecture-evolution diagram (end of §9), a "Key
+> trade-off" column plus worked numeric examples on the algorithm table (§6), and a handful of new
+> cheat-sheet/interview-signal entries (§13–14) so the additions are recallable, not just present.
+> The rest of the guide was already tight and example-rich, so it was left as written — new
+> material is marked with 🆕 throughout.
+
 ## Quick visual overview — the whole chapter in one diagram
 
 Every section below is a zoom-in on one hop of this journey. If you remember only one picture,
@@ -96,6 +106,23 @@ sequenceDiagram
 **Memory hook:** the VIP is the address; the LB owning it is just a lease-holder. Losing the
 lease-holder doesn't lose the address.
 
+### 🆕 Active-passive vs. active-active — the other half of the SPOF answer
+
+The diagram above shows active-passive (one owner, one idle standby). That's the easier case to
+reason about, but interviewers often push on the alternative — say both out loud:
+
+| | Active-passive | Active-active |
+|---|---|---|
+| Do both nodes serve live traffic? | No — standby sits idle until the VIP moves to it | Yes — both nodes take real traffic at the same time |
+| Mechanism | Single VIP, VRRP/keepalived picks one owner | Multiple LB IPs live at once — DNS with multiple A records, or ECMP/anycast spreading connections across both |
+| Capacity efficiency | Wastes the standby's capacity (you pay for an idle box) | Full utilization of every node you run |
+| What happens on failure | Clean VIP takeover — survivor was already idle, just starts serving | In-flight connections *pinned to the failed node* still drop; the LB tier reroutes new connections to survivors, but existing ones aren't magically resumed |
+| Typical fit | Simpler ops, smaller fleets, or when the standby doesn't need to coordinate any shared state | Larger fleets, cloud-managed LBs (AWS ALB/NLB and GCP's Cloud LB are active-active internally by default) |
+
+**Memory hook:** active-passive trades money (idle standby) for simplicity; active-active trades
+simplicity (rerouting live connections) for full utilization. Managed cloud LBs default to
+active-active because the provider already owns the complexity — you just don't see it.
+
 ## 3. Where load balancers sit
 
 LBs aren't limited to the client-facing edge — in a classic three-tier architecture you place one
@@ -166,6 +193,50 @@ sequenceDiagram
 passive checking notices "you didn't answer" from real traffic. Production LBs use both — active
 catches failures before users do, passive catches anything active checks missed between polls.
 
+### 🆕 How a node gets removed *and re-added* (interviewers ask both halves)
+
+Most candidates can explain removal. Fewer explain recovery — say both, with numbers, so it
+sounds like a real config instead of a vague idea:
+
+- **Unhealthy threshold**: e.g. 3 consecutive failed probes at a 5-second interval → the LB
+  declares the node dead and pulls it from rotation in ~15 seconds (illustrative numbers — real
+  thresholds are config, not physics).
+- **The LB keeps probing the removed node anyway** — it isn't deleted from the pool, just marked
+  "out of rotation," so it can come back automatically.
+- **Healthy threshold**: e.g. 2 consecutive successful probes at the same 5-second interval →
+  the node is eligible to rejoin, roughly ~10 seconds after it starts responding again.
+- **Slow start on re-entry**: a server that just rebooted has a cold cache/cold JIT/cold
+  connection pool. Dumping full traffic share on it immediately can cause it to fail health
+  checks again. Many LBs (AWS ALB's "slow start" is a named example) ramp a recovering node from
+  a small traffic weight up to 100% over a configurable window — illustrative range: 30–900
+  seconds — instead of an instant on/off switch.
+
+**Memory hook:** removal is a threshold crossed downward; recovery is the *same* threshold
+crossed upward, plus a ramp so the server doesn't get re-crushed the moment it's trusted again.
+
+### 🆕 TLS termination vs. passthrough vs. re-encryption
+
+"TLS termination" is in the services table above as one line — it deserves its own comparison,
+because "termination vs. passthrough" is a direct, frequently-asked interview question:
+
+| | **Termination** | **Passthrough** | **Re-encryption (TLS bridging)** |
+|---|---|---|---|
+| Where TLS ends | At the LB | At the backend server | Twice — at the LB, then again LB→backend |
+| What the LB can see | Full plaintext HTTP: headers, cookies, URL, body | Nothing — just encrypted bytes (can still route on the **SNI hostname**, unencrypted in the TLS handshake) | Full plaintext, same as termination, before it re-encrypts |
+| Enables L7 features (path/header/cookie routing)? | Yes | No — only SNI-based routing | Yes |
+| Backend CPU cost | Backend does no crypto | Backend does its own TLS handshake/crypto | Backend still does a (cheaper, private-network) TLS handshake |
+| End-to-end encryption? | No — LB↔backend hop is typically plaintext HTTP inside the trusted network | Yes — client's TLS session goes untouched all the way to the backend | Yes, in two separate encrypted hops |
+| Typical driver | Default choice — you want L7 routing/WAF/rate-limiting at the LB | Compliance (PCI/HIPAA) or client-cert auth that requires the *backend* to see the original TLS session | Compliance that requires encryption everywhere, but you still want L7 features at the edge |
+
+Illustrative cost note: a full TLS handshake costs roughly 1-2ms of CPU per connection
+(illustrative, varies by cipher/hardware) — trivial per-connection, but at tens of thousands of
+new connections/sec it's why hyperscale L4 LBs (Maglev, Katran) either skip termination entirely
+or offload it to dedicated crypto hardware.
+
+**Memory hook:** *termination opens the envelope and reads the letter; passthrough only reads the
+address on the outside (SNI) and never opens it; re-encryption opens it, reads it, then reseals
+it in a new envelope for the last leg.*
+
 ## 5. Global vs. local load balancing
 
 Two distinct problems get conflated under "load balancing" — know the difference cold.
@@ -230,15 +301,26 @@ actually in the request path.
 
 ## 6. Load balancing algorithms
 
-| Algorithm | How it decides | Best for |
-|---|---|---|
-| **Round-robin** | Cycles through servers sequentially | Homogeneous servers, uniform request cost |
-| **Weighted round-robin** | Round-robin biased by a per-server capacity weight | Heterogeneous server capacity |
-| **Least connections** | Picks server with fewest active connections | Long-lived/variable-duration requests (e.g., WebSocket, streaming) |
-| **Least response time** | Picks server currently responding fastest | Latency-sensitive services |
-| **IP hash** | Hash of client IP → server | Sticky sessions without a shared session store |
-| **URL hash** | Hash of URL/path → server | Routing to service-specific server pools (e.g., cache locality) |
-| **Consistent hashing** | Ring/hash-space mapping, minimal remapping on scale change | Stateless LBs, sharded caches, minimizing cache-miss storms on scale-out |
+| Algorithm | How it decides | Best for | 🆕 Key trade-off |
+|---|---|---|---|
+| **Round-robin** | Cycles through servers sequentially | Homogeneous servers, uniform request cost | Blind to actual load — a slow/overloaded server still gets its equal turn |
+| **Weighted round-robin** | Round-robin biased by a per-server capacity weight | Heterogeneous server capacity | Weight is a static guess set at config time — doesn't adapt if real-time load shifts |
+| **Least connections** | Picks server with fewest active connections | Long-lived/variable-duration requests (e.g., WebSocket, streaming) | Requires the LB to track live connection counts per server — more state, more coordination overhead |
+| **Least response time** | Picks server currently responding fastest | Latency-sensitive services | Needs continuous latency sampling; a server can look artificially fast right after being marked healthy again (empty queue) |
+| **IP hash** | Hash of client IP → server | Sticky sessions without a shared session store | Uneven if client IPs aren't evenly distributed (e.g., one large NAT/corporate proxy = one "client") |
+| **URL hash** | Hash of URL/path → server | Routing to service-specific server pools (e.g., cache locality) | A single hot URL/path still overloads one server — hashing doesn't rebalance skewed popularity |
+| **Consistent hashing** | Ring/hash-space mapping, minimal remapping on scale change | Stateless LBs, sharded caches, minimizing cache-miss storms on scale-out | More complex to implement/reason about than mod-N hashing; needs virtual nodes to avoid uneven ring distribution |
+
+**🆕 Worked examples (concrete numbers, not just names):**
+- **Weighted round-robin:** Server A is weighted 3, Server B is weighted 1 (A has 3x B's
+  capacity). Out of every 4 incoming requests, 3 go to A and 1 goes to B.
+- **Least connections:** at the moment a new request arrives, Server A has 40 active connections,
+  Server B has 15. The LB sends the new request to B — not because B is "the algorithm's turn,"
+  but because it's carrying less live work right now.
+- **Consistent hashing:** with 4 cache shards on the ring holding roughly 1,000 keys each
+  (illustrative), adding a 5th shard remaps only the ~200 keys physically adjacent to it on the
+  ring — the other ~3,800 keys stay put. Plain `hash(key) % N` would have remapped nearly all
+  4,000 keys the moment `N` changed from 4 to 5.
 
 **Decision tree — pick the algorithm out loud instead of reciting the table:**
 
@@ -286,6 +368,25 @@ flowchart TD
 sessions** (session affinity) — an L7 LB attaches a cookie pinning a client to a server, giving
 most of stateful LB's benefit without full cross-LB state sharing. Combine with a shared session
 store (Redis) if you need failover-safe stickiness.
+
+**🆕 The cost of sticky sessions — say this before an interviewer asks "any downsides?":**
+- **Uneven load.** Load-balancing algorithms assume they can freely redistribute the *next*
+  request. Stickiness removes that freedom for the *rest of that client's session* — if a handful
+  of pinned clients happen to send heavy requests, their server gets overloaded while others idle,
+  and the LB can't rebalance mid-session without breaking the affinity contract.
+- **Complicates scaling down.** You can't just terminate a server that has active sticky sessions
+  — doing so drops every client pinned to it. The safe path is to **drain** it first: stop
+  assigning *new* sessions to that server, then wait for existing sessions to end or their cookie
+  TTL to expire (illustrative example: a 30-minute session cookie means up to a 30-minute drain
+  window) before removing the instance.
+- **Failure isn't free either.** If the pinned server crashes outright (no graceful drain), the
+  session state dies with it unless it was externalized to a shared store — which is exactly why
+  "sticky sessions + Redis-backed session store" is the standard pairing, not sticky sessions
+  alone.
+
+**Memory hook:** stickiness is a promise to one client at the cost of the LB's freedom to
+rebalance everyone else — the more of it you use, the less "horizontally scalable" your fleet
+really behaves.
 
 **Why consistent hashing is the "stateless" answer** — the whole point is that adding/removing
 one server only remaps the keys next to it on the ring, not everything:
@@ -526,6 +627,63 @@ local picks the desk.* Three decisions, three different costs, three different f
 speeds — collapsing them into one "add a load balancer" answer is the single most common gap at
 this scale.
 
+### 🆕 Putting it all together: architecture evolution v1 → v2 → v3
+
+Every mechanism in this guide showed up because a simpler version broke. Narrating this
+progression — instead of jumping straight to the "final" tiered diagram — is a strong way to show
+an interviewer *why* each piece exists, not just that it exists.
+
+**v1 — single LB, no redundancy, no health awareness:**
+
+```mermaid
+flowchart LR
+    subgraph V1["v1: one LB, works until it doesn't"]
+        C1[Clients] --> LB1[Single LB]
+        LB1 --> S1[Server 1]
+        LB1 --> S2[Server 2]
+        LB1 --> S3[Server 3]
+    end
+```
+Gap: the LB is a single point of failure (§2), and it keeps sending traffic to a dead server
+because nothing is checking (§4).
+
+**v2 — active-passive LB pair, with health checks:**
+
+```mermaid
+flowchart LR
+    subgraph V2["v2: active-passive pair + health checks"]
+        C2[Clients] --> VIP2["Virtual IP (VRRP)"]
+        VIP2 --> LBA[LB-A, active]
+        VIP2 -.->|"standby, takes VIP on failure"| LBB[LB-B, passive]
+        LBA -->|"probes every 5s"| S1b[Server 1, healthy]
+        LBA --> S2b[Server 2, healthy]
+        LBA -.->|"3 failed probes → removed"| S3b["Server 3 (crashed)"]
+    end
+```
+Fixes: LB SPOF (§2, VRRP failover in ~1-3s) and dead-backend routing (§4). Still limited to one
+data center and one algorithm — no notion of "which region" yet.
+
+**v3 — GSLB + regional/tiered LBs + consistent hashing for stateful backends:**
+
+```mermaid
+flowchart TD
+    U[Users worldwide] --> GSLB["GSLB / Anycast DNS (§5)"]
+    GSLB --> RegA["Region: us-east<br/>Tier-1→3 LB stack (§9)"]
+    GSLB --> RegB["Region: eu-west<br/>Tier-1→3 LB stack (§9)"]
+    RegA --> Stateless["Stateless app servers<br/>round-robin / least-conn (§6)"]
+    RegA --> Ring["Consistent-hash ring (§7)<br/>for stateful backends"]
+    Ring --> Cache1[(Cache shard A)]
+    Ring --> Cache2[(Cache shard B)]
+    Ring --> Cache3[(Cache shard C)]
+```
+Fixes: multi-region reach and regional failover (§5, §9), plus safe scaling of stateful backends
+— adding/removing a cache shard remaps only ~1/N of keys instead of a full cache-stampede (§7).
+
+**Memory hook:** each version fixes exactly one gap the previous one exposed — v1→v2 removes the
+LB itself as a SPOF and adds failure detection; v2→v3 adds "which region" and makes scaling
+stateful backends safe. If an interviewer asks "how would this evolve as we grow," this is the
+story to tell, in this order.
+
 ## 10. API Gateway vs. Load Balancer
 
 ### Mental model
@@ -727,8 +885,10 @@ Watch for these interviewer signals — each maps to a specific part of this gui
 | "What if a server crashes?" | Health checking, dynamic algorithms (§4, §6) |
 | "Users are global, how do you route them efficiently?" | GSLB, anycast, latency-based DNS (§5) |
 | "What if the load balancer itself dies?" | LB redundancy, VIP failover, cloud-managed LBs (§2) |
-| "How do you keep a user's session on the same server?" | Sticky sessions / stateful vs stateless (§7) |
+| "How do you keep a user's session on the same server?" | Sticky sessions / stateful vs stateless, and the uneven-load/scale-down cost of stickiness (§7) |
 | "Can you inspect the request to route it?" | L7 vs L4 (§8) |
+| "🆕 Where does TLS get decrypted?" | Termination vs. passthrough vs. re-encryption (§4) |
+| "🆕 A server just recovered — does it come back instantly?" | Health-check recovery thresholds + slow start (§4) |
 | "How would you design this at Google/Facebook/Netflix scale?" | Tiered LB hierarchy, Maglev/Katran, client-side LB (§9, §11–12) |
 | "Your app spans multiple regions/data centers — how does traffic get distributed?" | The three-tier decision: global (region) → regional (AZ) → local (instance); AZ failover is cheap, region failover is expensive (§9 "Zooming out") |
 | "What about the database/cache behind it — same routing?" | Stateful pinning: reads spread globally, writes pinned to the primary region (§9 "Zooming out") |
@@ -749,6 +909,8 @@ mid-level-vs-senior tells in these interviews.
   performance.
 - **SPOF answer**: active-active/active-passive VIP pairs (VRRP/keepalived), anycast, or just use
   a managed cloud LB.
+- **🆕 Active-passive vs active-active**: passive standby is simple but wastes idle capacity;
+  active-active uses both nodes but drops in-flight connections pinned to whichever node fails.
 - **GSLB ≠ local LB**: GSLB routes across regions (DNS, anycast, cloud LBaaS); local LB routes
   across servers within one DC (reverse proxy + VIP).
 - **DNS round-robin limits**: 512B packet size, no health awareness, long-TTL staleness, ISP
@@ -760,8 +922,16 @@ mid-level-vs-senior tells in these interviews.
   always worth it in practice.
 - **Stateful vs stateless**: stateful = resilient but complex/less scalable; stateless = fast,
   uses consistent hashing, pair with sticky sessions/shared session store if needed.
+- **🆕 Sticky session cost**: pins one client to one server → uneven load if session weight
+  varies, and blocks safe scale-down until the server is drained of its pinned sessions.
 - **L4 vs L7**: L4 = fast & blind (TCP/UDP); L7 = smart & slower (HTTP-aware, TLS termination,
   rate limiting).
+- **🆕 TLS termination vs passthrough vs re-encryption**: termination enables L7 routing but the
+  LB↔backend hop is plaintext; passthrough keeps end-to-end encryption but the LB can only route
+  on SNI; re-encryption gets both at the cost of two TLS handshakes.
+- **🆕 Health-check recovery, not just removal**: a node is pulled after N consecutive failed
+  probes (e.g. 3 × 5s ≈ 15s) and re-added after M consecutive successes (e.g. 2 × 5s ≈ 10s),
+  often with a slow-start ramp so a just-recovered node isn't instantly re-crushed.
 - **Tiered hierarchy**: DNS (tier-0) → ECMP (tier-1) → L4 consistent-hash (tier-2) → L7
   HTTP-routing (tier-3).
 - **Multi-region scale = three routing decisions, not one**: global (which region — anycast/BGP
@@ -771,6 +941,9 @@ mid-level-vs-senior tells in these interviews.
 - **Stateful pinning**: reads load-balance globally like any stateless request; writes pin to the
   primary region/AZ and replicate out — multi-region write availability is a
   consensus/replication problem, not a load-balancing one.
+- **🆕 Architecture evolution**: v1 single LB (SPOF, no health checks) → v2 active-passive pair +
+  health checks (fixes both) → v3 GSLB + tiered regional LBs + consistent hashing for stateful
+  backends (adds multi-region reach and stampede-free scaling). Narrate it in that order.
 - **Implementation**: hardware (expensive, rigid) → software (flexible, cheap) → cloud LBaaS
   (managed, metered) → client-side LB (no extra hop, pushes complexity to clients).
 - **Name-drop real systems**: Maglev (Google, consistent-hashing L4), Katran (Meta, eBPF/XDP L4),

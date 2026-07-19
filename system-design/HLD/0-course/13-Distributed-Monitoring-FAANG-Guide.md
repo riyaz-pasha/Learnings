@@ -1,26 +1,54 @@
 # Distributed Monitoring — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added the pieces a FAANG interviewer
+> expects but the original draft assumed or skipped: a **Requirements**
+> section (§2), a **Capacity estimation** walkthrough with illustrative
+> numbers (§4), an explicit **Data model** section for metric+labels→series
+> (§7), and an **API design** section covering push/pull/query endpoints
+> (§10). It also deepened existing sections: a cardinality-explosion
+> flowchart + retention-tiers table (§9), an architecture **evolution
+> diagram v1→v2→v3** (§11), a query-performance-at-scale subsection (§12),
+> and a rule-evaluation-at-scale explainer with a sequence diagram (§13).
+> All net-new headings are marked 🆕; everything else (mental model, cost
+> numbers, failure domains, metric types, push/pull core comparison, alert
+> lifecycle, client-side deep-dive, three pillars, real systems) is
+> untouched apart from small clarity tweaks and cross-references. Section
+> numbers 2–17 shifted to make room — the content order and voice are
+> otherwise the original guide's.
+
 ## The whole chapter in one picture
 
 ```mermaid
 mindmap
   root((Distributed<br/>Monitoring))
+    Before you design
+      Requirements
+      Capacity estimation
     Why
       Cascading failures
       Downtime cost
     What to measure
       Metric types
       RED / USE / Golden Signals
+      Data model - name+labels=series
     How to collect
       Push vs Pull
+    APIs
+      Push endpoint
+      Pull endpoint
+      Query API
     Where to store
       Time-series DB
       Gorilla compression
+      Cardinality explosion
+      Retention tiers
     How to see it
       Dashboards
       Heatmaps / Top-N
+      Query performance
     How to react
       Alert lifecycle
+      Rule evaluation at scale
       SLI / SLO / SLA
     Client-side
       RUM
@@ -95,7 +123,36 @@ monitoring closes.
 
 ---
 
-## 2. The cost of not monitoring (memorize these numbers)
+## 2. 🆕 Requirements — what to clarify before you design anything
+
+Ask these out loud in the first couple of minutes. They drive every later
+decision — push vs. pull, retention length, how strict your cardinality
+limits need to be.
+
+**Functional requirements**
+- Collect metrics from every host/service/container in the fleet — both OS-level (CPU, memory, disk) and custom application metrics.
+- Store metrics as time series, queryable by metric name plus labels, over an arbitrary time range.
+- Visualize metrics on dashboards (ad-hoc exploration + saved dashboards).
+- Continuously evaluate alerting rules and notify on-call when a rule fires.
+- (Stretch, mention and move on) support both real-time queries (seconds-old data) and historical queries (years-old, downsampled data).
+
+**Non-functional requirements**
+- **Scale**: a fleet of 100K+ hosts, each emitting hundreds to thousands of metrics — that's millions of active time series (see capacity estimation below).
+- **Low collection overhead**: instrumentation must not itself slow down the thing being measured — "death by observability" is a real failure mode.
+- **Write-heavy**: ingestion volume dwarfs read volume. Optimize the write path first, the read path second.
+- **The monitoring system must be more available than what it watches** — if it shares a failure domain with the systems it monitors, an outage can blind you at the exact moment you need visibility.
+- **Durability vs. cost**: losing the last few seconds of raw samples in a crash is tolerable; silently losing historical trend data is not.
+- **Fast queries over huge ranges**: "p99 latency for the last 30 days" should render in a couple of seconds, not minutes.
+
+**Explicitly out of scope for a first pass** — say this so the interviewer knows you know the boundary: distributed tracing internals, log storage/search, synthetic/blackbox probing. Acknowledge the three pillars exist (§ Logs vs. Metrics vs. Traces below), then keep the rest of the interview focused on metrics.
+
+**Cheat-sheet:**
+- Lead with "collect → store → query → visualize → alert," then immediately flag fleet size × metrics-per-host as the number that drives every architecture choice.
+- If the interviewer doesn't hand you a fleet size, pick one and label it illustrative (e.g., "let's say 100K hosts") — never leave capacity estimation undefined.
+
+---
+
+## 3. The cost of not monitoring (memorize these numbers)
 
 | Incident | Date | Cost |
 |---|---|---|
@@ -113,7 +170,38 @@ first-class non-functional requirement, not an afterthought.
 
 ---
 
-## 3. Two failure domains: server-side vs. client-side
+## 4. 🆕 Capacity estimation (the numbers interviewers want to see)
+
+Treat the numbers below as illustrative — state your assumptions out
+loud, then compute. The interviewer cares more about the *method*
+(what multiplies by what) than the exact digits.
+
+**Ingest rate**
+- Assume 100,000 hosts, each emitting 1,000 distinct time series, scraped/pushed every 15s.
+- Data points/sec = 100,000 × 1,000 ÷ 15 ≈ **6.7M data points/sec** fleet-wide.
+- At roughly 2 bytes/point after Gorilla-style compression (see § TSDB below), that's ~13 MB/sec of compressed write throughput, ~1.1 TB/day.
+
+**Cardinality**
+- Active time series = hosts × metrics-per-host = 100,000 × 1,000 = **100M active series**.
+- Each series needs an in-memory index entry (metric name + label set). At ~500 bytes/series that's ~50 GB just for the index — before a single sample is stored. This is why cardinality, not raw point volume, is the scarce resource in a TSDB.
+- Contrast: a label with unbounded cardinality (e.g., `user_id` with 10M distinct values) can turn 1,000 base metrics into up to **10 billion** series — this is the failure mode covered in the cardinality-explosion section below.
+
+**Storage / retention**
+- Raw (15s resolution), kept 15 days: 6.7M points/sec × 86,400s × 15 days × ~2 bytes ≈ **~17 TB** compressed.
+- 5-min rollups, kept 13 months: roughly 1/20th the point rate of raw → a few TB.
+- 1-hour rollups, kept years: smaller still — effectively "free" to retain forever.
+- Rule of thumb: each downsampling tier costs roughly an order of magnitude less than the tier below it. That's why tiered retention — not "keep everything at full resolution forever" — is the only economical option at this scale.
+
+**Query load**
+- Reads (dashboards opening, alert rules ticking) are bursty, not constant. Provision for peak concurrent queries, not the average.
+
+**Cheat-sheet:**
+- Memorize the *shape* of the calculation, not the digits: `hosts × metrics/host ÷ scrape_interval = points/sec`.
+- Cardinality (unique label combinations) — not raw point count — is what actually breaks a TSDB. Call this out explicitly; it's the thing interviewers probe for.
+
+---
+
+## 5. Two failure domains: server-side vs. client-side
 
 | | Server-side errors | Client-side errors |
 |---|---|---|
@@ -134,7 +222,7 @@ server logs.
 
 ---
 
-## 4. Metrics: the atomic unit of monitoring
+## 6. Metrics: the atomic unit of monitoring
 
 A **metric** = what to measure + the unit + a timestamped value.
 Good metrics have low collection overhead — measuring must not itself
@@ -180,7 +268,43 @@ flowchart TD
 
 ---
 
-## 5. Push vs. pull — the central design decision
+## 7. 🆕 Data model: how a "metric" becomes a "time series"
+
+A **metric name** plus a **set of labels (key/value tags)** together
+define one **time series** — a stream of `(timestamp, value)` pairs
+ordered in time. Change any label *value* and you get a different
+series, not the same one with more data.
+
+```mermaid
+flowchart TD
+    M["Metric name<br/>http_requests_total"] --> L1["+ labels<br/>{method=GET, status=200, host=web-01}"]
+    M --> L2["+ labels<br/>{method=POST, status=500, host=web-02}"]
+    L1 --> S1["Series 1<br/>(t1,v1) (t2,v2) (t3,v3) ..."]
+    L2 --> S2["Series 2<br/>(t1,v1) (t2,v2) (t3,v3) ..."]
+```
+
+Concretely, one sample looks like this (Prometheus exposition style):
+
+```
+http_requests_total{method="GET", status="200", host="web-01"} = 42893  @ t=1737200015
+```
+
+- **Metric name** — what's being measured (`http_requests_total`, `cpu_usage_percent`).
+- **Labels/tags** — dimensions you'll want to slice or filter by (`method`, `status`, `region`, `host`). Every unique combination of label values is its own series, indexed separately.
+- **Timestamp** — when the sample was taken (usually collection time, not event time).
+- **Value** — a single float for counters/gauges, or a set of bucket counts for a histogram.
+
+This is exactly why label choice *is* the capacity-planning decision —
+adding a label multiplies series count by that label's cardinality (see
+the cardinality-explosion section under TSDBs, below).
+
+**Cheat-sheet:**
+- Mnemonic: **"Name + Labels = Series."** Same name, different label values → different series, each indexed and stored separately.
+- Cardinality multiplies across labels, it doesn't add: a metric with 3 labels of cardinality 10, 5, and 2 produces `10 × 5 × 2 = 100` series, not `10 + 5 + 2 = 17`.
+
+---
+
+## 8. Push vs. pull — the central design decision
 
 The course frames this correctly: **always describe push/pull from the
 monitoring system's point of view**, not the server's, or you'll confuse
@@ -219,6 +343,16 @@ sequenceDiagram
 | **Service discovery need** | Yes — monitoring system must know all targets (via Consul/K8s API/DNS) | No — servers self-register by pushing |
 | **Real examples** | Prometheus, Google Borgmon/Monarch | StatsD, Graphite, AWS CloudWatch (custom metrics), Facebook ODS |
 
+**🆕 Why Prometheus actually chose pull:** three reasons, in order of how
+often interviewers ask for them —
+1. **The monitoring system stays in control of its own load.** With push, a bug that makes every host push twice as often can overwhelm the collector; with pull, the scraper paces itself no matter what the targets do.
+2. **A failed scrape is a free liveness check.** You don't need a separate heartbeat mechanism — "can I reach `/metrics`" already tells you the process is up and responsive.
+3. **It composes cleanly with service discovery.** Point Prometheus at Kubernetes'/Consul's target list and it scrapes whatever exists right now — no per-host config push needed when hosts come and go.
+
+The trade-off it accepts: the monitoring system needs network reachability
+to every target (harder across firewalls/NAT), and short-lived jobs need
+a workaround (Pushgateway) since they may not exist at the next scrape.
+
 **Interview answer skeleton:** "I'd default to pull for long-running
 services — it's simpler to reason about load on the monitoring system and
 plays well with service discovery in Kubernetes. I'd add a push path (via a
@@ -232,7 +366,7 @@ catch them."
 
 ---
 
-## 6. Persisting the data: time-series databases
+## 9. Persisting the data: time-series databases
 
 A centralized in-memory store works at small scale. At FAANG scale (millions
 of time series, thousands of samples/sec), you need a **time-series
@@ -272,13 +406,92 @@ flowchart LR
     Down2 --> Archive["Cold archive / delete<br/>past retention policy"]
 ```
 
+#### 🆕 Retention tiers, with illustrative numbers
+
+| Tier | Resolution | Typical retention | Storage vs. raw | Use case |
+|---|---|---|---|---|
+| Raw | Every scrape (e.g., 15s) | Hours–days (Prometheus default: 15d) | 1x (baseline) | "What happened 10 minutes ago" |
+| 5-min rollup | avg/max/min per 5 min | Weeks–13 months | ~1/20th | Dashboards over days/weeks |
+| 1-hour rollup | avg/max/min per hour | Months–years | ~1/240th | Long-term/year-over-year trends |
+| Cold archive | Same as last rollup, on object storage (S3/GCS) | Years, or forever | Negligible marginal cost | Compliance, historical analysis |
+
+Mnemonic for the tiers: **Raw → Rolled → Really-old (archive)** —
+resolution drops and retention length grows at every step.
+
 **Cheat-sheet:**
 - Retention strategy: keep raw samples for hours/days, downsample (avg/max per 5-min bucket) for weeks, further downsample for years. This bounds storage growth (a classic system design trade-off: **precision vs. storage cost**).
-- Cardinality explosion is the #1 operational risk in a TSDB — a label like `user_id` on a metric creates millions of unique time series and can take down the whole system. Always mention label-cardinality limits when discussing metric design.
+- **If a query's range is more than a few hours, it should read from a downsampled tier, not raw** — otherwise the query engine scans far more points than the dashboard can even render.
+
+#### 🆕 Cardinality-explosion protection flowchart
+
+Cardinality explosion is the #1 operational risk in a TSDB — a single
+poorly-chosen label can multiply series count by orders of magnitude.
+**Example:** 1,000 base time series with a `user_id` label carrying
+100,000 distinct values turns into up to **100,000,000 series** — the
+in-memory index alone can exceed available memory and take the whole
+TSDB down. Real incidents at this scale are almost always a label like
+`user_id`, `request_id`, `session_id`, `raw_url`, or a client IP baked
+directly into a label.
+
+```mermaid
+flowchart TD
+    New["New label value observed<br/>at ingestion"] --> Check{"Is this label unbounded?<br/>(user_id, request_id, IP, raw URL)"}
+    Check -->|Yes| Reject["Reject or strip the label<br/>at the exporter / ingestion gateway"]
+    Check -->|No, bounded set| Count{"Series count for this metric<br/>over the configured limit?"}
+    Count -->|Yes| Throttle["Drop the new series,<br/>emit a 'cardinality limit exceeded' meta-metric"]
+    Count -->|No| Accept["Accept — index and store the series"]
+```
+
+**Cheat-sheet:**
+- **If a label's set of possible values is unbounded or user-controlled → never put it in a label.** Bucket it, hash it into a bounded set, or move it to a log/trace instead — metrics are for low-cardinality dimensions only.
+- Always mention a hard per-metric series limit and an ingestion-time rejection rule — this is the concrete mechanism that turns "watch out for cardinality" from a slogan into a design decision.
 
 ---
 
-## 7. High-level architecture of a monitoring system
+## 10. 🆕 API design: push, pull, and query
+
+Three API surfaces worth naming explicitly — interviewers want to see
+you separate "how metrics get in" from "how metrics get out."
+
+**1. Pull endpoint (exposed by every monitored instance)**
+```
+GET /metrics
+```
+Response — plain text, one line per series (this is the real Prometheus
+exposition format, worth reciting from memory):
+```
+# TYPE http_requests_total counter
+http_requests_total{method="GET",status="200"} 42893
+http_requests_total{method="POST",status="500"} 12
+# TYPE queue_depth gauge
+queue_depth 47
+```
+The scraper hits this on a fixed interval (e.g., every 15s) per target.
+
+**2. Push endpoint (for the push model, or a gateway for ephemeral jobs)**
+```
+POST /api/v1/push
+Body: [{ "metric": "job_duration_seconds",
+         "labels": {"job": "nightly-etl"},
+         "value": 812.4,
+         "timestamp": 1737200015 }]
+```
+
+**3. Query API (used by dashboards and the alerting engine alike)**
+```
+GET /api/v1/query_range?query=rate(http_requests_total{status="500"}[5m])&start=...&end=...&step=60s
+```
+Returns `(timestamp, value)` points per matching series. The same
+query language (PromQL-style) powers both a dashboard panel and an
+alert rule — one query engine, two consumers, by design.
+
+**Cheat-sheet:**
+- Three verbs to say out loud: **expose** (pull target), **ingest** (push target), **query** (read). Don't conflate the write API with the query API — they have very different load profiles: writes are constant and high-volume, queries are bursty.
+- The query API is the one both Grafana and the alerting engine call — say this explicitly to show alerting is "just another query consumer," not a separate data path.
+
+---
+
+## 11. High-level architecture of a monitoring system
 
 ```mermaid
 graph TD
@@ -313,9 +526,62 @@ graph TD
 - Always mention that the monitoring system itself must be **more available and more decoupled** than the systems it monitors — if the primary DB and the monitoring system share infra, an outage can blind you exactly when you need visibility most (monitor the monitor / use a separate failure domain).
 - Sharding the collector layer by service or by data center avoids one scraper trying to pull from every host globally.
 
+#### 🆕 Architecture evolution: v1 → v2 → v3
+
+Walk through this progression out loud when asked "how would this scale
+as the fleet grows" — it shows you know *why* each extra piece of
+complexity gets added, not just that it exists.
+
+```mermaid
+graph LR
+    subgraph V1["v1 — single node (up to a few hundred hosts)"]
+        A1[App hosts] -->|scrape| P1[Single Prometheus instance]
+        P1 --> D1[Local-disk TSDB]
+        P1 --> G1[Grafana]
+    end
+```
+*Why it breaks:* one process can't hold millions of series in memory,
+and one scraper can't reach thousands of hosts inside a 15s interval.
+
+```mermaid
+graph LR
+    subgraph V2["v2 — sharded scrapers + remote-write (thousands of hosts)"]
+        A2[App hosts, sharded by team/DC] -->|scrape| P2a[Scraper shard 1]
+        A2 -->|scrape| P2b[Scraper shard 2]
+        P2a -->|remote_write| TS2[(Horizontally-scaled TSDB<br/>e.g., Thanos / M3 / Mimir)]
+        P2b -->|remote_write| TS2
+        TS2 --> G2[Grafana / query federation layer]
+    end
+```
+*Why it still isn't enough:* downsampling is ad hoc (or missing), and
+alert-rule evaluation shares the same query engine as dashboards — a
+burst of dashboard traffic can slow down alert evaluation right when
+something is on fire.
+
+```mermaid
+graph LR
+    subgraph V3["v3 — dedicated downsampling + alerting tiers (100K+ hosts)"]
+        A3[App hosts] -->|scrape| P3[Sharded scraper layer]
+        P3 -->|remote_write| Q3[Ingestion queue]
+        Q3 --> TS3[(Sharded TSDB cluster)]
+        TS3 --> DS3[Downsampling / rollup workers]
+        DS3 --> TS3
+        TS3 --> QE3[Query engine]
+        QE3 --> G3[Dashboards]
+        QE3 --> RE3[Rule-evaluation tier<br/>sharded by rule-group]
+        RE3 --> AM3[Alertmanager<br/>dedup / group / route]
+        AM3 --> N3[PagerDuty / Slack / Email]
+    end
+```
+*What changed:* downsampling runs as its own background pipeline
+instead of a one-off script, and rule evaluation is a horizontally
+shardable tier that only needs read access to the query engine — so a
+spike in dashboard queries never delays a page. Same "monitor the
+monitor" principle as above, applied to the alerting path specifically.
+
 ---
 
-## 8. Visualizing enormous volumes of data
+## 12. Visualizing enormous volumes of data
 
 Dashboards at scale can't render millions of raw points — a few techniques
 worth naming:
@@ -327,9 +593,22 @@ worth naming:
 **Cheat-sheet:**
 - If asked "how do you show a human millions of data points without melting their brain," answer: aggregate before you render, and surface outliers, don't dump raw series.
 
+#### 🆕 Query performance over huge time ranges
+
+A dashboard panel asking for "error rate over the last 90 days" must
+not scan 90 days of raw 15-second samples. Four techniques make this
+fast:
+
+- **Recording rules**: pre-compute expensive queries (e.g., `rate(...)[5m]`) on a schedule and store the *result* as its own time series. The dashboard then reads the cheap pre-computed series instead of recomputing the aggregation on every page load.
+- **Automatic resolution selection**: the query engine picks raw, 5-min, or 1-hour data based on the requested range and display width — no point returning more points than there are pixels on screen.
+- **Query fan-out + merge**: a sharded TSDB runs the query on every shard in parallel and merges partial results at the query layer — the same scatter-gather pattern as any other sharded datastore.
+- **Result caching**: cache query results keyed on `(query, range, step)` for a few seconds — an auto-refreshing dashboard shouldn't recompute an unchanged historical range on every tick.
+
+**If X then Y:** if a query's range spans more than a few hours, route it to a downsampled tier and/or a recording rule — never let one ad-hoc dashboard query force a full raw-resolution scan across weeks of data.
+
 ---
 
-## 9. Alerting
+## 13. Alerting
 
 An alert = **condition/threshold** + **action**. Two components, but the
 hard part in practice is avoiding **alert fatigue**.
@@ -372,9 +651,49 @@ window becomes `Firing`.
 - Alert on **symptoms** (user-facing latency/error rate), not causes (CPU is at 80%) — causes should feed dashboards, not pages, or you get paged for things that don't actually hurt users.
 - Alerting engine should be a distinct component from the query/storage engine — Alertmanager pattern (rule evaluation is stateless and can run independently of storage).
 
+#### 🆕 How rule evaluation actually runs at scale
+
+An alert rule is just a query, run on a timer, compared against a
+threshold. The scale problem isn't the metrics again — it's **sharding
+the rules themselves** so one node isn't evaluating every rule for the
+whole fleet.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RE as Rule Evaluator (one shard)
+    participant QE as Query Engine / TSDB
+    participant AM as Alertmanager
+    participant OC as On-call (Slack/PagerDuty)
+
+    loop every evaluation_interval (e.g., 30s)
+        RE->>QE: run rule query (e.g., error_rate > 1%)
+        QE-->>RE: current value per matching series
+        alt condition breached
+            RE->>RE: mark series Pending (start "for" timer)
+        else condition clear
+            RE->>RE: reset to Inactive
+        end
+    end
+    RE->>AM: still breached after "for" duration -> Firing
+    AM->>AM: dedup + group with other firing alerts
+    AM->>OC: notify (respecting escalation policy)
+```
+
+Rule groups are sharded across many evaluator workers — by service,
+team, or a hash of the rule name — so no single node evaluates every
+rule in the fleet. Each worker only needs read access to the query
+engine, not the raw storage layer, which keeps the alerting tier
+decoupled from TSDB internals (same "monitor the monitor" principle as
+the v3 architecture diagram above).
+
+**Cheat-sheet:**
+- Rule evaluation is "a query on a timer" — the interesting scale problem is sharding *rules*, not re-sharding metrics.
+- If asked "what happens if the rule evaluator falls behind," the answer is: it's just another consumer of the query API, so it can be scaled out horizontally like any other stateless read client.
+
 ---
 
-## 10. Client-side monitoring deep-dive
+## 14. Client-side monitoring deep-dive
 
 Server-side pain is always visible somewhere; client-side pain can be
 **totally invisible** to the backend (the request never arrived). Real
@@ -418,7 +737,7 @@ Analytics/Search Console Core Web Vitals, New Relic Browser, Datadog RUM.
 
 ---
 
-## 11. Logs vs. Metrics vs. Traces (the three pillars)
+## 15. Logs vs. Metrics vs. Traces (the three pillars)
 
 | | Metrics | Logs | Traces |
 |---|---|---|---|
@@ -448,7 +767,7 @@ flowchart TD
 
 ---
 
-## 12. Real-world systems to cite
+## 16. Real-world systems to cite
 
 | Company | System | Notable design choice |
 |---|---|---|
@@ -461,7 +780,7 @@ flowchart TD
 
 ---
 
-## 13. How to identify this topic in an interview
+## 17. How to identify this topic in an interview
 
 Signals that the interviewer wants a monitoring-system design (not just a
 mention):
@@ -479,6 +798,14 @@ fine, but always justify with the underlying design decision.
 
 ## Master Cheat Sheet
 
+**🆕 Requirements in one breath:** collect → store → query → visualize → alert, at fleet scale, without the monitoring itself becoming a bottleneck or a single point of failure.
+
+**🆕 Capacity math (illustrative):** `hosts × metrics/host ÷ scrape_interval = points/sec`. Example: 100K hosts × 1,000 metrics ÷ 15s ≈ 6.7M points/sec; same fleet ≈ 100M active series.
+
+**🆕 Data model mnemonic:** "Name + Labels = Series." Cardinality multiplies across labels (10 × 5 × 2 = 100 series), it doesn't add.
+
+**🆕 API surfaces:** expose (`GET /metrics` for pull), ingest (`POST /push` for push/gateway), query (`GET /query_range` — the one both dashboards and alert rules call).
+
 **Two failure domains:** server-side (5xx, always visible) vs. client-side (4xx or fully invisible — request never arrived).
 
 **Metric types:** counter (monotonic, use `rate()`), gauge (point-in-time), histogram (aggregatable buckets — prefer this), summary (client-side quantiles, NOT aggregatable across hosts).
@@ -493,7 +820,15 @@ fine, but always justify with the underlying design decision.
 
 **Architecture pipeline:** exporters/agents → collector/scraper (sharded, service discovery) → ingestion buffer → aggregator/downsampler → TSDB → query engine → {dashboard, alerting engine} → notification fan-out (dedup/group/escalate).
 
-**Cardinality explosion** is the #1 way to accidentally kill a monitoring system — never put unbounded-cardinality fields (user_id, request_id) directly into metric labels.
+**🆕 Architecture evolution:** v1 single-node scraper+TSDB → v2 sharded scrapers + remote-write into a horizontally-scaled TSDB → v3 adds a dedicated downsampling pipeline and a separately-shardable rule-evaluation tier, so dashboard load never delays a page.
+
+**Cardinality explosion** is the #1 way to accidentally kill a monitoring system — never put unbounded-cardinality fields (user_id, request_id) directly into metric labels. If a label's values are unbounded or user-controlled, reject/strip it at ingestion or bucket it instead.
+
+**🆕 Retention tiers mnemonic:** Raw → Rolled → Really-old (archive). Each tier costs roughly an order of magnitude less than the one before it.
+
+**🆕 Query performance over big ranges:** recording rules (pre-aggregate), automatic resolution selection (don't return more points than pixels), sharded fan-out + merge, short-lived result caching.
+
+**🆕 Rule evaluation at scale:** an alert rule is just a query on a timer; scale by sharding rule groups across evaluator workers, not by re-sharding metrics.
 
 **SLI/SLO/SLA:** SLI = measured value, SLO = internal target, SLA = external contractual commitment (looser than SLO). Error budget = `1 - SLO`; alert on burn rate, not raw threshold.
 

@@ -1,5 +1,13 @@
 # Newsfeed System Design — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added material the original draft was thin on, everything else (mental model, capacity math, architecture evolution, fan-out/ranking/privacy/media/counter/security deep dives, golden rules) was already interview-ready and is left untouched.
+> - New deep dive: **Pagination, Infinite Scroll & the "Seen" Problem** — cursor drift while new posts arrive mid-scroll, session-pinned snapshots, and a seen-set/Bloom-filter dedup flowchart.
+> - New deep dive: **Delete & Edit Propagation** — a sequence diagram showing why edits are nearly free (pointer-only cache) while deletes need a tombstone check at read-time; also corrected a line that wrongly implied edits need invalidation like deletes do.
+> - Data model ER diagram now includes an explicit **FEED_ENTRY** entity (the `<user_id, post_id>` pointer row that actually lives in the feed cache) instead of leaving it implied.
+> - Interview Playbook checklist and Master Cheat Sheet table updated with rows for the two new deep dives so the whole doc stays in sync.
+> - New comparison table (pagination strategies) and one new mnemonic ("freeze the list, don't reshuffle the deck mid-deal") for recall under pressure.
+> - All new headings/subsections are prefixed with 🆕; unmarked text is the original guide, occasionally tightened for clarity.
+
 ## Mental Model
 
 A newsfeed is **not a query, it's a pre-assembled magazine**. You don't scan every friend's posts live and sort them when you open Instagram — that's too slow at scale. Instead, think of the system as a **publishing pipeline**: when someone posts, the system decides *now* (write-time) or *later* (read-time) whose mailbox that post lands in, then a **ranking editor** decides the order before it's handed to you.
@@ -48,6 +56,8 @@ flowchart TD
     E --> E5["Privacy/visibility pre-filter"]
     E --> E6["Counters (likes/comments hot row)"]
     E --> E7["Abuse/spam mitigation"]
+    E --> E8["🆕 Pagination + seen-post dedup"]
+    E --> E9["🆕 Delete/edit propagation into feeds"]
 
     F --> F1["Hot shard / thundering herd"]
     F --> F2["Staleness vs freshness"]
@@ -236,7 +246,7 @@ graph LR
     PostSvc --> Queue[Fan-out Queue]
     Queue --> FGW[Feed-gen Worker]
     FGW -->|"push <post_id,author_id>\nto EVERY follower"| FeedCache[(Feed Cache\nper-user pointer list)]
-    Reader -->|getFeed - O(1) lookup| FeedCache --> Reader
+    Reader -->|"getFeed - O(1) lookup"| FeedCache --> Reader
 ```
 
 Move the expensive work from read-time to write-time: the moment a post is created, push a lightweight pointer into every follower's precomputed feed. Reads become a single cache lookup — fast, cheap, and horizontally scalable.
@@ -317,6 +327,8 @@ erDiagram
     USER ||--o{ EDGE : "has relationship"
     USER ||--o{ FEED_ITEM : authors
     FEED_ITEM ||--o{ MEDIA : contains
+    USER ||--o{ FEED_ENTRY : "has precomputed feed"
+    FEED_ITEM ||--o{ FEED_ENTRY : "referenced by"
     USER {
         string user_id PK
         json profile_json
@@ -339,10 +351,17 @@ erDiagram
         string blob_url
         string type "image|video"
     }
+    FEED_ENTRY {
+        string user_id FK "whose feed this pointer sits in"
+        string post_id FK
+        float rank_score
+        timestamp inserted_at
+    }
 ```
 
 - **Graph DB** for `User`/`Edge` — modeled as a property graph (vertices = users, edges = relationships), often implemented relationally with JSON columns for flexible properties (this is exactly what Facebook's **TAO** does in production — see references below).
 - **Feed_item** = posts; **Media** = attachments, pointer to blob storage/CDN URL, not the bytes themselves.
+- 🆕 **Feed_entry** = the row that actually lives in the feed cache — the `<user_id, post_id>` pointer this whole doc keeps referring to, now made an explicit entity instead of an implied one. One `Feed_item` (one post) fans out into up to millions of `Feed_entry` rows (one per follower); one `User` holds ~100–500 `Feed_entry` rows (their precomputed feed).
 
 **Cheat sheet — high-level design:**
 - Two pipelines: **generation** (async, write-side) and **publishing** (sync, read-side) — always separate these in your diagram.
@@ -532,7 +551,7 @@ flowchart LR
     Graph[Graph DB: who you follow] --> Candidates[Candidate generation:\nrecent posts from follows\n+ engagement-heavy posts]
     Candidates --> Filter[Integrity filter:\nremove spam/clickbait/\nmisinfo/already-seen]
     Filter --> Feature[Feature extraction:\naffinity, recency, post type,\npast engagement]
-    Feature --> Score[ML scoring:\npredict P(like), P(comment),\nP(share), P(hide)]
+    Feature --> Score["ML scoring:\npredict P(like), P(comment),\nP(share), P(hide)"]
     Score --> Blend[Value model:\nweighted blend of predictions\ninto single relevance score]
     Blend --> TopN[Select + order top N]
 ```
@@ -732,11 +751,100 @@ stateDiagram-v2
     Invalidated --> [*]
 ```
 
+#### 🆕 Delete & Edit Propagation
+
+**Mental model:** deletes and edits are *not* the same problem, even though they look alike at first glance. The whole reason is Golden Rule #1 — the feed cache stores a **pointer** (`<user_id, post_id>`), not the post's content. That single design choice makes edits almost free and turns deletes into a read-time check instead of a write-time fan-out.
+
+```mermaid
+sequenceDiagram
+    participant Alice as Alice (author)
+    participant PS as Post Service
+    participant PDB as Post DB/Cache
+    participant FC as Bob's Feed Cache (pointer only)
+    participant FPS as Feed Publishing Service
+    participant Bob as Bob (follower)
+
+    Alice->>PS: editPost(post_123, new_text)
+    PS->>PDB: UPDATE post_123 content
+    Note over FC: Bob's pointer <post_123, alice_id>\nis untouched — nothing to invalidate
+    Bob->>FPS: getNewsfeed()
+    FPS->>FC: read pointer post_123
+    FPS->>PDB: hydrate post_123 (fetches CURRENT content)
+    FPS-->>Bob: shows the edited text automatically
+    Note over FPS: Edits cost zero fan-out —\nonly the Post DB/cache row changed
+
+    Alice->>PS: deletePost(post_123)
+    PS->>PDB: mark post_123 as tombstoned (soft delete)
+    Note over FC: Bob's pointer to post_123 is still\nsitting in his feed cache (stale)
+    Bob->>FPS: getNewsfeed()
+    FPS->>FC: read pointer post_123
+    FPS->>PDB: hydrate post_123 → tombstoned
+    FPS->>FPS: drop the tombstoned item\n(lazy invalidation at read-time)
+    FPS-->>Bob: feed shown WITHOUT the deleted post
+```
+
+**Worked example:** Alice has 300 followers. She edits a typo in a post. Zero of the 300 followers' feed caches need to change — the next time any of them reads their feed, the hydrate step (`Post DB/cache` lookup by `post_id`) picks up the new text for free. Compare that to deleting the same post: none of the 300 pointers are proactively removed either (that would cost 300 writes, same shape as fan-out itself) — instead each follower's *next* read does one extra check ("is this post tombstoned?") and silently drops it. The only real gap: between the delete and a follower's next feed read, the post could theoretically still render if a client had it cached locally — an acceptable, short-lived staleness window, not a bug to "fix" with eager invalidation.
+
 **Cheat sheet — caching:**
 - Cache **pointers**, not full objects, in the per-user feed cache — keeps it cheap even with massive fan-out.
 - Post cache has extreme read fan-in (same viral post read by millions) — perfect LRU/hot-key candidate, consider dedicated hot-key replication.
-- Deletion/edit requires async invalidation across every follower's feed — plan for eventual consistency here (a deleted post may briefly still appear).
+- 🆕 **Edits are (almost) free, deletes are not free but are cheap:** an edit changes the Post DB/cache row only — no fan-out, no invalidation, because the pointer never encoded the content. A delete needs a tombstone flag checked lazily at hydrate-time (cheap, default choice) or an eager async invalidation sweep across every follower's cache (expensive, only worth it for legal/compliance takedowns where a few seconds of visibility is unacceptable).
 - Background refresh (not just lazy-on-miss) keeps precomputed feeds warm for active users.
+
+---
+
+## Deep Dive: 🆕 Pagination, Infinite Scroll & the "Seen" Problem
+
+**Mental model:** infinite scroll is walking down a list that's being edited underneath your feet. Two classic bugs fall out of this: (1) the **same post appears twice** across a page boundary because new content shifted everyone's rank between your page-1 and page-2 requests, and (2) a post you **already saw** reappears after the feed silently re-ranks in the background. Both are pagination-consistency bugs, not ranking bugs — fix them at the pagination layer, not by tweaking the ranking model.
+
+**Why offset pagination is already ruled out:** `LIMIT 20 OFFSET 40` assumes the underlying list is frozen between requests. It never is — a new post lands above your cursor every few seconds, so "offset 40" points at a different post on every call. This doc already picked cursor-based pagination in the API Design section; here's why that alone isn't the whole answer.
+
+#### 🆕 Two ways to make a cursor actually stable
+
+1. **Cursor on `(rank_score, post_id)`** — page N+1 asks for "everything with a lower score than my last item, tie-broken by `post_id`." Cheap, no extra storage, but a *new* high-ranking post inserted after page 1 was served can still shift where page 2 starts, so a post can still be skipped or duplicated at the boundary.
+2. **Session-pinned snapshot** — the moment the user opens the feed, freeze the ranked list of post pointers for that session (cache it, e.g. a Redis list keyed by `session_id`, TTL 10–30 min). Every subsequent page request just slices further into the *same* frozen list. New posts never get spliced into the middle mid-scroll — they show up only via the "N new posts" banner (the push-notification path already covered above), and only get merged in on the next pull-to-refresh. This is what Twitter/Facebook/Instagram actually do, and it's why "pull to refresh" feels like a deliberate action instead of something that happens automatically under you.
+
+**Worked example:** feed page size = 20 posts. A session-pinned snapshot holding the next 500 ranked pointers costs 500 × 16 bytes ≈ **8 KB per active session** — trivial, and it buys you a scroll experience with zero duplicate/skipped posts for the life of that session.
+
+#### 🆕 Deduplication via a "seen" set
+
+Even with a pinned snapshot, one more gap remains: a cache eviction or a fallback to on-demand generation mid-session can regenerate part of the list and reintroduce a post the user already scrolled past. The fix is a small **seen set** per session — track the `post_id`s already returned, and filter them out of every subsequent page before it's sent.
+
+A full `Set<post_id>` is fine for a short session (a few hundred IDs), but at scale (a session that scrolls thousands of posts, or a "mark as seen for 30 days" feature) a **Bloom filter** is the standard tool: it answers "have I shown this before?" with no false negatives and a small false-positive rate, for a fraction of the memory. Tracking the last 1,000 seen `post_id`s at a 1% false-positive rate costs roughly **1,200 bytes** (~9.6 bits/element) — cheap enough to keep per-session in Redis with a short TTL.
+
+```mermaid
+flowchart TD
+    Start(["Client requests a feed page"]) --> Q1{First page\nof this session?}
+    Q1 -->|Yes| Snap[Generate/read ranked snapshot;\ncreate empty seen-set]
+    Q1 -->|No, page N| Slice[Slice next N posts\nfrom the pinned snapshot]
+    Snap --> Return1[Return page 1;\nadd returned ids to seen-set]
+    Slice --> Check{"Any returned id already in\nseen-set? (e.g. snapshot was\nregenerated mid-session)"}
+    Check -->|Yes| Filter[Drop the duplicate ids;\nbackfill from snapshot tail]
+    Check -->|No| ReturnN[Return page N as-is]
+    Filter --> ReturnN2[Return filtered page;\nupdate seen-set]
+    ReturnN --> UpdateSeen[Update seen-set]
+    Return1 --> Done([Done])
+    ReturnN2 --> Done
+    UpdateSeen --> Done
+    Pull["User pulls to refresh"] -.-> Reset[Discard old snapshot + seen-set;\nregenerate fresh, merge in\n'N new posts' from the banner]
+```
+
+#### 🆕 Pagination strategy comparison
+
+| Strategy | Handles new inserts mid-scroll? | Extra storage | Used by |
+|---|---|---|---|
+| Offset (`LIMIT`/`OFFSET`) | No — guaranteed duplicates/skips | None | Toy demos only |
+| Cursor on `(rank_score, post_id)` | Partially — no same-rank duplicates, but a new top-ranked post can still shift the boundary | None | Simple chronological feeds |
+| Session-pinned snapshot | Yes — list is frozen for the session | ~8KB/session (500 pointers) | Twitter, Facebook, Instagram |
+| Snapshot + seen-set/Bloom filter | Yes, and survives cache eviction / on-demand fallback | ~1.2KB/session extra (1K-item Bloom filter) | Production systems that need to be resilient to cache misses mid-scroll |
+
+**Memory hook:** *"Freeze the list, don't reshuffle the deck mid-deal."* Once you've dealt page 1, don't reshuffle the deck before dealing page 2 — freeze the ranking for the session, and only shuffle again when the user explicitly asks (pull-to-refresh).
+
+**Cheat sheet — pagination & seen-tracking:**
+- Cursor-based alone isn't sufficient at scale — the interview-winning answer is a **session-pinned snapshot** so the list doesn't shift under an active scroll.
+- New posts during an open session surface only via the "N new posts" banner (ties back to the push/pull delivery disambiguation) — never spliced mid-list.
+- A **seen-set (or Bloom filter for scale)** is the safety net for the rarer case where the snapshot itself gets regenerated mid-session (cache eviction, fallback to on-demand generation).
+- Give a number: a 1,000-item Bloom filter at 1% false-positive rate is about 1.2KB — cheap enough to keep per-session without a second thought.
 
 ---
 
@@ -799,6 +907,7 @@ stateDiagram-v2
 | **Hot row for like/comment counter** | Viral post gets 1,000+ likes/sec on one row | Atomic increment + write-behind batching to an in-memory shard, flush to DB periodically; shard the counter itself if still hot |
 | **Fake engagement / bot ring** | Coordinated accounts inflating likes/comments | Rate limiting at write path; down-weight low-trust accounts' signals in ranking; graph-clustering detection |
 | **Stale privacy check after unfriend/block** | Fan-out-on-write audience resolved before the unfriend/block happened | Read-time re-check as a safety net for high-sensitivity content; async invalidation sweep on block events |
+| 🆕 **Duplicate/skipped posts during infinite scroll** | Feed re-ranks or new posts insert between page N and N+1 requests | Session-pinned ranked snapshot for the scroll session; seen-set/Bloom filter as a fallback dedup net |
 
 **Graceful degradation ladder (say this — interviewers love it):** ranking service down → fall back to chronological order → feed cache down → serve last-known-good cached copy → all else down → serve "recent posts from close friends" static fallback rather than an error page.
 
@@ -843,6 +952,8 @@ stateDiagram-v2
 7. **Degrade gracefully, in a defined order.** Ranking down → chronological. Feed cache down → last-known-good. Never surface a hard error where a slightly-worse feed would do.
 8. **Privacy is a pre-filter, never a ranking discount.** A private post scoring low is still a leak risk if it was ever in the candidate pool — gate visibility before scoring, not through it.
 9. **Idempotent writes make retries free.** Fan-out and counter updates must tolerate at-least-once delivery — `SET`/atomic-`INCR`, never "read, then write."
+10. 🆕 **Freeze the list, don't reshuffle mid-scroll.** Pin a ranked snapshot per session so infinite scroll doesn't duplicate or skip posts as new content arrives underneath the user.
+11. 🆕 **Edits are free, deletes are a read-time check.** The pointer-only feed cache means an edit needs zero fan-out (only the Post DB/cache row changes); a delete just needs a tombstone check at hydrate-time, not an eager invalidation sweep.
 
 ---
 
@@ -857,6 +968,7 @@ stateDiagram-v2
 - **Name real systems** (TAO, Cassandra, Kafka, Redis) briefly to demonstrate grounded knowledge, but don't turn it into a trivia recitation.
 - **Narrate the architecture evolution** (naive pull → fan-out-on-write → hybrid + ranking) before landing on the final diagram — this is the artifact interviewers remember most.
 - **Volunteer privacy and abuse** even if not asked — one line each ("visibility is a pre-filter before ranking"; "rate limiting and fake-engagement discounting guard the write path") shows production maturity beyond the happy path.
+- 🆕 **Mention pagination consistency and edit/delete propagation if there's time** — "we pin a ranked snapshot per scroll session so the list doesn't shift under the user" and "edits are free because the cache only stores pointers, deletes need a lazy tombstone check" are two more one-liners that separate a senior answer from a happy-path one.
 - **Close with graceful degradation** — shows production maturity beyond "happy path" design.
 
 ---
@@ -873,7 +985,8 @@ flowchart TD
     FanOut{Fan-out\nstrategy?} -->|Default answer| Hybrid[Hybrid: push for most,\npull for celebrities > threshold]
     Hybrid --> Privacy[Privacy pre-filter:\ngate visibility BEFORE ranking]
     Privacy --> Cache[Feed cache stores\n<post_id,user_id> pointers only]
-    Cache --> Media[Media -> Blob + CDN,\nnever inline in feed payload]
+    Cache --> Page["🆕 Pagination: session-pinned\nsnapshot + seen-set dedup"]
+    Page --> Media[Media -> Blob + CDN,\nnever inline in feed payload]
     Media --> Counters[Likes/comments: atomic\nincrement + write-behind batching]
     Counters --> Abuse[Rate-limit writes;\ndiscount bot/fake engagement]
     Abuse --> Fail[Plan failure modes:\nhot key, cache stampede,\nranking overload, replication lag]
@@ -893,6 +1006,8 @@ flowchart TD
 | Privacy | Pre-filter before ranking; write-time audience can go stale, read-time never does |
 | Counters | Denormalized + atomic increment; write-behind batching for viral hot rows |
 | Abuse/security | Rate limit writes; discount fake engagement in ranking; **SPAM** signals (Similarity, Pace, Age/trust, Mutual clustering) |
+| 🆕 Pagination/seen-tracking | Session-pinned ranked snapshot, not raw offset/cursor; seen-set or Bloom filter as a dedup safety net |
+| 🆕 Delete/edit propagation | Edits: free (pointer unchanged, content re-hydrates). Deletes: tombstone checked lazily at read-time |
 | Architecture evolution | Naive pull/single-DB → fan-out-on-write + feed cache → hybrid fan-out + ranking → full HLD (media/CDN/notifications) |
 | Bottleneck to always mention | Thundering herd from fan-out or cache stampede on hot content |
 | Degradation order | Ranking → chronological → last-known-good cache → static fallback |

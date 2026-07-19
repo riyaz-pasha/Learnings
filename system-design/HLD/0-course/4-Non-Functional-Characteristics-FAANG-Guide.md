@@ -2,6 +2,14 @@
 
 > **Goal**: Walk into any Google/Meta/Amazon system design interview and confidently articulate, quantify, and design for Availability, Reliability, Scalability, Maintainability, and Fault Tolerance.
 
+> **Enhancement notes:**
+> - Added **🆕 Chapter 0 — Don't Confuse These Words**: precise definitions for all six properties (including **Durability**, which had no dedicated coverage before), a master comparison table (definition + differentiator + one-line example each), a disambiguation flowchart, and a reusable 30-second template for stating non-functional requirements at the start of an interview answer.
+> - **Durability** was previously absent as a named concept — it's now defined, added to the Quick Chapter Map, the Comparison Matrix, the Golden Rules (#11), and the Master Cheat Sheet, with AWS S3's "11 nines" as the anchoring real-world number.
+> - Added a **🆕 SLA → SLO → SLI flow diagram** and a from-scratch **error-budget worked example** (99.9% SLO over 30 days ≈ 43 minutes) in the Availability chapter, next to the existing SLA/SLO/SLI table and burn-down pie chart.
+> - Added a **🆕 Latency vs Throughput trade-off** subsection in the Scalability chapter, with an illustrative batching example and Little's Law (`L = λW`) — explicitly labeled illustrative where numbers aren't measured facts.
+> - Extended the Master Cheat Sheet's "Interviewer Says → You Think" table with entries for durability, SLA/SLO/SLI, and latency-vs-throughput signals.
+> - No existing section was rewritten or reordered — all additions are new subsections/rows marked with 🆕, and the original voice, formulas, and examples are untouched.
+
 ---
 
 ## How to Use This Guide
@@ -24,6 +32,58 @@
 | **Scalability**     | System handles*growing load* without degrading | Throughput, Latency at Pn | Horizontal scaling, Sharding  |
 | **Maintainability** | System is*easy to operate and evolve*          | MTTR                      | Observability, Modular design |
 | **Fault Tolerance** | System*keeps running* despite failures         | RTO, RPO                  | Replication, Checkpointing    |
+| 🆕 **Durability**       | Data*never gets lost*, even if the service is briefly down | Nines of durability (e.g. 11 nines) | Replication across disks/AZs, checksums |
+
+---
+
+## 🆕 0. Don't Confuse These Words (Definitions At a Glance)
+
+Six words get used almost interchangeably outside interviews, and precisely because of that, FAANG interviewers listen for whether you keep them separate. Skim this chapter first if you only have five minutes before the interview — everything here is expanded with formulas and examples in the chapters that follow.
+
+### 🆕 Precise Definitions
+
+- **Availability** — the fraction of time the system is up and responding. Answers: *"Is it reachable right now?"* Measured in nines (99.9%, 99.99%…).
+- **Reliability** — the probability the system does the *correct* thing for a given period. Answers: *"Is the answer right?"* A system can be up and still wrong.
+- **Durability** — the probability that data, once committed, is never lost — even across disk, node, or datacenter failure. Answers: *"Will this data still exist years from now?"* A system can be temporarily unreachable (unavailable) while every byte it holds remains perfectly durable, waiting on disk for the service to come back.
+- **Fault Tolerance** — the ability to keep operating correctly *while* a component is actively failing, not just recover after the fact. Answers: *"Does a live failure ever become user-visible?"*
+- **Scalability** — the ability to handle more load (users, requests, data) without a proportional loss of performance. Answers: *"What happens at 10x traffic?"*
+- **Maintainability** — how cheaply the system can be operated, debugged, and changed over its lifetime. Answers: *"How painful is day-2 operations?"*
+
+### 🆕 Comparison Table — All Six, Side by Side
+
+| Term                    | Precise Definition                                                        | Differs From...How                                                                                          | One-Sentence Example                                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Availability**  | % of time the system responds to requests                                  | vs Reliability: says nothing about correctness, only uptime                                                     | A checkout page that loads 99.99% of the time is highly available                                                                                   |
+| **Reliability**   | Probability of producing the correct result over a period                  | vs Availability: a system can be "up" and still wrong                                                           | An ATM that's always online but occasionally dispenses the wrong amount is available but not reliable                                               |
+| **Durability**    | Probability that stored data is never lost, independent of reachability    | vs Availability: durability is about data survival, not service uptime                                          | AWS S3 advertises "11 nines" (99.999999999%) annual durability — an object essentially never disappears, even during a brief outage                 |
+| **Fault Tolerance** | Continuing to work correctly *during* an active component failure        | vs Reliability/Availability: it's the *mechanism*, not the outcome — it's what protects the other two          | A 4-engine plane that lands safely on 2 engines is fault-tolerant; passengers never notice the failure                                              |
+| **Scalability**   | Handling growing load without proportional performance loss                | vs Availability: a system can be up for 10 users and fall over at 10M — scale is a separate axis from uptime    | Sharding a database by `user_id` so adding new users doesn't slow down existing queries                                                             |
+| **Maintainability** | Ease of operating, debugging, and evolving the system over time          | vs Reliability: reliability is failing less often (↑MTBF); maintainability is fixing faster (↓MTTR) once it does | Structured logs + one-command rollback let an on-call engineer fix a bad deploy in 5 minutes instead of 2 hours                                     |
+
+### 🆕 Disambiguation Diagram
+
+```mermaid
+flowchart TD
+  Q{What is the interviewer\nactually asking?}
+  Q -->|"Is it reachable right now?"| AV["Availability\nnines, uptime %"]
+  Q -->|"Is the answer correct?"| REL["Reliability\nMTBF, error rate"]
+  Q -->|"Will the data still exist later?"| DUR["Durability\nnines of durability, replication"]
+  Q -->|"Does a live failure stay invisible to users?"| FT["Fault Tolerance\nRTO, RPO, replication"]
+  Q -->|"Does it hold up as load grows?"| SC["Scalability\nthroughput, latency at scale"]
+  Q -->|"How cheap is it to run and change?"| MT["Maintainability\nMTTR, observability"]
+```
+
+### 🆕 How to State Non-Functional Requirements Concisely (Interview Opening)
+
+Before you draw a single box, spend 30 seconds stating your targets out loud. This does two things: it shows the interviewer you think in trade-offs before solutions, and it gives you a yardstick to justify every design decision later ("I chose async replication *because* I said availability mattered more than zero data loss").
+
+A reusable template:
+
+> "For this system, I'll design for **[X] requests/sec** and **[Y] TB of data**, targeting **[N] nines of availability** (~[downtime]/year), **[strong/eventual] consistency** for [which operations], **RTO of [T1]** and **RPO of [T2]**, and I'll treat [reliability/durability/scalability] as the primary constraint because [reason from the prompt]."
+
+Example: *"For this URL shortener, I'll design for ~2,000 RPS reads and ~200 RPS writes, targeting 99.99% availability (~52 min/year downtime), eventual consistency is fine since a redirect being a few seconds stale doesn't matter, and durability is the real constraint — losing a mapping breaks every link that points to it, so I'll replicate writes to at least 3 nodes before acknowledging."*
+
+Note what this does *not* do: it doesn't invent precise numbers you can't defend. If you're unsure of a number, say "illustrative" or "let's assume" out loud — interviewers reward candidates who flag their own assumptions over ones who state guesses as facts.
 
 ---
 
@@ -129,7 +189,34 @@ These three terms come up constantly in FAANG interviews and on the job.
 
 > **Interview tip**: SLO is your engineering target. SLA is the legal contract (usually more lenient than SLO to give you buffer). SLI is the actual measured number. Always set SLO tighter than SLA.
 
-**Error Budget** = 100% - SLO. If your SLO is 99.9%, your error budget is 0.1% (43.8 min/month). Once you burn the budget, you stop shipping new features and focus on reliability.
+### 🆕 How SLA, SLO, and SLI Fit Together
+
+```mermaid
+flowchart LR
+  SLI["SLI\nService Level Indicator\nthe actual measured number\ne.g. 99.97% measured uptime"] -.->|"measured against"| SLO
+  SLO["SLO\nService Level Objective\ninternal engineering target\ne.g. 99.95%"] -->|"looser than, for buffer"| SLA
+  SLA["SLA\nService Level Agreement\nexternal contractual promise\ne.g. 99.9%, refund if missed"]
+  SLO -->|"100% − SLO"| EB["Error Budget\n0.05% allowed failure"]
+  EB -->|"budget exhausted"| Freeze["Freeze non-critical launches,\nprioritize reliability work"]
+```
+
+The direction of the arrows is the whole trick: you measure with an **SLI**, hold yourself to a stricter internal **SLO**, and promise customers an even looser **SLA** — the gap between SLO and SLA is your safety margin.
+
+**Error Budget** = 100% − SLO. If your SLO is 99.9%, your error budget is 0.1%. Once you burn the budget, you stop shipping new features and focus on reliability.
+
+### 🆕 Worked Example: Error Budget From Scratch
+
+Say your SLO is **99.9% over a 30-day month**:
+
+```
+Error budget (%)      = 100% − 99.9% = 0.1%
+Minutes in 30 days     = 30 × 24 × 60 = 43,200 minutes
+Allowed downtime       = 43,200 × 0.1% = 43.2 minutes
+```
+
+So **99.9% SLO over 30 days ≈ 43 minutes of allowed downtime** — this is the number to memorize. (The nines table above shows 43.8 min/month because it uses a 30.44-day average month; either figure is fine to quote, just say which month-length you assumed.)
+
+If an incident this month already ate 25 minutes of downtime, you have **~18 minutes of error budget left** — that's the number that should drive whether you approve a risky deploy today or wait.
 
 ---
 
@@ -542,6 +629,29 @@ Monthly: ~30TB
 
 ---
 
+### 🆕 Latency vs Throughput Trade-off
+
+These two metrics are often quoted together, but improving one can hurt the other — interviewers use this to check you understand *why* a design choice was made, not just that you named the right buzzword.
+
+- **Latency** — time to complete *one* request (p50/p95/p99, usually in ms).
+- **Throughput** — number of requests the system completes *per unit time* (RPS, QPS).
+
+**Why they trade off**: batching is the classic example. Grouping 100 writes into one batch call raises throughput (fewer round-trips, less per-request overhead) but raises latency for the first request in the batch (it waits for the batch to fill).
+
+```
+Illustrative example — a write API:
+  No batching:     1 write/call   →  ~5ms latency/write   →   ~2,000 writes/sec (thread-bound)
+  Batch of 50:      50 writes/call →  ~40ms latency/write  →  ~50,000 writes/sec
+```
+
+(Numbers above are illustrative, not measured — the direction of the trade-off, not the exact figures, is what matters in an interview.)
+
+**Little's Law** ties them together and is safe to cite by name: `L = λ × W` — the average number of requests in the system (L) equals the arrival rate (λ, i.e. throughput) times the average time each spends in the system (W, i.e. latency). Push more throughput through a system with fixed concurrency, and per-request latency has to rise to compensate — this is why connection-pool size and thread-pool size are latency/throughput dials, not just resource limits.
+
+> **Interview framing**: "I'm optimizing for low latency on the read path (users are waiting on it) and high throughput on the write path (it's async, batched via a queue)." Naming which side of the trade-off matters for which part of the system is the signal interviewers look for.
+
+---
+
 ### Real-World Examples
 
 - **Twitter (2012–2015)**: Migrated from monolith to microservices to scale the tweet-serving tier independently of the timeline-fanout tier. The "Fail Whale" era was a scaling problem — too much vertical, not enough horizontal.
@@ -944,6 +1054,9 @@ flowchart TD
 | Scalability     | Throughput at Pn latency | Horizontal scaling, caching, sharding  | Complexity (distributed state)      |
 | Maintainability | MTTR                     | Observability, modular design          | Initial investment                  |
 | Fault Tolerance | RTO, RPO                 | Replication, checkpointing             | Cost, latency (sync replication)    |
+| 🆕 Durability       | Nines of durability     | Replication across disks/AZs, checksums, erasure coding | Storage cost, write latency (extra copies) |
+
+> **🆕 Durability's place in this table**: it sits next to Fault Tolerance as a foundation, but protects a different thing. Fault tolerance keeps the *service* running through a live failure; durability guarantees the *data* survives even if the service itself is down for a while. A system can lose availability without losing durability — S3 being briefly unreachable doesn't mean any object was deleted.
 
 ---
 
@@ -987,6 +1100,7 @@ Unconditional, durable principles — true regardless of which system you're des
 8. **Idempotency is mandatory wherever retries exist.** If a call can be retried, it must be safe to run twice.
 9. **Bulkheads isolate failure domains — one slow dependency should never be able to starve every other request path.**
 10. **State RTO and RPO before choosing a replication or standby strategy.** "Hot vs warm vs cold" is a cost conversation once you know the numbers you're targeting.
+11. **🆕 Durability ≠ Availability.** Data can be perfectly safe on disk (durable) while the service in front of it is temporarily unreachable (unavailable) — don't let an outage make you claim you "lost data" when you only lost access to it.
 
 ---
 
@@ -1021,6 +1135,7 @@ MTTR            = Total Maintenance Time / # Repairs
 | **Scalability**     | "Start with a back-of-envelope estimate, then design for horizontal scaling with sharding and a caching layer."          |
 | **Maintainability** | "I'll instrument with logs, metrics, and traces from day one, and deploy via canary releases."                           |
 | **Fault Tolerance** | "I'll use synchronous replication with a hot standby — RTO <30s, RPO = 0."                                              |
+| 🆕 **Durability**       | "I'll replicate every write to at least 3 storage nodes across 2+ AZs before acknowledging — the object should never be lost even if we lose a disk or a zone." |
 
 ### Interview Flow: When They Say... You Think...
 
@@ -1032,6 +1147,9 @@ MTTR            = Total Maintenance Time / # Repairs
 | "Easy to debug and deploy"              | Maintainability → observability, canary deploys               |
 | "What if a server crashes?"             | Fault Tolerance → replication, checkpointing, hot standby     |
 | "What if a whole datacenter goes down?" | Availability + FT → geo-redundancy, multi-AZ, active-active   |
+| 🆕 "This data must never be lost, even in 10 years" | Durability → multi-AZ/multi-disk replication, checksums, nines of durability |
+| 🆕 "We promised customers X% uptime in the contract" | SLA (external) vs SLO (your tighter internal target) vs SLI (what you actually measured) |
+| 🆕 "How do you handle a sudden spike vs steady heavy load?" | Throughput (requests/sec you can sustain) vs Latency (how slow each request gets under that load) — name which one you're protecting |
 
 ### FAANG-Level Depth Signals (What Makes You Stand Out)
 

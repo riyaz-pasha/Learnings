@@ -1,5 +1,13 @@
 # Elasticsearch — Practitioner Deep-Dive Guide
 
+> **Enhancement notes:** this pass added interview-shaped material the original deep-dive assumed you'd get from the companion guide, without touching sections that already worked. New content is marked `🆕` inline.
+> - Added a "using ES as a component in a system-design interview" framing (clarifying questions → capacity → architecture → deep dive) in section 1.
+> - Added the inverted index's actual data structure (term dictionary + postings lists, with a worked example and a segment-merge diagram) in section 3.
+> - Added a node-failure / shard-reallocation flowchart (and how the same allocator rebalances on node-join) in section 2.
+> - Added a "is this quorum writes?" clarification — ES replicates to *all* in-sync copies via a single primary, not a Dynamo-style `W+R>N` quorum — in section 3, since conflating the two is a common interview mistake.
+> - Added a shard-routing decision flowchart ("which shards does a query actually hit") in section 4, and a primary-vs-replica comparison table in section 2.
+> - Added an illustrative docs/sec throughput estimate in section 10, labeled as illustrative rather than benchmarked. Left the existing GB/day capacity walkthrough, all diagrams, and every cheat-sheet/golden-rule list otherwise as-is — they were already accurate and dense with concrete numbers.
+
 *Chapter 21 companion: the actual Elasticsearch framework — internals, API surface, and production operation across regions*
 
 > This is the hands-on companion to the Distributed Search FAANG guide. That guide derives *why* inverted indexes, sharding, replication, and BM25 exist. This one assumes you know all that and goes deep on **how Elasticsearch itself implements those ideas** — real config keys, real endpoints, real defaults — so you can both run a multi-region cluster without getting paged at 3am and answer "how does ES actually do X" in an interview.
@@ -55,6 +63,24 @@ Worth knowing cold, since it comes up both operationally (which one are you actu
 
 **Golden rule:** Every ES feature is either "Lucene does this per-shard" or "ES coordinates this across shards." Know which side of the line any behavior lives on and you can reason about it from first principles.
 
+### 🆕 Using Elasticsearch as a component in a system-design interview
+
+Before any internals, an interviewer wants to see you treat ES as **one component you're choosing and sizing** — not a black box you name-drop. Same shape as any other system-design answer: clarify requirements, estimate capacity, sketch the architecture, then go deep on the hard parts.
+
+**Clarifying questions to ask, roughly in this order:**
+
+| Question | Why it matters | Where it's answered in this guide |
+|---|---|---|
+| How many documents, how big is each? | Sets total index size and shard count | Section 6 (sharding), section 10 (capacity) |
+| What's the write rate — docs/sec, steady vs. peak? | Sets bulk sizing, refresh interval, node count | Section 10's docs/sec estimate, section 5 (`_bulk`) |
+| How fresh must results be? | ES's default is ~1s (near-real-time), not instant | Section 3 (refresh/flush/merge, NRT) |
+| Read-heavy or write-heavy? | Drives replica count — more replicas help reads, cost writes | Section 6, section 2's primary/replica table |
+| Exact-match/filter, full-text relevance, or both? | Drives mapping (`keyword` vs `text`) and query shape | Section 2 (mapping), section 5 (query DSL) |
+| Single region or multi-region? | Decides whether you need CCR/CCS at all | Section 8 |
+| Is ES the source of truth, or a derived index? | Almost always derived — you still need a durable upstream | Golden rule 12 |
+
+Answering these out loud *before* drawing shards is what separates "I've memorized ES internals" from "I can use ES to solve this problem" — the latter is what's actually being graded. Once you have the answers, section 10 turns them into an actual shard/node count, and sections 3, 4, and 6 are the deep-dive material for when the interviewer asks "how does that write/query actually work."
+
 ---
 
 ## 2. Core Concepts & Data Model
@@ -84,6 +110,20 @@ flowchart TB
 - **Shard**: one Lucene index. A **primary** shard owns a slice of the documents; **replica** shards are copies for HA and read throughput. Primary count is fixed at creation; replica count is mutable.
 - **Segment**: an immutable Lucene file-set. New docs go into new segments; deletes are tombstones; background **merges** compact segments.
 - **Document**: a JSON object with an `_id`, stored in `_source`, indexed per its mapping.
+
+### 🆕 Primary vs replica shard: side-by-side
+
+Easy to blur these under pressure — pin the distinction:
+
+| | Primary shard | Replica shard |
+|---|---|---|
+| Accepts writes directly from client? | **Yes** — the coordinator always routes writes here first | No — receives ops **only** by replicating from its primary |
+| Can serve reads? | Yes | Yes — this is why more replicas means more read throughput |
+| Count fixed at index creation? | **Yes**, immutable (section 6) | **No**, mutable anytime (`number_of_replicas`) |
+| What happens if it's lost? | An in-sync replica is **promoted** to primary | Master allocates a new replica copy elsewhere |
+| Can it share a node with its own primary/replica pair? | — | **Never** — that would defeat redundancy |
+
+**If the primary dies, one of its in-sync replicas is promoted to primary — that's the only way a shard's primary ever changes hands.**
 
 ### Node roles
 
@@ -131,6 +171,28 @@ sequenceDiagram
 ```
 
 Once elected, the master owns **cluster state** (index mappings, settings, and the shard routing table — which shard copy lives on which node) and publishes updates to every node. Data nodes don't vote on queries or writes — they just execute against whatever shards the master has assigned them.
+
+### 🆕 Node failure & shard reallocation
+
+What actually happens when a data node dies mid-operation:
+
+```mermaid
+flowchart TD
+    Fail["Data node stops responding"] --> Detect["Master detects missed\nheartbeats/pings\n(after fault-detection timeout)"]
+    Detect --> Mark["Master removes node from\ncluster state, marks its\nshards UNASSIGNED"]
+    Mark --> Check{"Was a PRIMARY\non that node?"}
+    Check -->|Yes| Promote["Master promotes an in-sync\nreplica (on another node)\nto PRIMARY"]
+    Check -->|No, only replicas| Skip["Primaries elsewhere are\nunaffected"]
+    Promote --> Health1["Cluster health: RED briefly\n(primary unassigned during promotion),\nthen YELLOW (replica copy missing)"]
+    Skip --> Health2["Cluster health: YELLOW\n(replica copy missing)"]
+    Health1 --> Realloc["Master allocates NEW replica\ncopies on remaining nodes to\nrestore the configured replica count"]
+    Health2 --> Realloc
+    Realloc --> Green["Cluster health: GREEN once\nall primaries + replicas allocated"]
+```
+
+Losing a node never loses data **as long as every shard on it had at least one in-sync replica elsewhere** — that's the entire reason replicas exist. The red/yellow window matters (section 9, mistake #10): red means some primary has no surviving copy *right now*, which only happens with zero replicas, or if you lose nodes faster than the cluster can react.
+
+The same allocator also runs proactively, not just on failure: add a node, or let disk usage get uneven across nodes, and the master **rebalances** shards toward an even distribution (subject to the one-copy-per-node rule and any AZ awareness constraints from section 8). Reallocation-on-failure and rebalancing-on-growth are the same mechanism — the allocator is always nudging the cluster toward "shards evenly spread, replicas never co-located with their primary."
 
 ### Realistic production topology
 
@@ -283,6 +345,46 @@ POST /products/_analyze
 { "analyzer": "english", "text": "The Quick-Foxes!" }
 ```
 
+### 🆕 Inside a segment: the inverted index, concretely
+
+**Mnemonic: an inverted index flips "doc → terms" into "term → docs."** That flip is the entire trick that makes full-text search fast — here's what it actually looks like on disk.
+
+Say three tiny documents land in the same segment, already run through the analyzer:
+
+```
+Doc 1: "the quick fox"       -> terms: [quick, fox]
+Doc 2: "the quick brown fox" -> terms: [quick, brown, fox]
+Doc 3: "a lazy fox"          -> terms: [lazy, fox]
+```
+
+The segment stores a **term dictionary** (sorted, for fast lookup) where each term points to a **postings list** — the doc IDs (plus positions, for phrase queries) that contain it:
+
+| Term | Postings list (doc IDs) |
+|---|---|
+| brown | [2] |
+| fox | [1, 2, 3] |
+| lazy | [3] |
+| quick | [1, 2] |
+
+A query for `"fox"` is now one dictionary lookup + one postings-list read — not a scan of every document. A phrase query like `"quick fox"` intersects the `quick` and `fox` postings lists, then checks stored term positions are adjacent. This term-dictionary-plus-postings-list pair, repeated per segment, **is** the inverted index. Everything built on top of it in this section (refresh creates a new one, merge combines several, BM25 scores using per-term document-frequency stats read straight off these postings lists) is decoration on this one structure.
+
+```mermaid
+flowchart LR
+    subgraph SegA["Segment A postings"]
+        A1["fox -> [1,2,3]"]
+        A2["quick -> [1,2]"]
+    end
+    subgraph SegB["Segment B postings (newer)"]
+        B1["fox -> [4,5]"]
+        B2["lazy -> [4]"]
+    end
+    SegA --> Merge["Merge (below)"]
+    SegB --> Merge
+    Merge --> SegC["Merged segment postings:\nfox -> [1,2,3,4,5]\nquick -> [1,2]\nlazy -> [4]"]
+```
+
+Merging two segments' postings for the same term is a cheap sorted-list merge (both lists are already doc-ID-sorted). What's expensive is rewriting the rest of the segment's files around it — that I/O cost is exactly why the merge policy batches many small segments instead of merging on every refresh.
+
 ### The full internal write path
 
 When you index a document, here's what physically happens:
@@ -314,6 +416,25 @@ Step by step:
 4. **Translog.** The op is appended to the **translog** (write-ahead log) and, by default (`index.translog.durability: request`), **fsynced to disk before the request is acked.** This is what makes an acked write durable even though the Lucene segment hasn't been committed yet.
 5. **Replication.** The primary forwards the op to each in-sync replica, which repeats buffer + translog. Only after in-sync replicas ack does the primary ack the coordinator.
 6. **Client gets 200.** The doc is durable but still **not searchable** until the next refresh.
+
+### 🆕 Replication consistency: is this "quorum writes"?
+
+Distributed-systems interview prep (and the companion guide) often frames replicated writes as Dynamo-style quorums (`W + R > N`). **Elasticsearch does not use that model** — worth being precise about, since conflating the two is an easy interview slip.
+
+What ES actually does:
+- Every write goes to the **primary first, always** — there's no "write to any W replicas." The primary is the single ordering authority for that shard.
+- Before accepting the write, the primary checks `index.write.wait_for_active_shards` (default **`1`**, meaning only the primary itself needs to be active — replicas are best-effort for this check). Raise it to `all` or a number to require more copies to be active before the client even gets a request accepted. This is a **threshold on how many shard copies are up**, not a quorum vote among peers.
+- Once accepted, the primary replicates to **every current in-sync replica** — not a majority subset — and waits for all of them to ack before acking the client. Day to day, an acked write reached the primary *and* every in-sync replica, which is a stronger guarantee than a bare majority quorum.
+- Reads (search) can hit **any** copy, primary or replica — there's no read-quorum concept. You get whatever that one shard copy currently has, which is why search is NRT/eventually consistent (see refresh, above), not linearizable.
+
+| | Dynamo-style quorum (`W+R>N`) | Elasticsearch |
+|---|---|---|
+| Who accepts a write first | Any of W replicas | **Only the primary**, always |
+| Read consistency | Tunable via R | Whatever one shard copy has (NRT) |
+| "Enough copies" check | Quorum vote among peers | Primary checks **active shard count** vs. a threshold |
+| Conflict resolution | Vector clocks / last-write-wins | Not needed — primary is the single order of truth per shard |
+
+**Takeaway for interviews:** if asked "how does ES ensure write consistency," the accurate answer is "single-primary-per-shard ordering, translog durability, and replication to every in-sync copy" — not "quorum."
 
 ### Refresh vs Flush vs Merge
 
@@ -402,6 +523,21 @@ sequenceDiagram
 - **Fetch phase:** a *second* round-trip retrieves the actual `_source` for only the final top-K, and only from the shards that own those specific docs.
 
 Why two phases: shipping full document bodies from every shard for every candidate would be enormously wasteful. Query-then-fetch moves only tiny (id, score) tuples in phase one and full bodies for just the final K in phase two. The cost: **two network round-trips**, which is why people who assume "one broadcast" mis-estimate latency.
+
+### 🆕 Which shards does a query actually hit?
+
+Not every search fans out to every shard. The coordinating node decides based on what the request provides:
+
+```mermaid
+flowchart TD
+    Q["Incoming search request"] --> R{"Does the request specify\na routing value (?routing=...)?"}
+    R -->|Yes| One["Compute hash(routing) % num_primaries\n-> hit ONLY that one shard's copies\n(no fan-out, no merge needed)"]
+    R -->|No, typical| Fan["Fan out to ONE copy of\nEVERY shard in the target\nindex(es) - query-then-fetch"]
+    One --> Done1["Return that shard's top-K directly"]
+    Fan --> MergeAll["Coordinator merges each shard's\ntop-K -> global top-K"]
+```
+
+This is exactly why **custom routing** (section 6) is a real performance lever: if a query is scoped to one tenant and that tenant's docs were routed to a single shard at index time, the query touches **1 shard instead of N** — no wasted work on shards holding none of that tenant's docs, and no merge phase. The cost is the same hot-spot risk noted in section 6: a routing key that's too coarse concentrates data (and query load) unevenly across shards.
 
 ### Relevance scoring — what's ES-specific
 
@@ -1178,6 +1314,27 @@ So each data node: **64 GB RAM, 30 GB heap, ~34 GB OS filesystem cache**, with h
 
 **Result:** 30 GB/day × 120-day retention with RF choices → **7.5 TB stored**, **~50 hot + ~150 warm primary shards** managed by rollover, **3 hot + 2 warm data nodes** (plus 3 masters + 2 coord), each data node **64 GB RAM / 30 GB heap.**
 
+### 🆕 Indexing throughput: how many docs/sec can this handle?
+
+The walkthrough above sizes for **volume** (GB/day → shards → nodes). The other capacity question interviewers ask is **rate**: how many documents/sec can this ingest? This varies a lot by document size, mapping complexity, and hardware — treat the numbers below as **illustrative, not a benchmark to quote**. The method matters more than the exact figures.
+
+```
+Given (illustrative):
+  Avg document size (indexed, post-JSON) ≈ 1 KB
+  Daily primary volume (from above)      = 50 GB/day
+  -> Docs/day  = 50 GB / 1 KB            ≈ 50,000,000 docs/day
+  -> Docs/sec, steady average            ≈ 50,000,000 / 86,400s ≈ ~580 docs/sec
+  -> Docs/sec, peak (~5x for bursty logs) ≈ ~2,900 docs/sec
+```
+
+To actually sustain that rate:
+- Use `_bulk` (section 5) — looping single-doc requests tops out far lower, often only tens to low hundreds of docs/sec per client thread, purely from per-request overhead.
+- Batch a few thousand docs / a few MB per bulk request, fired from **multiple parallel client threads** — one thread serializes its own batches, so parallelism is what scales total throughput, not bigger batches alone.
+- Relax `index.refresh_interval` (e.g. `30s`, or `-1` during a bulk load) — every refresh is a small write-amplification cost, and refreshing every 1s under heavy load competes with indexing for the same CPU/IO.
+- Set `number_of_replicas: 0` during a bulk load, restore after — every replica duplicates the indexing work in parallel.
+
+**If asked "what's the bottleneck at high write rate,"** the honest answer is usually **not** network or even disk — it's **CPU spent analyzing text and merging segments**, plus translog fsync latency if durability is `request`. Same tradeoff shape as the refresh/flush/merge table earlier in section 3, just at whole-cluster scale.
+
 ---
 
 ## 11. Real-World Reference Points
@@ -1219,6 +1376,7 @@ The survive-even-if-you-forget-everything-else principles:
 10. **Don't stretch one cluster across regions** — one cluster per region, connected by CCR (replicate) or CCS (federate).
 11. **Read/write through aliases** so you can reindex and flip atomically with zero downtime.
 12. **ES is a rebuildable derived view, not your source of truth** — keep a durable upstream to replay from.
+13. 🆕 **Replication is single-primary-then-all-in-sync-replicas, not a Dynamo-style quorum** — reads can hit any one copy, which is why search is NRT, not linearizable.
 
 ---
 
@@ -1233,6 +1391,7 @@ The survive-even-if-you-forget-everything-else principles:
 | `index.refresh_interval` | `1s` | How often new docs become searchable (NRT) |
 | `index.translog.durability` | `request` | fsync translog per request (durable acks) |
 | `index.max_result_window` | `10000` | `from`+`size` ceiling |
+| 🆕 `index.write.wait_for_active_shards` | `1` | How many active shard copies must be up before the primary accepts a write — not a quorum vote |
 | `index.mapping.total_fields.limit` | `1000` | Max fields before writes fail (mapping explosion guard) |
 | `cluster.routing.allocation.disk.watermark.low` | `85%` | Stop allocating new shards to node |
 | `...disk.watermark.high` | `90%` | Relocate shards off node |
@@ -1272,6 +1431,8 @@ The survive-even-if-you-forget-everything-else principles:
 - **"Heap ≤ 50% and ≤ 32, both."**
 - **"`knn` in the body = hybrid for free"** — native vector search fuses with lexical query server-side.
 - **"Elasticsearch and OpenSearch are siblings, not synonyms"** — 2021 SSPL/Elastic-License fork, check which one you're actually running.
+- 🆕 **"Inverted index flips doc→terms into term→docs"** — term dictionary + postings lists, the one structure everything else (refresh, merge, BM25) sits on top of.
+- 🆕 **"Primary first, replicate to all in-sync copies"** — not a quorum vote; reads can hit any one copy, hence NRT.
 
 ### Symptom → probable cause
 

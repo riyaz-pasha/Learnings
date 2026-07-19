@@ -1,5 +1,7 @@
 # Sharded Counters — FAANG System Design Interview Guide
 
+> **Enhancement notes:** This pass added (1) an explicit Requirements Clarification (functional + non-functional) subsection and a Data Model subsection under §3, (2) an architecture-evolution walkthrough — v1 single row → v2 fixed-N shards → v3 adaptive shards + write-behind cache — under a new §5.0, (3) an adaptive shard-count decision flowchart under §6.1, (4) a 3-way "exact sharded vs HyperLogLog vs in-memory batching" comparison table under §6.5, and (5) a compact "if X → then Y" recall table under §15. It also tightens a couple of dense run-on sentences (§6.6, §8) for plain-language clarity. Everything else — mental model, playbook, capacity math, disambiguation tables, failure modes, golden rules — was already solid and is left untouched. New material is marked with a 🆕 in its heading.
+
 > Building block. Not a full system — a technique you slot into "design X at scale" whenever X has a number that gets hammered by concurrent writes: likes, views, votes, impressions, rate-limit counters, inventory counts.
 
 ---
@@ -82,6 +84,57 @@ readCounter(counter_id)                       // Σ over all shards (or cached �
 
 Google popularized this exact pattern in the **App Engine Datastore sharded counter** doc (the canonical reference every interviewer has half-read) — same three operations, same shard-count trade-off.
 
+### 🆕 3.1 Requirements Clarification (say this out loud first)
+
+**Functional requirements**
+- Increment / decrement a named counter (like, unlike, view, vote).
+- Read the current (approximate) total for a counter.
+- Support many independent counters — one per post/video/tweet — not just one global counter.
+- (Optional, ask the interviewer) Per-user "have I already liked this" state — usually a separate table, not part of the counter itself.
+
+**Non-functional requirements**
+- **Write throughput:** must absorb bursty, skewed traffic — one viral post can generate tens of thousands of writes/sec while most posts generate almost none. Design for the peak on the hottest entity, not the system-wide average.
+- **Read latency:** sub-10ms for a count display — it renders on every page view of the post.
+- **Read consistency:** eventual is acceptable. Product tolerance is usually "a few seconds of staleness on a like/view count is fine." Say this out loud and get the interviewer to confirm it; if they say "must be exact," this pattern is the wrong tool (see §10.2).
+- **Durability:** counts must survive a node restart/crash — in-memory shards need periodic flush to a durable store.
+- **Availability over strict consistency:** prefer serving a slightly-stale count over failing the read.
+
+Close the clarification with one sentence: *"I'll optimize for write availability and read latency, and accept eventual consistency on the displayed count — tell me if that's not acceptable for this use case."*
+
+### 🆕 3.2 API Design (fleshed out)
+
+The three logical operations above, as they'd actually look over HTTP/RPC:
+
+| Operation | Signature | Notes |
+|---|---|---|
+| Create | `POST /counters` `{counter_id, entity_type, initial_shard_count}` → `201` | Called once when the entity (tweet/post/video) is created. |
+| Increment / decrement | `POST /counters/{counter_id}/writes` `{delta: +1 \| -1, dedupe_key?}` → `202 Accepted` | `dedupe_key` (e.g. `user_id:action`) lets a downstream job detect duplicate/replayed writes. Async-friendly — the caller doesn't need the new total back. |
+| Read | `GET /counters/{counter_id}` → `{counter_id, value, as_of_timestamp}` | `as_of_timestamp` makes the staleness explicit to the caller instead of hiding it. |
+
+Returning `202` (not `200` with the new value) on write is a deliberate choice: the caller shouldn't expect the response to reflect a fresh global total, because summing on every write would defeat the whole point of sharding.
+
+### 🆕 3.3 Data Model
+
+Three things need storage: the shard values, the metadata mapping a counter to its shards, and (optionally) the cached aggregate.
+
+```
+counters_metadata                 shard_values (Redis hash, one per counter)
+─────────────────────             ─────────────────────────────────────────
+counter_id      PK                key:   counter_id:shard_id
+entity_type                       value: int64 (or two int64s, P and N — §5.5)
+shard_count
+created_at
+last_resharded_at
+
+aggregate_cache (Redis, TTL'd)
+───────────────────────────────
+key:   counter_id:aggregate
+value: {sum, computed_at}
+ttl:   T seconds (§5.4)
+```
+
+`counters_metadata` is small — one row per entity — but read on every write, so cache it aggressively (golden rule #9). `shard_values` is the hot path: N keys per counter, written constantly. `aggregate_cache` only exists if you chose the cached-rollup read strategy (§6.3) over pure fan-out.
+
 ### Interview cheat-sheet — What it is
 - Three APIs to name: `createCounter`, `writeCounter`, `readCounter` — mention metadata store tracks `counter_id → shard_count → shard locations`.
 - A shard is just a normal row/key; nothing fancy — the cleverness is entirely in routing + aggregation.
@@ -136,6 +189,46 @@ graph LR
 ---
 
 ## 5. How It Works Internally
+
+### 🆕 5.0 Architecture Evolution: v1 → v2 → v3
+
+Walk an interviewer through this progression out loud — it shows you didn't jump straight to the complex answer.
+
+```mermaid
+flowchart LR
+    subgraph V1["v1 — single counter row"]
+        direction TB
+        C1[Client] --> R1[(tweet.like_count<br/>one row, one lock)]
+    end
+    subgraph V2["v2 — fixed-N sharded counter"]
+        direction TB
+        C2[Client] --> LB2[App server]
+        LB2 --> SH2["pick 1 of N shards<br/>(random/hash)"]
+        SH2 --> S20[(shard_0)]
+        SH2 --> S21[(shard_1)]
+        SH2 --> S2n[(shard_N)]
+    end
+    subgraph V3["v3 — adaptive shards + write-behind cache"]
+        direction TB
+        C3[Client] --> LB3[App server]
+        LB3 --> SH3["pick 1 of N-t shards<br/>N grows/shrinks with QPS"]
+        SH3 --> S30[(shard_0)]
+        SH3 --> S31[(shard_1)]
+        SH3 --> S3n[(shard_N)]
+        S30 -.write-behind nudge.-> AGG[("in-memory<br/>running aggregate")]
+        S31 -.write-behind nudge.-> AGG
+        S3n -.write-behind nudge.-> AGG
+        AGG -->|periodic flush| DUR[(durable store<br/>e.g. Cassandra)]
+    end
+    V1 -->|"breaks at ~1-2K writes/sec<br/>on one row"| V2
+    V2 -->|"breaks when actual traffic<br/>doesn't match predicted shard count"| V3
+```
+
+- **v1** works fine until one entity gets hot — then it's a single lock, single row, hard ceiling (§4).
+- **v2** fixes the write bottleneck but bakes in a guess (`number_of_shards` chosen at creation, §5.1). A wrong guess means an under-provisioned hot shard, or wasted read fan-out if you over-shard.
+- **v3** adds two things on top of v2: the shard count itself reacts to live write-QPS (§6.1, adaptive), and each shard write also nudges an in-memory running total (write-behind, §6.3) so reads almost never need to fan out. The periodic flush to a durable store is just for crash-recovery, not for serving reads.
+
+Each arrow in the diagram is a concrete "what broke" — that's the story to tell, not just the end state.
 
 ### 5.1 Counter creation
 
@@ -280,6 +373,21 @@ Worked example: a user double-taps to like then immediately unlikes the same twe
 
 **Memory hook — "F.A.T." shard strategies: F**ixed, **A**daptive, **T**iered (start with few shards, add more as write-QPS crosses thresholds — a hybrid of the two).
 
+#### 🆕 Adaptive shard-count decision flowchart
+
+```mermaid
+flowchart TD
+    A["Monitor: per-counter write QPS<br/>(sliding window, e.g. last 60s)"] --> B{"QPS > per-shard ceiling<br/>x current shard count x 0.7 ?<br/>(70% = act before saturation)"}
+    B -- Yes --> C["Compute new shard count:<br/>N' = ceil(QPS / per-shard ceiling) x safety margin"]
+    C --> D["Widen: add shards N+1..N'<br/>to metadata (versioned)"]
+    D --> E["New writes route across N'<br/>old shard totals stay put (§6.6)"]
+    B -- No --> F{"QPS under 20% of current<br/>capacity for a sustained window?"}
+    F -- Yes --> G["Optional: mark counter 'cooling down'.<br/>Most systems just leave shard count as-is —<br/>shrinking is rarely worth the complexity"]
+    F -- No --> H["No change — current shard count<br/>still fits observed traffic"]
+```
+
+Trigger the "widen" path off **per-shard** QPS, not the counter's total QPS — a skewed selection strategy can overload one shard while the total still looks fine (§6.6).
+
 ### 6.2 Storage backing: In-memory vs. DB-backed
 
 | | In-memory (Redis `INCR`/`HINCRBY`) | DB-backed (row per shard: Cassandra/DynamoDB/MySQL) |
@@ -328,9 +436,25 @@ For some problems you don't need an *exact* count at all — you need a good est
 | Memory | O(shards) — grows with entity count | O(1) per counter (~12KB) | O(width × depth), fixed |
 | Use when | You need per-entity exact-ish totals (likes, views) | "How many unique users viewed this" | "What are the top K trending hashtags right now" |
 
+#### 🆕 Quick comparison: exact sharded counting vs HyperLogLog vs in-memory batching
+
+These solve different problems but get lumped together in interviews — know which axis each one trades on.
+
+| | Exact sharded counting | HyperLogLog | In-memory batching (write-behind) |
+|---|---|---|---|
+| Question answered | "What's the total?" — exact-ish, eventually consistent | "How many *distinct* items?" — approximate | "What's the total?" — same question as sharded counting, cheaper reads |
+| Accuracy | Exact sum, as of the last aggregation pass | ~0.81% standard error, never exact | Exact sum, but can drift if a nudge is lost (§5.5) |
+| Memory | O(number of shards) | O(1) — ~12KB flat, regardless of scale | O(1) extra — one running total per counter |
+| Shines when | Per-entity like/view/vote counts | Unique visitors, unique viewers | Read QPS so high that even a cache-hit fan-out sum is too much |
+| Fails when | Doesn't dedupe — two writes from the same user both count | Can never give you the exact number | Needs periodic reconciliation against a source of truth |
+
+Recall trick — **"sum vs. distinct vs. speed."** Sharded counters optimize the *sum*, HyperLogLog optimizes *distinct*, write-behind batching optimizes *read speed* for a sum you're already computing.
+
+Concrete number for the batching column: flushing an in-memory aggregate to the durable store every **100ms**, instead of writing the durable store on every increment, cuts durable-store writes by roughly **100x** for a counter taking 10 writes/ms. The trade: up to 100ms of data is at risk if the process crashes between flushes.
+
 ### 6.6 Rebalancing: When a Shard Itself Gets Hot
 
-Sharding fixes the entity-level hot key, but a **second-order hot key** can appear inside the shard set: a poorly-distributing hash clusters too many active users onto `shard_7`, or random selection just gets unlucky enough times that one shard's row becomes a mini hot-key inside its own Cassandra/DynamoDB partition. The fix is the same idea, applied recursively — plus a live-migration question you didn't have at creation time.
+Sharding fixes the entity-level hot key. But a **second-order hot key** can appear inside the shard set itself: a poorly-distributing hash clusters too many active users onto `shard_7`, or random selection just gets unlucky enough times that one shard becomes a mini hot-key inside its own Cassandra/DynamoDB partition. The fix is the same idea, applied recursively — plus a live-migration question you didn't face at creation time.
 
 **Detect:** per-shard write-QPS, not just the counter's total QPS. If `shard_7` runs at 5x its siblings, either selection is skewed or the partitioning underneath maps several shards onto the same physical node.
 
@@ -425,11 +549,10 @@ with 50% safety margin → 30 shards
 
 **Read cost (fan-out, no caching)**
 ```
-30 shards × ~1ms per-shard read (parallel fan-out, not serial) 
-≈ 1-3ms wall clock (parallelized) but 30x the request fan-out load
-on the store — at 10,000 reads/sec on this post, that's 300,000
-shard-reads/sec generated just for aggregation.
+30 shards × ~1ms per-shard read, done in parallel (not serial)
 ```
+Each read fans out to all 30 shards at once, so wall-clock latency stays ~1-3ms — bounded by the slowest shard, not the sum of all of them. But the *load* on the store is 30x: at 10,000 reads/sec on this post, that's 300,000 shard-reads/sec generated just to compute the aggregate.
+
 This is the number that justifies caching: 300K extra store ops/sec to serve reads is not acceptable.
 
 **Read cost (with cached aggregate, refreshed every 2 seconds)**
@@ -645,5 +768,19 @@ read_cost(cached)  = O(1) per read + O(shards_needed) per aggregation cycle
 **Failure modes to volunteer:** unpredicted viral burst overwhelms fixed shard count; fan-out reads without caching explode read QPS; naive selection recreates a hot shard; decrements assumed away; metadata lookup itself becomes hot; live resharding is hard.
 
 **Real-world anchors:** Google App Engine (origin), Twitter/Instagram likes, YouTube views (intentionally delayed), Reddit votes, DynamoDB/Cassandra hot-partition-key suffixing.
+
+**🆕 If X → then Y (fast recall under pressure):**
+
+| If... | Then... |
+|---|---|
+| One entity's write QPS is uniform and low | Plain counter row / Redis `INCR` — don't shard. |
+| One entity's write QPS exceeds the store's single-row/partition ceiling | Shard the counter (§5, §8). |
+| The write rate for a hot entity keeps changing unpredictably | Adaptive shard count, not fixed (§6.1). |
+| Reads must be exact, no staleness tolerated | Wrong pattern — use a single sequencer or a transaction, not sharded counters (§10.2). |
+| You need "how many unique X," not "how many total X" | HyperLogLog, not sharded counters (§6.5). |
+| You need top-K / frequency across a huge key space | Count-Min Sketch (§6.5). |
+| Writes come from multiple regions with no shared coordinator | CRDT counter — G-Counter/PN-Counter, not centrally-routed shards (§6.4). |
+| The action can be reversed (unlike, unvote) | Signed delta or PN-Counter-lite shards, never increment-only (§5.5). |
+| Fan-out-on-read is generating too much load on the store | Cache the aggregate; bound staleness by TTL or write-count (§5.4, §6.3). |
 
 **Golden rule to close any answer with:** "Sharded counters buy write scalability by making the read an approximation — I'd confirm with the interviewer/PM how stale a count is acceptable before finalizing the aggregation strategy."

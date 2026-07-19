@@ -1,5 +1,15 @@
 # Design Google Maps — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added material the original guide was missing or left thin, everything else below is untouched.
+> - Added an **API Design** subsection (§6) — the guide had no explicit request/response contract, a FAANG interviewer will ask for one.
+> - Added a **v1 → v2 → v3 architecture evolution** diagram (§6) showing static tiles → CDN + dynamic tiles → real-time traffic + hierarchical routing.
+> - Added a full **Geocoding & Reverse Geocoding** deep dive (§7) — previously a one-line mention inside "Distributed Search."
+> - Added a **Turn-by-Turn Navigation & Rerouting-on-Deviation** deep dive with a decision flowchart (§13) — previously just "Navigator detects deviation" with no logic shown.
+> - Added a **Tile zoom-level selection flowchart** (§10) and a couple of new comparison/mnemonic aids.
+> - Everything else — requirements, capacity estimation, segmentation, routing algorithms, traffic ingestion, ETA modeling, production readiness, golden rules — was already strong and is left as-is; new headings are marked with 🆕.
+
+---
+
 ## 1. Mental Model
 
 Google Maps is three products wearing one UI:
@@ -198,6 +208,71 @@ aggregates grow daily).
 
 ## 6. High-Level Design
 
+### 🆕 API Design
+
+State the contract before the boxes-and-arrows — interviewers use this to check you've thought about the client's actual call shape, not just internal components.
+
+| Endpoint | Purpose | Key request params | Key response fields |
+|---|---|---|---|
+| `GET /v1/geocode?address=` | Text address → lat/lng | `address` | `lat, lng, placeId, confidence` |
+| `GET /v1/reverseGeocode?lat=&lng=` | lat/lng → nearest address | `lat, lng` | `address, placeId` |
+| `GET /v1/routes?origin=&destination=&mode=&departureTime=` | Compute a route | `origin, destination, mode (car/bike/walk/transit), departureTime` | `routeId, distanceMeters, etaSeconds, polyline, steps[]` |
+| `GET /v1/routes/{routeId}/eta?lat=&lng=` | Live-recompute ETA mid-trip from current position | `routeId, lat, lng` | `etaSeconds, remainingDistanceMeters, rerouted (bool)` |
+| `GET /v1/tiles/{z}/{x}/{y}.pbf` | Fetch one vector tile | path params `z, x, y` | binary protobuf (geometry + style refs) |
+| `POST /v1/location/pings` (or WebSocket equivalent) | Stream a device's GPS ping | `userId, ts, lat, lng, speedKph, headingDeg` | `ack` (fire-and-forget, no meaningful body) |
+| `GET /v1/places/nearby?lat=&lng=&radiusM=&category=` | POI search near a point | `lat, lng, radiusM, category` | `places[] {placeId, name, lat, lng, distanceM}` |
+
+Notes worth saying out loud:
+- `routes` and `eta` are separate calls on purpose — the first is expensive (graph search), the second is cheap (re-weight a cached path); don't force a client to re-request the whole route just to refresh a number.
+- Tiles are fetched by `(z, x, y)`, not by bounding box — that's what makes them CDN-cacheable (fixed, predictable keys) instead of query-string-cacheable (infinite key space).
+- Location pings are one-way and idempotent-ish (a dropped ping just means one fewer sample) — that's why it's fire-and-forget over a POST/WebSocket, not a call the client waits on or retries aggressively.
+- Rate limits (§16) apply per endpoint: `routes`/`geocode` are token-bucketed per API key; `location/pings` is capped per device, not per key.
+
+### 🆕 Architecture Evolution: v1 → v2 → v3
+
+Interviewers like seeing that you didn't jump straight to the final design — walk through how it would evolve if you shipped incrementally.
+
+```mermaid
+flowchart LR
+    subgraph V1["v1 — static, pre-rendered"]
+        direction TB
+        v1a[Offline tile renderer] --> v1b[(Pre-rendered raster tiles on disk)]
+        v1b --> v1c[Tile server] --> v1d[Client]
+        v1e[Full road graph, single box] --> v1f[Dijkstra on whole graph] --> v1d
+    end
+```
+
+```mermaid
+flowchart LR
+    subgraph V2["v2 — CDN + dynamic tiles + segmented graph"]
+        direction TB
+        v2a[Vector tile generator] --> v2b[CDN edge cache] --> v2c[Client]
+        v2d[Segmented road graph + precomputed exit-point distances] --> v2e[Route Finder / Area Search / Graph Processing] --> v2c
+    end
+```
+
+```mermaid
+flowchart LR
+    subgraph V3["v3 — real-time traffic + hierarchical routing"]
+        direction TB
+        v3a[GPS pings, millions/sec] --> v3b[Kafka] --> v3c[Spark/Flink: map-match + aggregate]
+        v3c --> v3d[Map Update Service] --> v3e[Graph DB: live edge weights]
+        v3e --> v3f[Contraction-Hierarchy-style routing engine]
+        v3f --> v3g[Client: route + live ETA]
+        v3h[CDN + dynamic vector tiles] --> v3g
+    end
+```
+
+| Stage | What's new | What breaks if you stop here |
+|---|---|---|
+| v1 | Tiles are baked offline and served flat; routing is Dijkstra on one giant in-memory graph | Doesn't scale past a small map — full-graph Dijkstra and un-cached tiles both fall over at real traffic |
+| v2 | CDN in front of tiles (huge bandwidth win), graph split into segments with precomputed exit points | Routing is fast but ETAs are static — no live traffic means wrong ETAs during real congestion |
+| v3 | GPS-ping pipeline feeds live edge weights; routing engine is CH-like (or ALT) so it stays fast *and* traffic-aware | This is the target design described in the rest of this guide |
+
+**Cheat-sheet**
+- If asked "how would you build this incrementally," answer with this v1→v2→v3 ladder, not the full design from scratch.
+- The recurring upgrade at every stage is the same: replace "compute everything at request time" with "precompute + cache, refresh async."
+
 ### Components
 | Component | Responsibility |
 |---|---|
@@ -347,6 +422,43 @@ flowchart TD
 - S2 = what Google actually uses; near-equal-area cells on the sphere, Hilbert-curve locality means nearby cells have nearby IDs (great for range scans in Bigtable/Spanner).
 - R-tree = for shapes, not points — geofencing, building footprints, delivery zones.
 - Uber uses **H3** (hexagonal hierarchical index) as a fifth alternative worth name-dropping — hexagons have uniform neighbor distance (no diagonal-vs-adjacent distortion like squares).
+
+### 🆕 Geocoding & Reverse Geocoding
+
+The "Distributed Search / Typeahead" component in §6 does two distinct jobs that are worth separating explicitly, because they use different data structures:
+
+**Forward geocoding** — text address → lat/lng (e.g., "1600 Amphitheatre Parkway, Mountain View" → `37.4220, -122.0841`).
+- Backed by an inverted index over address tokens (street number, street name, city, postal code) — conceptually the same trie/inverted-index machinery as search typeahead, just indexing addresses instead of web pages.
+- Ambiguous/partial input ("Koramangala" — a neighborhood, not a full address) resolves to a ranked list of candidates; ranking uses popularity, proximity to the requester, and string-match quality.
+- **Illustrative scale:** a country-level address index might hold on the order of 100M–1B addressable entries (buildings, POIs, intersections); at ~200 bytes/entry that's tens to low hundreds of GB — small enough to shard by region and mostly cache in memory, unlike the multi-PB road graph.
+
+**Reverse geocoding** — lat/lng → nearest address (e.g., `37.4220, -122.0841` → "1600 Amphitheatre Parkway").
+- Not a text lookup — it's a spatial nearest-neighbor query: map the point to its S2 cell/geohash prefix, then do a bounded radius search over addresses/parcels indexed under that same cell (the exact index from the table above), picking the closest by haversine distance.
+- This is also exactly how a raw GPS ping gets turned into "which street am I on" for display purposes (distinct from *map matching* in §11, which snaps a ping onto a *road edge* for routing/traffic — reverse geocoding snaps it onto a human-readable *address*).
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant GeoAPI as Geocoding Service
+    participant TextIdx as Address Inverted Index
+    participant SpatialIdx as S2 / Geohash Index
+
+    Client->>GeoAPI: GET /v1/geocode?address="Koramangala"
+    GeoAPI->>TextIdx: token lookup + ranking (popularity, match quality)
+    TextIdx-->>GeoAPI: ranked candidates [lat/lng, confidence]
+    GeoAPI-->>Client: top candidate + alternates
+
+    Client->>GeoAPI: GET /v1/reverseGeocode?lat=12.93&lng=77.62
+    GeoAPI->>SpatialIdx: which S2 cell? nearby address candidates?
+    SpatialIdx-->>GeoAPI: candidate addresses within ~50 m
+    GeoAPI->>GeoAPI: pick nearest by haversine distance
+    GeoAPI-->>Client: "80 Feet Rd, Koramangala"
+```
+
+**Cheat-sheet**
+- Forward geocoding = text search problem (inverted index + ranking). Reverse geocoding = spatial nearest-neighbor problem (same S2/geohash index used for segments and tiles).
+- Both are read-heavy and latency-sensitive (~20 ms budget in the §9 trace) but tiny compared to the road graph — cache them aggressively, they change far less often than traffic.
+- If asked "is geocoding part of routing," say no — it's a prerequisite lookup that turns free text into the lat/lng that routing actually consumes.
 
 ---
 
@@ -608,6 +720,23 @@ pie showData
     "Forwarded to origin tile server" : 5
 ```
 
+#### 🆕 Tile zoom-level selection flowchart
+
+The client, not the server, decides which zoom level to ask for — but it's worth walking through the logic out loud, because it's the same "which partition do I need" question the whole system keeps asking.
+
+```mermaid
+flowchart TD
+    A[User pans/zooms viewport] --> B[Compute viewport scale: meters/pixel]
+    B --> C[zoom = log2(156,543 / meters_per_pixel)]
+    C --> D[Round to nearest supported integer zoom level]
+    D --> E[Compute tile x,y range covering viewport bounds at that zoom]
+    E --> F{Tiles in local client cache?}
+    F -->|Yes| G[Render from cache, no network call]
+    F -->|No| H{Tiles in CDN edge cache?}
+    H -->|Yes ~95%| I[CDN returns tile, client caches it]
+    H -->|No ~5%| J[Origin tile server renders/fetches, CDN + client cache it]
+```
+
 **Cheat-sheet**
 - Tiles are addressed by `(zoom, x, y)` — same trick as segments/S2 cells: fixed-size partitions of the world at multiple resolutions.
 - Modern Google/Apple/Mapbox Maps use vector tiles: smaller payload, instant re-styling (dark mode, language), smooth zoom — cost is shifted to client CPU/GPU.
@@ -720,11 +849,37 @@ Naive ETA = distance / speed-limit. Reality needs:
 - Pings fan out via Kafka to two consumers: (1) Navigator's own deviation-detection logic (has the user left the suggested path?), (2) the analytics pipeline (traffic aggregation, feeds back into the graph).
 - **Lazy loading**: Google Maps only loads the map data (tiles, POIs) for the visible viewport, not the whole route or region — reduces initial load, saves bandwidth, and reduces server load per client. This is explicitly why "availability" holds up even at huge scale.
 
+### 🆕 Turn-by-Turn Navigation & Rerouting-on-Deviation
+
+**Generating the turn list.** A route from Graph Processing is a sequence of edges (road segments), not a sequence of English sentences. The Navigator (client + a thin server-side helper) turns that into steps by walking consecutive edge pairs: at each vertex, compare the incoming edge's bearing to the outgoing edge's bearing — the angle difference buckets into "continue straight" (~0–15°), "slight left/right" (~15–45°), "turn left/right" (~45–135°), or "sharp turn/U-turn" (>135°). Attach the outgoing edge's street name and distance-until-next-maneuver, and you have one turn-by-turn instruction. This is why street names and edge geometry both need to live on `ROAD_EDGE` (§8's schema already has this).
+
+**Detecting deviation.** Every incoming GPS ping (already flowing through the pipeline in §11) gets map-matched onto an edge, same as for traffic. Navigator compares the matched edge against the *planned* route's current step:
+- Matched edge is on the planned route → no-op, just advance the "current step" pointer if the user crossed into the next edge.
+- Matched edge is off the planned route → deviation. Don't reroute on the very first off-route ping (could be a momentary map-matching error or a missed turn the driver is already correcting) — require the deviation to persist for a couple of consecutive pings/seconds before acting.
+
+```mermaid
+flowchart TD
+    A[GPS ping arrives] --> B[Map-match to nearest road edge]
+    B --> C{Matched edge on planned route?}
+    C -->|Yes| D[Advance current-step pointer if edge changed]
+    C -->|No| E{Off-route for N consecutive pings / T seconds?}
+    E -->|No, could be noise| F[Wait for next ping, don't reroute yet]
+    E -->|Yes, sustained| G[Publish deviation event to Kafka]
+    G --> H[Route Finder: recompute route from current lat/lng to original destination]
+    H --> I[Push new route + steps + ETA to client]
+    D --> J[Continue navigation]
+    F --> A
+```
+
+**Why this reuses everything already built:** a reroute is just a brand-new `findRoute` call (§6's sequence diagram) with the origin swapped to the driver's current position — no special-cased "rerouting" code path. The only new piece is the deviation *detector* sitting in front of it.
+
 **Cheat-sheet**
 - One WebSocket per active device; gateway tier sized by socket-ceiling-per-server, not by CPU.
 - Ping payload is deliberately minimal — the design bets on high *volume*, low *per-message cost*.
 - Same ping stream serves two masters: deviation detection (sync-ish, on Navigator) and traffic analytics (async, via Kafka/Spark) — don't couple them.
 - Lazy-loading the viewport, not the world, is a direct availability lever — say this if asked "how does this stay available under load."
+- Turn-by-turn steps come from edge-to-edge bearing changes, not a separate "directions" dataset — the same graph edges used for routing carry the street names.
+- Rerouting = deviation detector (debounced, so it doesn't fire on one noisy ping) + a normal `findRoute` call from the new position — if X (sustained off-route) then Y (reroute from here), otherwise no-op.
 
 ---
 
@@ -916,6 +1071,11 @@ meters_per_pixel    ≈ 156,543 / 2^zoom   (equator)
 - Core services: *"Find it, Route it, Watch it"* → Search/Location, Route/Area/Graph, Navigator.
 - Abuse defense: *"Throttle the key, trust no single ping, believe the crowd"* → API throttling, plausibility filter, corroboration.
 - Multi-region: *"Regional by default, global only where it's cheap"* → segments/graph/telemetry regional, KV mapping global.
+
+**🆕 If X then Y — quick recall for the two "logic" deep dives:**
+- Geocoding: if input is text → inverted-index text search (§7). If input is lat/lng → spatial nearest-neighbor via S2/geohash (§7). Never the other way around.
+- Rerouting: if a map-matched ping is off-route for one noisy sample → do nothing. If it stays off-route for several consecutive samples → fire a deviation event and call `findRoute` again from the current position (§13).
+- Tile zoom: if the requested `(z,x,y)` is in the CDN edge cache (~95% of the time) → serve from CDN. If it's a cache miss → origin renders/fetches and both caches backfill (§10).
 
 **Golden rules recap:** partition before routing · precompute offline · stream, don't request-response, telemetry · ETA is a distribution, re-ground it · separate static geodata from live telemetry scaling · pick spatial index by query shape · cache everything expensive · degrade gracefully, never fail hard · rate-limit both directions and never trust one GPS ping.
 

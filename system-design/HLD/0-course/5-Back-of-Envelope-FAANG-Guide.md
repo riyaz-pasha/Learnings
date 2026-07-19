@@ -1,5 +1,11 @@
 # Back-of-the-Envelope Calculations — FAANG Interview Guide
 
+> **Enhancement notes:**
+> - Added a 🆕 "Estimation Loop" flowchart (state assumption → compute → sanity check → round to a clean number) — the per-number process the existing 5-step framework runs internally at each stage.
+> - Added a 🆕 time-unit ladder (ns → μs → ms → s, ×1,000 per rung) next to the latency table, mirroring the existing byte ladder for the same memorability effect.
+> - Audited the file against the standard checklist (capacity-estimation method, latency numbers table, unit-conversion mnemonics, worked practice problems): all were already present and solid, so they were left untouched rather than padded.
+> - No rewrites of working sections — this pass only fills the one confirmed gap (the estimation-loop diagram) plus one small memorability aid.
+
 > **The goal**: Never freeze when an interviewer says "how many servers do you need?" or "how much storage?"
 > Estimations don't need to be exact — they need to be *fast, reasonable, and defensible*.
 
@@ -270,6 +276,21 @@ flowchart TD
   E["5. Calculate servers\n(RPS ÷ server_capacity or DAU ÷ 8,000)"]
 ```
 
+### 🆕 The Estimation Loop (Run This for Every Number)
+
+The 5 steps above are *what* to estimate. This is the *how* — the micro-loop you repeat inside each one:
+
+```mermaid
+flowchart LR
+  A["State assumption\n(e.g. '3 tweets/user/day')"] --> B["Compute\n(round to 1 sig fig)"]
+  B --> C{"Sanity check:\nright order of magnitude?"}
+  C -- "No — off by 1000x+" --> A
+  C -- "Yes" --> D["Round to a clean number\n(e.g. 11.85 Gbps → ~12 Gbps)"]
+  D --> E["Feed into next step"]
+```
+
+Worked example of the loop: assume 250M DAU × 3 tweets/day = 750M writes/day → compute 750M ÷ 100,000 = 7,500 RPS → sanity check ("plausible for a Twitter-scale write path? yes") → round to **~7,500 RPS** and move to storage.
+
 ### Step-by-step with Twitter as example
 
 **Given assumptions:**
@@ -464,6 +485,8 @@ graph LR
 
 > **Key insight**: Every layer is 10–2,000× slower than the one above it — the biggest single jump is RAM → SSD (~2,000×). This is why caching exists.
 > RAM is roughly 20,000× faster than disk for a 1MB read (100ns vs 2ms, scaled up).
+
+> **🆕 Time-unit ladder** (mirrors the [Byte Ladder](#quick-recall-the-byte-ladder) above): `1,000 ns = 1 μs`, `1,000 μs = 1 ms`, `1,000 ms = 1 s` — each rung is ×1,000, same pattern as KB → MB → GB. So "L1 is ~1ns, RAM is ~100ns, SSD read is ~200μs (200,000ns), disk is ~2ms (2,000,000ns)" is really just counting rungs on this ladder.
 
 ### A Concrete Request Flow (Sequence Diagram)
 

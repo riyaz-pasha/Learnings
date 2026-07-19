@@ -1,5 +1,12 @@
 # Distributed Cache — FAANG Interview Guide
 
+> **Enhancement notes**: This pass filled the gaps a FAANG interviewer expects but the original draft skipped, and added recall aids. Sections marked 🆕 are new; everything else is the original content, renumbered to fit.
+> - Added **§3 Clarify requirements** (functional + NFR questions to ask out loud) and **§4 API design and data model** (GET/SET/DELETE/EXPIRE/TTL/MGET/MSET surface, key namespacing, serialization, per-entry metadata) — both previously missing entirely.
+> - Added **§17 Cache warm-up and cold start** — a gap called out explicitly: what happens when a node restarts with an empty cache, and how to ramp it back in without stampeding the DB.
+> - Added new diagrams: a v1→v2→v3 **architecture evolution** sequence in §15, a **ring-rebalancing-on-node-addition** diagram and **hot-key detection flowchart** in §11, and a **cache-miss-with-stampede-lock flowchart** in §20.
+> - Added concrete worked numbers throughout (e.g., a 50K req/sec hot key spread across 5 replicas to 10K req/sec each; adding a 4th shard moving ~75K of 300K keys; a cold node causing a 20x DB spike) and two new recall tables (invalidation strategies at a glance; stampede mitigation techniques compared).
+> - Light clarity edit to the "naive design" intro in §12 (was a vague 3-item list, now says plainly what each problem is) — everything else's original voice and structure is untouched.
+
 ## 1. Mental model (read this once, never forget it)
 
 A cache is a bet: most requests ask for a small, hot subset of your data, so keep that subset in RAM, in front of the database, and most requests never touch disk. **Locality of reference** (temporal — recently accessed data gets accessed again soon; spatial — nearby data gets accessed together) is the entire justification for caching. If access is uniformly random, caching buys you nothing — say this out loud if an interviewer asks "would you cache this?"
@@ -40,7 +47,59 @@ flowchart TD
 
 ---
 
-## 3. Where caching lives in a system
+## 🆕 3. Clarify requirements first (step 1 of the playbook, spelled out)
+
+Don't design anything until you've said these out loud and gotten a nod. Interviewers deliberately leave this vague — asking the right questions here is itself a scored signal.
+
+**Functional requirements** — pin these down:
+- `get`/`set`/`delete` on a key — is that the whole surface, or do we also need `exists`, batch `mget`/`mset`, atomic `incr`/`decr`?
+- Does every key need a **TTL**, or is expiry opt-in per key?
+- Is this a **generic cache** (any service, any shape of data) or built for one specific access pattern (e.g., a session store, a leaderboard)? This changes whether Redis's richer data structures earn their keep (§19) or a plain Memcached-style KV store is enough.
+- Do we need an explicit invalidation/delete API, or is TTL-based staleness acceptable? (Directly sets up §9.)
+
+**Non-functional requirements** — the ones that actually drive the design:
+
+| Question | Why it matters | Typical FAANG-interview default if unstated |
+|---|---|---|
+| What's the read:write ratio? | Read-heavy → optimize hit rate and read replicas; write-heavy → worry about write-back durability | Read-heavy, often 80:20 to 99:1 |
+| What latency is acceptable on a hit? | Sets the RAM-only vs. RAM+disk decision | Sub-millisecond to low single-digit ms |
+| Can the system tolerate stale data, and for how long? | Determines TTL length and whether write-through is required | A few seconds to a few minutes is usually fine |
+| Does the cache need to survive a restart (durability)? | A cache is normally a *disposable* accelerator, not a source of truth | No — DB is source of truth; cache rebuilds itself (§17) |
+| What's the working-set size and growth rate? | Feeds directly into capacity estimation (§13) | Ask for DAU/QPS and item size, then compute it live |
+| What availability target? | Drives replica count and failover design (§12) | 99.9%+, no single point of failure |
+
+> **Say this explicitly**: "A cache is allowed to lose data and rebuild itself from the database — that's what makes it a cache and not a database. If we need durability guarantees, we're really asking for a data store, not a cache." Interviewers listen for this line because it's the thing junior candidates miss.
+
+---
+
+## 🆕 4. API design and data model
+
+Keep the API tiny — a cache earns its keep by being simple and fast, not feature-rich.
+
+```
+GET    key                          -> value | NOT_FOUND
+SET    key, value, ttl_seconds?     -> OK
+DELETE key                          -> OK | NOT_FOUND
+EXISTS key                          -> bool
+EXPIRE key, ttl_seconds             -> OK          # update TTL without rewriting the value
+TTL    key                          -> seconds_remaining | -1 (no TTL) | -2 (missing)
+MGET   [key, ...]                   -> {key: value}   # batch read, one round trip instead of N
+MSET   {key: value, ...}, ttl?      -> OK             # batch write
+INCR   key, delta=1                 -> new_value       # optional — needs an atomic counter, Redis-style
+```
+
+**Data model** — a distributed cache almost always stores **opaque bytes**, not typed objects:
+
+- **Key**: a string, conventionally namespaced as `entity:id:field` (e.g. `user:42:profile`, `product:9981:price`) so multiple services sharing one cluster don't collide.
+- **Value**: serialized bytes (JSON, Protobuf, or MessagePack) — the app serializes before `SET` and deserializes after `GET`. The cache itself doesn't know or care what's inside.
+- **Metadata per entry** (kept alongside the value, not part of it): TTL/expiry timestamp, last-access time and/or access count (whichever the eviction policy needs, §8), and optionally a version number for the versioned-key pattern (§9).
+- **Size limits matter**: most caches cap a single value (Memcached defaults to 1MB/item) — oversized blobs (a whole page of search results, a big serialized object) either get chunked across multiple keys or don't belong in the cache at all.
+
+**Concrete example**: caching a user profile. Key = `user:42:profile`, value = 800-byte JSON blob, TTL = 300s. On write to the DB, the write path issues `DELETE user:42:profile` (or a fresh `SET`) so the next `GET` reloads the current row — this is explicit invalidation from §9, not eviction.
+
+---
+
+## 5. Where caching lives in a system
 
 | Layer | Technology | What it accelerates |
 |---|---|---|
@@ -54,7 +113,7 @@ Naming the layer signals you understand caching isn't one knob. "I'd cache stati
 
 ---
 
-## 4. Access patterns — who populates the cache, and when
+## 6. Access patterns — who populates the cache, and when
 
 This is the most commonly mis-named concept in interviews. There are two independent axes: **who fills the cache on a miss** (app vs. cache library) and **when the DB gets written** (sync, async, or never-through-cache).
 
@@ -125,7 +184,7 @@ sequenceDiagram
 
 ---
 
-## 5. Single-node internals
+## 7. Single-node internals
 
 Every cache node needs two data structures working together:
 
@@ -145,11 +204,11 @@ graph TD
     end
 ```
 
-**Bloom filter**: a probabilistic structure answering "is this key *definitely not* cached?" in O(k) with no false negatives (but possible false positives). Used to skip wasted DB lookups for keys that never existed — this is exactly how Cassandra avoids unnecessary SSTable reads, and the standard fix for **cache penetration** (see §12).
+**Bloom filter**: a probabilistic structure answering "is this key *definitely not* cached?" in O(k) with no false negatives (but possible false positives). Used to skip wasted DB lookups for keys that never existed — this is exactly how Cassandra avoids unnecessary SSTable reads, and the standard fix for **cache penetration** (see §20).
 
 ---
 
-## 6. Eviction policies
+## 8. Eviction policies
 
 RAM is small and expensive, so something must be evicted to make room.
 
@@ -192,7 +251,7 @@ pie showData
 
 ---
 
-## 7. Cache invalidation ("one of the two hard things in CS")
+## 9. Cache invalidation ("one of the two hard things in CS")
 
 ```mermaid
 stateDiagram-v2
@@ -213,9 +272,20 @@ stateDiagram-v2
 
 **Cheat-sheet**: TTL handles *time-based* staleness. Explicit invalidation handles *event-based* staleness (a write happened). If asked "how do you keep cache and DB in sync after a delete" — the answer is always the write path, never the eviction policy.
 
+#### 🆕 Invalidation strategies at a glance
+
+| Strategy | Triggers on | Catches writes? | Cost | If asked... |
+|---|---|---|---|---|
+| TTL — active | Background sweep timer | No | CPU, always running | "reclaim memory proactively" |
+| TTL — passive | Next GET after expiry | No | Cheap, but stale entry lingers in RAM | "lazy, low overhead" |
+| Explicit delete-on-write | The write path, immediately | Yes | One extra call per write | "how do we stay in sync with the DB" |
+| Versioned keys | New version written, old key just ages out | Yes (no race) | Slight key-space growth | "avoid delete-race conditions" |
+
+**If X then Y**: *if the interviewer says "the DB changed, how does the cache find out" → your answer is explicit delete-on-write, never "wait for the TTL."* TTL is a safety net for staleness you didn't catch, not the primary invalidation mechanism.
+
 ---
 
-## 8. Sharding topology: dedicated vs. co-located
+## 10. Sharding topology: dedicated vs. co-located
 
 | Model | Description | Pros | Cons |
 |---|---|---|---|
@@ -228,7 +298,7 @@ stateDiagram-v2
 
 ---
 
-## 9. Finding the right server: consistent hashing
+## 11. Finding the right server: consistent hashing
 
 Plain `hash(key) % N` breaks catastrophically when `N` changes — adding/removing a node remaps nearly every key, causing a stampede on the DB. **Consistent hashing** places servers and keys on a hash ring; adding/removing a node only remaps the keys between it and its neighbor — roughly `K/N` keys move, not nearly all of them.
 
@@ -245,18 +315,50 @@ flowchart LR
     Before -.->|"remove Server B"| After
 ```
 
+#### 🆕 Ring rebalancing on node addition
+
+```mermaid
+flowchart LR
+    subgraph Before2["Before: ring has A, B, C"]
+        direction LR
+        A3((A)) --- B3((B)) --- C3((C)) --- A3
+    end
+    subgraph After2["After: D inserted between C and A"]
+        direction LR
+        A4((A)) --- B4((B)) --- C4((C)) --- D4((D)) --- A4
+    end
+    Before2 -.->|"add Server D"| After2
+```
+
+**Worked example**: 3 shards holding 300K keys total (100K each). Add a 4th shard: only the keys that now fall in D's slice of the ring move — roughly `300K / 4 ≈ 75K` keys relocate, and the other ~225K keys never move. Plain `hash(key) % N` would have remapped nearly all 300K keys on that same resize (`N` changed from 3 to 4 changes almost every `key % N` result) — that difference is the entire pitch for consistent hashing.
+
 - Lookup complexity with a sorted ring + binary search: **O(log N)**, N = number of shards.
 - **Virtual nodes** (each physical server mapped to many points on the ring) fix uneven load distribution — without them, a small N can produce a lumpy ring where some servers get disproportionately more keys.
 - **Hotkey problem**: even with perfectly even key distribution, one *key* can dominate traffic (viral post, celebrity profile). This is a **load** problem, not a **hashing** problem — consistent hashing can't fix it. Fixes:
   - Read replicas for the hot shard.
-  - **L1 local/in-process cache** in front of the distributed cache for the hottest keys (see §14).
+  - **L1 local/in-process cache** in front of the distributed cache for the hottest keys (see §16).
   - Further shard within the hot key's range, or replicate that single key across nodes and pick one at random per request.
+
+**Concrete example**: monitoring shows one key (`product:1001:price`, a flash-sale item) taking 50K req/sec on a shard that normally handles 10K req/sec total — a single key is 5x its shard's normal load. Replicate that key across 5 nodes and route requests to it round-robin/random: each replica now absorbs `50K / 5 = 10K req/sec`, back to a normal shard load.
+
+#### 🆕 Detecting and mitigating a hot key
+
+```mermaid
+flowchart TD
+    Mon["Monitoring: per-key QPS sampling\n(e.g. count top-K keys per shard per second)"] --> Detect{"One key >> shard's\nfair share of traffic?"}
+    Detect -->|No| Normal["Normal operation"]
+    Detect -->|Yes| Size{"Is the hot value\nsmall and rarely updated?"}
+    Size -->|Yes| Replicate["Replicate the single key\nacross N nodes; client picks\none at random/round-robin per request"]
+    Size -->|"No / changes often"| L1["Push it into each app server's\nL1 in-process cache (§16)\nwith a short TTL"]
+    Replicate --> Recheck["Re-sample QPS per replica\nconfirm load is now spread evenly"]
+    L1 --> Recheck
+```
 
 ---
 
-## 10. Availability: replication and configuration management
+## 12. Availability: replication and configuration management
 
-Three problems the naive design has: (1) clients can't detect a server joining/dying, (2) one server per shard = SPOF + no hotkey relief, (3) no spec for what's inside a cache server.
+The naive design has three problems: (1) clients have no way to detect a server joining or dying, (2) one server per shard is a single point of failure with no read relief when that shard gets hot, (3) nothing guarantees every client agrees on which server owns which shard — two clients with different views of the topology will send the same key to two different servers.
 
 ### Server discovery — three escalating solutions
 
@@ -290,7 +392,7 @@ sequenceDiagram
 
 ---
 
-## 11. Capacity estimation (back-of-the-envelope) — do this math out loud
+## 13. Capacity estimation (back-of-the-envelope) — do this math out loud
 
 Interviewers score this step explicitly. The chain is always: **QPS → hit rate → working-set size → RAM per node → shard count → replica factor → network bandwidth check.**
 
@@ -327,7 +429,7 @@ Say the *method*, not a memorized number — interviewers change the inputs and 
 
 ---
 
-## 12. Numbers worth memorizing
+## 14. Numbers worth memorizing
 
 | Operation | Approx. latency |
 |---|---|
@@ -345,7 +447,46 @@ These are the numbers behind every "why does caching help" justification — RAM
 
 ---
 
-## 13. Full detailed design
+## 15. Full detailed design
+
+#### 🆕 Architecture evolution: v1 → v2 → v3
+
+Narrating the design as an evolution — not jumping straight to the final diagram — is a strong way to show *why* each piece exists.
+
+```mermaid
+graph LR
+    subgraph V1["v1: single-node cache"]
+        C1[Client] --> Cache1[(Single Cache Node)]
+        Cache1 -->|miss| DB1[(Database)]
+    end
+```
+*Works until the working set outgrows one machine's RAM, or that one machine goes down and every request falls through to the DB.*
+
+```mermaid
+graph LR
+    subgraph V2["v2: sharded cluster, consistent hashing"]
+        C2[Client] -->|consistent hash| S1[(Shard 1)]
+        C2 -->|consistent hash| S2[(Shard 2)]
+        C2 -->|consistent hash| S3[(Shard 3)]
+        S1 -->|miss| DB2[(Database)]
+        S2 -->|miss| DB2
+        S3 -->|miss| DB2
+    end
+```
+*Fixes the size ceiling. Still has two problems: no replica if a shard dies, and no defense against a hot key or a stampede.*
+
+```mermaid
+graph LR
+    subgraph V3["v3: + replication, hot-key relief, stampede protection"]
+        C3[App Server\nL1 cache] -->|L1 miss, consistent hash| S1P[(Shard 1 Primary)]
+        C3 -->|L1 miss, consistent hash| S2P[(Shard 2 Primary)]
+        S1P -->|sync repl| S1R[(Shard 1 Replica)]
+        S2P -->|sync repl| S2R[(Shard 2 Replica)]
+        S1P -->|"miss: coalesced\nsingle in-flight fetch"| DB3[(Database)]
+        S2P -->|"miss: coalesced\nsingle in-flight fetch"| DB3
+    end
+```
+*v3 is the target end-state: replicas remove the SPOF and absorb hot-shard reads, the L1 cache removes network hops for the single hottest keys, and request coalescing (§20) stops a stampede from ever reaching the DB as N redundant queries.*
 
 ```mermaid
 graph TB
@@ -368,11 +509,11 @@ graph TB
 
 Narrate in this order: **cache client** (consistent hash, picks shard, TCP/UDP, gets topology from config service) → **cache server** (hash map + DLL, eviction, TTL) → **primary + replica per shard** (availability, hot-shard read scaling) → **configuration service** (health + topology, must be consistent across all clients — disagreement here means split-brain reads) → **monitoring service** (hit/miss rate, latency percentiles, memory pressure).
 
-Note: no delete API in the base design — eviction (algorithm-driven) and expiration (TTL-driven) handle removal locally. A delete API is added only when explicit invalidation is required (§7).
+Note: no delete API in the base design — eviction (algorithm-driven) and expiration (TTL-driven) handle removal locally. A delete API is added only when explicit invalidation is required (§9).
 
 ---
 
-## 14. Multi-level caching (L1 local + L2 distributed)
+## 16. Multi-level caching (L1 local + L2 distributed)
 
 A pattern worth volunteering when hotkeys or extreme latency come up: put a small **in-process (L1) cache** inside each app server, in front of the **distributed (L2) cache**.
 
@@ -387,7 +528,39 @@ graph LR
 
 ---
 
-## 15. Evaluating against non-functional requirements
+## 🆕 17. Cache warm-up and cold start
+
+A node that just restarted (crash, deploy, autoscale-up) is a **cold cache** — empty, 0% hit rate. If the config service routes full production traffic to it immediately, every one of those requests misses and falls through to the DB at once. This is the same stampede shape as §20, but triggered by a node lifecycle event instead of a key expiring.
+
+**Concrete example**: a shard normally serves 50K req/sec at a 95% hit rate — only 2.5K req/sec reach the DB. If that shard restarts cold, hit rate drops to ~0% until the working set rebuilds, so the DB briefly sees the full 50K req/sec — a **20x spike** on the exact box that was never sized for it.
+
+```mermaid
+flowchart TD
+    Start["Node restarts / new node joins ring"] --> Mark["Config service marks node WARMING\n(not yet eligible for full traffic)"]
+    Mark --> Choice{"Warm-up strategy available?"}
+    Choice -->|"Replica exists"| Promote["Promote a caught-up replica\ninstead of cold-starting the primary"]
+    Choice -->|"Snapshot exists (RDB/AOF)"| Restore["Restore from last snapshot\nbefore accepting any reads"]
+    Choice -->|"Neither"| Ramp["Gradually ramp traffic share\n(e.g. 5% -> 25% -> 100% over minutes)\nwhile DB absorbs the temporary miss overflow"]
+    Promote --> Healthy
+    Restore --> Healthy
+    Ramp --> Check{"Hit rate crossed\nhealthy threshold?"}
+    Check -->|No| Ramp
+    Check -->|Yes| Healthy["Config service marks node HEALTHY\nfull traffic share"]
+```
+
+Mitigations, cheapest first:
+- **Prefer promotion over cold restart**: if a replica is already warm (§12), promote it and let the old primary rejoin as the (cold) replica instead — reads never hit an empty cache.
+- **Snapshot restore**: Redis's RDB/AOF (§19) lets a restarting node reload most of its working set from disk before serving traffic, instead of rebuilding it one DB-fallback at a time.
+- **Gradual traffic ramp / canary warm-up**: the configuration service (§12) sends a small percentage of a shard's traffic to a newly-healthy node and increases it as the hit rate climbs, rather than flipping 0% → 100%.
+- **Pre-warm from a hot-key list**: replay the top-N known-hot keys (from monitoring, §15) into the node before marking it healthy, so at least the highest-traffic keys don't start cold.
+- **Rate-limit the DB during the warm-up window** — the same circuit-breaker discipline as the golden rule in §20 applies here: a cold node is a temporary, predictable spike, not a reason to let the DB fall over.
+- **Consistent hashing already limits the blast radius**: a *new* node only owns ~K/N of the keyspace (§11), so a join is naturally cheaper to warm than a full-cluster restart would be.
+
+> **Memory hook**: "A cold node is a self-inflicted stampede — treat it exactly like one: ramp it in, don't switch it on."
+
+---
+
+## 18. Evaluating against non-functional requirements
 
 Walk NFRs in this order in your answer — each builds on a decision you already justified:
 
@@ -401,7 +574,7 @@ Walk NFRs in this order in your answer — each builds on a decision you already
 
 ---
 
-## 16. Real-world case studies
+## 19. Real-world case studies
 
 ### Memcached — simplicity, shared-nothing, O(1) throughput
 - Pure key-value; keys and values are **strings** — everything must be serialized.
@@ -446,7 +619,7 @@ sequenceDiagram
 
 ---
 
-## 17. Failure modes to volunteer (unprompted — this is what separates senior answers)
+## 20. Failure modes to volunteer (unprompted — this is what separates senior answers)
 
 ```mermaid
 sequenceDiagram
@@ -469,11 +642,35 @@ sequenceDiagram
     Cache-->>Req2: value (shared result)
 ```
 
+#### 🆕 Cache-miss handling with a stampede lock
+
+```mermaid
+flowchart TD
+    Get["GET key"] --> Hit{"Key present\nand not expired?"}
+    Hit -->|Yes| Return["Return value"]
+    Hit -->|No| Lock{"Acquire per-key\nfetch lock?"}
+    Lock -->|"Got it (first request)"| Fetch["Query DB, SET cache,\nrelease lock"]
+    Fetch --> Return
+    Lock -->|"Someone else holds it"| Wait["Wait briefly on the\nin-flight fetch (or return\nslightly-stale value if one exists)"]
+    Wait --> Return
+```
+
+**Concrete example**: a product page cached for 60s gets 2,000 req/sec. Without coalescing, the instant the key expires all ~2,000 requests in that second miss and hit the DB simultaneously. With a per-key lock, only the first misses through to the DB — the other 1,999 wait ~10-50ms for that one query's result and reuse it, so the DB sees **1 query, not 2,000**.
+
+**Stampede mitigation techniques compared**:
+
+| Technique | How it works | Trade-off |
+|---|---|---|
+| Request coalescing / mutex lock | First miss fetches, others wait on that in-flight result | Small added latency for waiters; needs a lock per key |
+| Jittered TTL | Add random ±10-20% to each key's TTL | Spreads expirations over time, doesn't help a single sudden hot key |
+| Probabilistic early refresh | Recompute slightly *before* expiry, with rising probability as TTL nears zero | No thundering herd at all, but adds background refresh traffic |
+| Stale-while-revalidate | Serve the expired value immediately, refresh in the background | Best latency; briefly serves stale data by design |
+
 | Problem | What it is | Fix |
 |---|---|---|
 | **Cache stampede / thundering herd** | Many requests miss simultaneously and all hit the DB at once | Request coalescing (one in-flight fetch per key), jittered TTLs, probabilistic early refresh |
 | **Cache penetration** | Repeated requests for keys absent from cache *and* DB, bypassing the cache every time | Bloom filter to short-circuit definitely-absent keys, or cache the "not found" result briefly (**negative caching**) |
-| **Hotkey / hot shard** | One key or shard gets disproportionate traffic | Read replicas for that shard, L1 local cache (§14), further sharding within the key's range |
+| **Hotkey / hot shard** | One key or shard gets disproportionate traffic | Read replicas for that shard, L1 local cache (§16), further sharding within the key's range |
 | **Cache pollution** | A one-time large scan evicts the entire genuinely-hot working set | LFU instead of pure LRU, or scan-resistant algorithms (2Q/ARC) |
 | **Split-brain / stale topology** | Different clients see different shard-ownership views | Single source of truth (configuration service) all clients pull from |
 
@@ -486,6 +683,8 @@ sequenceDiagram
 **Definitions**: Cache = small, fast (RAM), nonpersistent store exploiting locality of reference. Distributed cache = multiple coordinating cache servers, needed when data won't fit one node or one node is an availability risk.
 
 **The 7-step playbook**: Requirements → Capacity estimate → API → High-level design → Deep dive → Trade-offs/failure modes → Wrap-up.
+
+**Requirements to ask for**: get/set/delete surface + TTL semantics, read:write ratio, tolerable staleness, durability (usually none — a cache is disposable by definition), availability target. **API**: `GET/SET/DELETE/EXISTS/EXPIRE/TTL` + batch `MGET/MSET`. **Data model**: opaque serialized bytes, namespaced keys (`entity:id:field`), metadata (TTL, access stats, version) stored alongside the value, not in it.
 
 **Capacity math**: `QPS_avg = daily_requests / 86400` → `× peak_multiplier` → `× hit_rate` (cache) / `× miss_rate` (DB) → working set = `hot_keys × (value_size + overhead)` → `shards = working_set / RAM_per_node` → `nodes = shards × replication_factor`.
 
@@ -510,6 +709,8 @@ Rehash on scale event (consistent hashing): ~K/N keys move
 **Availability**: primary + replicas per shard, sync in-DC / async cross-DC (CAP/PACELC), configuration service for auto-discovery, recovering nodes withhold reads until caught up.
 
 **Multi-level caching**: L1 (in-process, μs) in front of L2 (distributed, ms) for hotkeys.
+
+**Cache warm-up / cold start**: a freshly restarted node is a self-inflicted stampede — ramp its traffic share gradually, promote a warm replica instead of cold-starting, or restore from a snapshot; don't flip 0%→100% traffic on an empty cache.
 
 **Memcached**: simple, shared-nothing, client-side clustering, no persistence, multithreaded, big read-heavy blobs.
 

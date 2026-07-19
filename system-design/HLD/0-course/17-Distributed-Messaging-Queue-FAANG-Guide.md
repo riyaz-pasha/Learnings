@@ -1,5 +1,7 @@
 # Distributed Messaging Queue — FAANG Interview Guide
 
+> **Enhancement notes:** this pass added (1) a 🆕 Requirements-to-clarify section (functional + non-functional tables) up front, (2) a 🆕 API Design table (`CreateQueue`/`SendMessage`/`ReceiveMessage`/`DeleteMessage`/`ChangeMessageVisibility`) with the receipt_handle-vs-message_id safety detail called out, (3) a 🆕 v1→v2→v3 architecture-evolution diagram, (4) a 🆕 FIFO-vs-Standard queue trade-off table, (5) a 🆕 worked send→receive→process→delete sequence diagram showing a concrete visibility-timeout redelivery (30s timeout, 45s processing job), plus the message-lifecycle state diagram and a delivery-semantic decision flowchart, and (6) a 🆕 poison-message/DLQ decision flowchart. Everything else — the mental model, ordering/concurrency discussion, retry/backoff narrative, queue-vs-topic-vs-log table, golden rules, and master cheat sheet — was already strong and is left untouched.
+
 ## Mental Model
 
 A messaging queue is a **surge tank between a fire hose and a garden hose**. The producer can spray messages in bursts; the consumer drains them at its own steady rate. The queue is the buffer that absorbs the mismatch so neither side has to match the other's speed, and neither side has to know the other exists.
@@ -104,7 +106,96 @@ A **messaging queue** is an intermediary between **producers** (write messages) 
 
 ---
 
+## 🆕 Requirements to Clarify First (Functional & Non-Functional)
+
+Ask these before you draw a single box — they change the entire design, and interviewers are grading whether you ask, not just whether you eventually land somewhere reasonable.
+
+**Functional requirements — what operations must the system support:**
+
+| Requirement | Question to ask | Why it matters |
+|---|---|---|
+| Enqueue | One message at a time, or batches? | Batching changes the API and the throughput math |
+| Dequeue | Do consumers pull, or does the broker push? | Drives the push-vs-pull decision later |
+| Acknowledge / delete | Is "processed" explicit (ack) or implicit (delete-on-read)? | Determines at-least-once vs. at-most-once by default |
+| Visibility / lease extension | Can a long-running job ask for more time? | Without it, long jobs get duplicated |
+| Ordering | Must messages for the same key come out in send order? | Standard vs. FIFO queue type |
+| Dead-lettering | What happens to a message that keeps failing? | Poison-message isolation |
+| Queue management | Create/delete/configure queues via API, or fixed at deploy time? | Multi-tenant systems usually need dynamic queues |
+
+**Non-functional requirements — the dials you're allowed to trade against each other:**
+
+| Requirement | Typical interview answer | Trade-off it implies |
+|---|---|---|
+| Durability | No message loss once it's acknowledged as sent | Requires replication (sync/quorum, not async-only) |
+| Availability | Producers can always enqueue, even if some consumers are down | Queue and consumer availability are decoupled by design |
+| Delivery guarantee | At-least-once by default, unless told otherwise | Consumers must be idempotent |
+| Ordering guarantee | Best-effort, unless a specific key must stay ordered | Strict order costs throughput (see Ordering section) |
+| Latency | Sub-second enqueue and dequeue (illustrative — confirm with the interviewer) | Long polling instead of a tight polling loop |
+| Throughput | State it as a range (e.g., "thousands to tens of thousands of msg/sec" — illustrative unless the prompt gives a number) | Drives partition count, not node count |
+| Scalability | Both queue depth and throughput grow with traffic, not just storage | Partition count needs headroom — see Capacity Estimation |
+| Message size | Cap it (e.g., 256 KB–1 MB, illustrative) | Large payloads go in blob storage with a pointer in the message |
+
+**Say this out loud:** *"Before I design anything, I want to lock down: point-to-point or fan-out, ordering scope (none / per-key / global), delivery guarantee (at-least-once by default), and whether a message that keeps failing should ever be allowed to block the queue."* Getting this in the first two minutes is worth more than any diagram.
+
+---
+
+## 🆕 API Design
+
+A point-to-point queue needs a small, boring API — the interview value is in naming every parameter that actually matters, not in the endpoint names.
+
+| Operation | Key parameters | Returns | Notes |
+|---|---|---|---|
+| `CreateQueue` | `name`, `visibility_timeout` (e.g. 30s default), `max_receive_count` (e.g. 5), `retention_period` (e.g. 4d), `fifo: bool` | `queue_url` | FIFO vs. standard is chosen once, at creation — can't be flipped later without recreating the queue |
+| `SendMessage` | `queue_url`, `body`, `delay_seconds` (optional), `message_group_id` (FIFO only), `dedup_id` (FIFO only, or a content hash) | `message_id` | A producer that retries a send on network timeout should pass a stable `dedup_id`, so the retry doesn't create a second message |
+| `ReceiveMessage` | `queue_url`, `max_messages` (batch, e.g. 1–10), `wait_time_seconds` (long polling), `visibility_timeout` (optional override) | list of `{message_id, receipt_handle, body}` | Nothing is deleted here — the message just becomes invisible for `visibility_timeout` seconds |
+| `DeleteMessage` | `queue_url`, `receipt_handle` | ack | This is the real "I'm done" signal — skip it and the message reappears |
+| `ChangeMessageVisibility` | `queue_url`, `receipt_handle`, `new_timeout` | ack | Lets a slow consumer buy more time before the default timeout re-delivers the message |
+| `GetQueueAttributes` | `queue_url` | `approx_number_of_messages` (queue depth), `oldest_message_age` | The two numbers you actually alert on — see Failure Modes |
+
+**The one API detail worth memorizing cold:** `ReceiveMessage` returns a **receipt_handle**, not just the `message_id` — and a *new* receipt_handle is issued on every (re)delivery of the same message. `DeleteMessage`/`ChangeMessageVisibility` are keyed by receipt_handle, not message_id, so a stale handle from an earlier, already-expired delivery can't accidentally delete or extend a message a different consumer is now processing. This one design choice is what makes visibility-timeout redelivery safe — see the worked sequence diagram in Delivery Semantics.
+
+---
+
 ## How It Works Internally — Architecture
+
+#### 🆕 Architecture evolution: v1 → v2 → v3
+
+Most candidates try to describe the final production system in one shot. It lands better — for you and for the interviewer — as three steps, each one fixing a concrete problem with the step before it:
+
+```mermaid
+flowchart TD
+    subgraph V1["v1 — single-node, in-memory (prototype)"]
+    direction LR
+    P1[Producer] --> Q1[("In-memory list,<br/>one process")]
+    Q1 --> Cx1[Consumer]
+    end
+
+    subgraph V2["v2 — durable, partitioned, scaled-out"]
+    direction LR
+    P2[Producers] --> FE2[Front-end tier]
+    FE2 --> PL[("Partitioned log,<br/>replicated x3")]
+    PL --> CG2["Consumer group<br/>(N workers, 1 partition each)"]
+    end
+
+    subgraph V3["v3 — production-hardened"]
+    direction LR
+    P3[Producers] --> FE3[Front-end tier]
+    FE3 --> QT{"Standard or<br/>FIFO queue?"}
+    QT --> PL3[("Partitioned log,<br/>replicated x3")]
+    PL3 --> VT["Visibility-timeout /<br/>lease tracking"]
+    VT --> CG3["Consumer group"]
+    CG3 -->|maxReceiveCount exceeded| DLQ3[("Dead-letter queue")]
+    end
+
+    V1 -. "fixes: crash = total data loss,<br/>1 consumer = no scaling" .-> V2
+    V2 -. "fixes: no poison-message isolation,<br/>no per-message redelivery safety" .-> V3
+```
+
+- **v1 fails on:** a process crash loses every unacknowledged message, and only one consumer can drain it — fine for a take-home toy, not for an interview answer.
+- **v2 fixes:** durability (replicated partitioned log) and consumer throughput (a consumer group, one partition per worker) — this is roughly "reinvent Kafka."
+- **v3 fixes:** the two failure modes that actually show up under load — a message that keeps crashing every consumer (needs a DLQ) and a message stuck invisible forever if a consumer dies mid-processing (needs the visibility-timeout/lease tracker) — plus lets the caller opt into FIFO where strict order is worth the throughput cost.
+
+**The shape you actually draw in an interview is v3's steady state, in more detail:**
 
 ```mermaid
 flowchart TD
@@ -354,8 +445,22 @@ sequenceDiagram
 ### Managing concurrency
 Two points of contention: multiple producers writing at once, multiple consumers reading at once.
 - **Locking** — correctness-simple, but kills scalability and throughput (the single-server queue's exact problem — this is *why* a naive port to distributed doesn't work).
-- **Serialize via buffers at both ends** — the practical answer; avoids race conditions without a global lock.
+- **Serialize via buffers at both ends** — the practical answer; avoids race conditions without a global lock. Concretely: each partition gets one write buffer that appends sequentially (no two producers interleave writes to the same partition), and one consumer thread applies messages in receipt order (no two threads mutate the same partition's downstream state at once).
 - **Multiple queues, dedicated producer/consumer pairs** — keeps per-queue ordering cost low at the price of more complex application logic (this is the mental model behind Kafka partitions: N partitions = N independent ordered logs, but the app must pick a partition key).
+
+#### 🆕 FIFO vs. Standard queues — the ordering trade-off, productized
+
+This is the same best-effort-vs-strict trade-off from above, worth naming as its own decision because it's exactly how SQS (and similarly-shaped systems) expose it to the caller — as a queue *type*, chosen once at creation:
+
+| | Standard queue | FIFO queue |
+|---|---|---|
+| Ordering | Best-effort — usually in order, not guaranteed | Strict, per `message_group_id` |
+| Delivery | At-least-once, duplicates possible | At-least-once, but with a dedup window (e.g., 5 minutes) giving effectively exactly-once processing |
+| Throughput | Very high, scales near-linearly with partitions | Capped per queue/group — illustrative order of magnitude: low thousands of msg/sec with batching; check the provider's current limit, these have grown over time |
+| Parallelism | Any consumer can take any message | Only one in-flight message per `message_group_id` at a time — more groups buys more parallelism |
+| Typical use | Logs, metrics, notifications — anything order-tolerant | Sequenced business events: payment state-machine steps, inventory updates for one SKU — anything where processing B before A corrupts state |
+
+**Memory hook:** *Standard is a fast-food counter — several windows, first available server takes your order, no ticket number. FIFO is a single-file DMV line — one ticket, strict order, and the whole line waits behind the one slow window.* If the prompt ever says "these events must apply in the order they happened for the same `X`" (same user, same order, same SKU), that's your cue to say "FIFO, partitioned by `X`" — not "standard queue."
 
 ---
 
@@ -381,6 +486,42 @@ stateDiagram-v2
 **Two concrete mechanisms behind "don't delete on read" (both give at-least-once):**
 1. **Offset-based, no delete** (Kafka model): message stays in the log; consumer tracks its own **offset**. Multiple consumer groups can each read the same message independently. A retention job deletes on expiry, not on consumption.
 2. **Visibility-timeout model** (SQS model): message becomes **invisible** for `visibility_timeout` seconds after being received, not deleted. Consumer must call `DeleteMessage` (ack) before the timeout or the message reappears for another consumer to grab.
+
+#### 🆕 Send → receive → process → delete, with a concrete redelivery
+
+A worked example beats the abstract rule: **visibility timeout = 30s**, and this particular job **takes 45s** to process.
+
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant Q as Queue
+    participant A as Consumer A
+    participant B as Consumer B
+
+    P->>Q: SendMessage(body)
+    Q-->>P: message_id = msg-42
+
+    A->>Q: ReceiveMessage()
+    Q-->>A: msg-42, receipt_handle = r1<br/>(invisible for 30s)
+    Note over A: processing msg-42... (will take 45s total)
+
+    rect rgb(80,40,40)
+    Note over Q: t=30s: no DeleteMessage seen — visibility timeout expires
+    Q->>Q: msg-42 becomes visible again
+    B->>Q: ReceiveMessage()
+    Q-->>B: msg-42, receipt_handle = r2 (a NEW handle)
+    Note over A,B: t=30s–45s: A and B are now both processing msg-42
+    end
+
+    A->>Q: DeleteMessage(r1) — issued at t=45s
+    Q-->>A: rejected — r1 is stale, msg-42 is now owned under r2
+    B->>Q: DeleteMessage(r2)
+    Q-->>B: ack — msg-42 permanently removed
+```
+
+Two things worth saying out loud about this diagram: the message reappeared **only** because A took longer than the timeout — nothing crashed — and A's delete is rejected specifically because it names the *old* receipt handle. That rejection is exactly the safety net `receipt_handle` (instead of reusing `message_id`) is designed to provide.
+
+**Making the consumer actually idempotent, concretely:** keep a small dedup store (Redis, or a table with a TTL) keyed by a **business** idempotency key — an `order_id` or `payment_id`, not the queue's `message_id` — because what must not double-apply is the side effect, not the delivery. Before doing anything with a real-world effect (charging a card, sending an email), atomically check-and-set that key; if it's already set, skip the side effect and just acknowledge the message. Set the TTL comfortably longer than the worst-case reprocessing window — e.g., if visibility timeout is 30s and `maxReceiveCount` is 5, a TTL of a few minutes is generous headroom — so even a late duplicate gets caught.
 
 **Point to ponder, answered:** if the visibility timeout expires while the consumer is *still* processing, **another consumer can pick up and process the same message concurrently** — this is exactly why at-least-once requires idempotent consumers, and why SQS/Kafka both expose an API to *extend* the timeout (`ChangeMessageVisibility` / Kafka's `max.poll.interval.ms`) for long-running jobs.
 
@@ -427,6 +568,26 @@ sequenceDiagram
 **Dead-letter queue (DLQ):** after a message exceeds `maxReceiveCount`, it's routed to a separate queue instead of being retried forever — poison-pill isolation so one bad message can't stall the whole pipeline. *(This is a real quiz question in the source material — remember it cold: DLQ = messages that failed and hit the retry ceiling, not "successfully consumed" and not "producer died.")*
 
 **Memory hook:** *backoff buys the downstream time to recover; the cap prevents one poison message from retrying forever; the DLQ makes sure "gave up retrying" is a visible event, not a silent data loss.*
+
+#### 🆕 Poison-message decision flowchart
+
+The DLQ isn't a separate feature bolted on — it's the answer to one specific question the consumer/queue must ask on every failed delivery:
+
+```mermaid
+flowchart TD
+    R["Message delivered to consumer"] --> P{"Processing<br/>succeeded?"}
+    P -->|Yes| Del["DeleteMessage — done"]
+    P -->|"No (transient: timeout,<br/>downstream 503, etc.)"| BO["Requeue with<br/>exponential backoff"]
+    BO --> Cnt{"receiveCount ><br/>maxReceiveCount?"}
+    Cnt -->|No| R
+    Cnt -->|Yes| DLQ["Move to Dead-Letter Queue"]
+    DLQ --> Alert["Alert on-call / dashboard —<br/>never silently drop"]
+    Alert --> Fix{"Root cause fixable?<br/>(bad data, bug, bad config)"}
+    Fix -->|Yes| Replay["Fix the cause,<br/>manually replay from DLQ"]
+    Fix -->|"No — permanently bad message"| Archive["Archive + discard,<br/>keep an audit log entry"]
+```
+
+**If X then Y, cold:** *if a message has failed `maxReceiveCount` times, then it goes to the DLQ, not back to the main queue — retrying it a 6th time when 5 already failed just burns downstream capacity for nothing.*
 
 ---
 

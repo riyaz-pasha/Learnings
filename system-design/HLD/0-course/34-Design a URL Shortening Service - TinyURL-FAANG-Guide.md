@@ -1,5 +1,14 @@
 # Designing a URL Shortener (TinyURL / bit.ly) — FAANG Interview Guide
 
+> **Enhancement notes:** This pass added material the original guide only touched lightly. New additions (all marked 🆕 at the heading level):
+> - A happy-path **"create short URL" sequence diagram** in §7 (API Design) — the guide had a race-condition variant in §11 but no plain success-path walkthrough.
+> - A **custom-alias availability decision flowchart** in §11, complementing the existing sequence diagram with a simpler branch-logic view.
+> - A **redirect latency budget** (§12) with illustrative per-hop millisecond numbers (CDN hit vs cache hit vs DB miss) — labeled as estimates, not measured figures.
+> - A **cache-miss / stampede decision flowchart** (§12) making the "lock-on-miss vs serve-stale" logic explicit instead of only prose in the cheat-sheet.
+> - A proper **rate-limiting deep dive** (§16.2) — algorithm comparison table (fixed window / sliding window / token bucket) plus a decision flowchart; the original only named "fixed-window" in passing.
+> - A **quick-recall "if X then Y" table** in §21 (Memory Hooks) consolidating the guide's scattered decision heuristics into one lookup table.
+> - Minor clarity tightening on a couple of dense single-sentence paragraphs (e.g., §15.2 consistent hashing). Everything else — structure, section order, existing diagrams, tables, mnemonics — is untouched because it already worked.
+
 ## 1. Mental Model
 
 A URL shortener is **a giant key-value store with two hot paths**: `write(long_url) -> short_key` and `read(short_key) -> long_url`. Nothing else about it is hard. Everything interesting in the interview comes from three sub-problems:
@@ -279,6 +288,33 @@ getURLAnalytics(api_dev_key, url_key, date_range=None)                     -> {c
 | `url_key` | The short key (path segment) used for lookup |
 | `date_range` | Optional window filter for analytics queries — defaults to "all time" |
 
+### 🆕 Create short URL — happy-path sequence diagram
+
+The race-condition diagram in §11 shows what happens when two custom-alias requests collide. This is the plain success path for an ordinary (non-custom) shorten call — worth drawing once so the interviewer sees the write path end to end before you dive into any one component.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant App as App Server
+    participant RL as Rate Limiter
+    participant IDGen as ID Generator / Sequencer
+    participant DB as Sharded DB (unique index on short_key)
+    participant Cache as Cache
+
+    C->>App: POST shortenURL(api_dev_key, original_url)
+    App->>RL: check quota for api_dev_key
+    RL-->>App: OK (under limit)
+    App->>IDGen: getNextId() (local range, no per-request coordination)
+    IDGen-->>App: numeric id (e.g. 5,001,203)
+    App->>App: base58_encode(id) -> short_key (e.g. "8xQ3fT")
+    App->>DB: INSERT {short_key, original_url, owner_id, expiry_at}
+    DB-->>App: insert success (unique index has no conflict)
+    App->>Cache: SET short_key -> original_url (warm the cache proactively)
+    App-->>C: 200 OK { short_url: "https://tiny.co/8xQ3fT" }
+```
+
+Two details worth narrating out loud: the rate-limit check happens **before** an ID is ever minted (don't burn keyspace or DB writes on a request you're about to reject), and the cache is warmed on write, not left to a cold miss on the link's very first click.
+
 ### Section cheat-sheet
 - Every mutating call carries `api_dev_key` — this is your rate-limiting and abuse-tracking hook, call it out early.
 - `custom_alias` is optional on the *same* endpoint as auto-generated shortening — don't design a separate API, just branch internally.
@@ -354,7 +390,7 @@ Hash `long_url (+ salt/timestamp)`, take the first 6-8 characters of the hex/bas
 - ❌ **Collisions**: two different URLs can truncate to the same prefix. Must detect (DB lookup) and resolve — append a counter suffix, re-salt and re-hash, or extend the truncation length until a free slot is found.
 - ❌ Same URL always maps to the same hash unless salted — that's a dedup *feature* if wanted, a predictability *bug* if not.
 
-**Range-based / ticket servers (Zookeeper or a range-allocation DB table)**
+**Range-based / ticket servers (Zookeeper or a range-allocation DB table) — aka a "pre-generated key pool" service**
 A coordination service (Zookeeper, or a simple DB row with atomic "give me the next 1000 IDs" semantics) hands each app server a **block/range** of IDs (e.g., server A gets `[1M, 2M)`, server B gets `[2M, 3M)`). Each server then assigns from its local range in memory, no coordination needed per-request.
 - ✅ No per-request contention; coordination cost amortized over a whole block.
 - ✅ This is Flickr's classic "ticket server" pattern in production (two MySQL ticket servers, one incrementing by 2 on evens, the other on odds, for redundancy).
@@ -580,6 +616,27 @@ sequenceDiagram
 
 **The fix is not "check more carefully" — it's letting the DB be the source of truth.** Put a **unique index/constraint on `short_key`**, do the availability check for a fast user-facing "probably free" response, but let the **insert's uniqueness constraint be the real arbiter** (this is exactly why the source design calls out MongoDB's duplicate-key error as a *feature*, not an edge case to work around).
 
+### 🆕 Custom-alias availability — decision flowchart
+
+Same logic as the sequence diagram above, redrawn as a branch decision — useful if the interviewer asks you to just narrate the rule rather than the race:
+
+```mermaid
+flowchart TD
+    A["shortenURL(custom_alias=X)"] --> B{"Length/charset valid?\n(e.g. <= 11 chars, blocklist clean)"}
+    B -->|"No"| R1["400: invalid alias"]
+    B -->|"Yes"| C{"Fast SELECT: X in short_key index?"}
+    C -->|"Found"| R2["409: alias taken\n(fast, user-facing check)"]
+    C -->|"Not found"| D["INSERT {short_key: X, ...}"]
+    D --> E{"Unique-index conflict\nat insert time?"}
+    E -->|"Yes (lost the race)"| R2
+    E -->|"No"| R3["200: alias reserved,\nshort URL created"]
+
+    style R2 fill:#c62828,color:#fff
+    style R3 fill:#2e7d32,color:#fff
+```
+
+The SELECT at step C is only a UX shortcut for the common case — the real "available or not" answer is always decided by the INSERT's unique-index outcome at step E, because that's the only check that's atomic.
+
 ### Section cheat-sheet
 - Custom alias = check-then-act = classic TOCTOU race — always draw or describe this explicitly, interviewers listen for it.
 - Resolve with a **DB-level unique constraint**, not application-level locking — locking doesn't scale across sharded/replicated writes.
@@ -655,6 +712,40 @@ sequenceDiagram
 
 ### 12.4 CDN layer for viral hot keys
 A single link can go viral (shared by a celebrity account) and spike far past what one cache node/shard can serve. Put a **CDN edge cache** (or edge-compute redirect function) in front for the *hottest of the hot* keys — this decouples "redirect serving" from your origin entirely for the extreme tail, the same pattern used for static asset delivery.
+
+### 🆕 12.5 Redirect latency budget (illustrative numbers)
+
+Interviewers often ask "how fast does this actually need to be" — put a number on it instead of just saying "fast." These are illustrative, not measured, but they're the right order of magnitude to reason with:
+
+| Hop | Typical added latency | Cumulative |
+|---|---|---|
+| CDN/edge cache hit (§12.4) | ~5-10 ms | ~5-10 ms |
+| App server + regional cache hit (§12.1) | ~10-20 ms round trip | ~15-30 ms |
+| Cache miss → sharded DB read (§15) | +50-100 ms | ~65-130 ms |
+| Cold shard / cross-region fallback | +100-200 ms | ~165-330 ms |
+
+**A reasonable p99 target to state out loud: "redirect should complete in well under 100 ms for the ~80% of traffic the cache serves (§12.2), with a generous ceiling around 200-300 ms for the cold-path tail."** The exact numbers matter less than showing you think in terms of a *budget* — cache hit rate (80/20 rule, §4) is what keeps the p99 low, since a DB round trip alone can eat most of a 100 ms budget on its own.
+
+### 🆕 12.6 Cache-miss handling — stampede decision flowchart
+
+§12.1's sequence diagram shows the happy-path miss (one request, one DB read, one cache fill). The cheat-sheet below mentions "jittered TTL" and "lock-on-miss" for stampede protection but never diagrams the decision — here it is:
+
+```mermaid
+flowchart TD
+    A["Cache miss on short_key"] --> B{"Is another request already\nrepopulating this key?\n(mutex/lock in cache)"}
+    B -->|"No"| C["Acquire lock, query DB,\nSET cache with jittered TTL,\nrelease lock"]
+    B -->|"Yes"| D{"Can we tolerate\nslightly-stale data?"}
+    D -->|"Yes"| E["Serve stale-but-cached value\nwhile the other request repopulates"]
+    D -->|"No / no stale copy exists"| F["Wait briefly for the\nin-flight repopulation, then read cache"]
+    C --> G["Return redirect to client"]
+    E --> G
+    F --> G
+
+    style C fill:#2e7d32,color:#fff
+    style E fill:#ef6c00,color:#fff
+```
+
+**Why this matters**: without the lock in step B, a hot key's TTL expiring at the exact moment of a traffic spike sends *every* concurrent request straight to the DB at once (the "thundering herd" / cache stampede) — for a key doing thousands of reads/sec, that's thousands of redundant identical DB queries in the same instant, not one.
 
 ### Section cheat-sheet
 - Cache-aside (lazy load + TTL) is the default pattern here — reads populate cache on miss, no separate cache-warming pipeline needed for a system this simple.
@@ -741,7 +832,7 @@ The DB from §6/§8 doesn't fit on one node once you cross a few hundred GB (§4
 
 ### 15.2 Consistent hashing, one paragraph
 
-Hash each shard onto points on a ring (typically with virtual nodes per physical shard, to smooth out load further); hash each `short_key` onto the same ring; the key belongs to the first shard clockwise from its position. Adding or removing a shard only reshuffles the keys between that shard and its immediate neighbors on the ring — not the whole dataset — which is exactly what makes resharding survivable at 60+ shards (§4) without a full data migration.
+Hash each shard onto points on a ring — usually several points per physical shard (virtual nodes), to smooth out load further. Hash each `short_key` onto that same ring. A key belongs to the first shard found clockwise from its position. The payoff: adding or removing a shard only reshuffles the keys between that shard and its immediate ring neighbors, not the whole dataset. That's exactly what makes resharding survivable at 60+ shards (§4) without a full data migration.
 
 ```mermaid
 flowchart LR
@@ -789,9 +880,30 @@ flowchart TD
     E -->|"Later found malicious"| F["Tombstone the link,\nserve interstitial warning\ninstead of redirecting"]
 ```
 
-### 16.2 Rate limiting abuse
+### 🆕 16.2 Rate limiting abuse — algorithm choice and decision flow
 
 Beyond the fixed-window `api_dev_key` limiter already in the high-level design (§6): anonymous/unauthenticated shortening (no login wall, per §8's nullable `owner_id`) needs its **own** stricter per-IP limit, since `api_dev_key` alone doesn't stop a script rotating keys. A CAPTCHA challenge after N shortens/hour from one IP is the standard escalation before an outright block.
+
+"Rate limiter" isn't one algorithm — know the three common ones and their failure modes, the same way you know the four ID-generation strategies (§9):
+
+| Algorithm | How it works | Weakness | Best fit here |
+|---|---|---|---|
+| **Fixed window** | Count requests in a clock-aligned bucket (e.g., per minute), reset to 0 at the boundary | Burst at the edge: a client can fire 2x the limit by hitting the last second of one window and the first second of the next | Simple per-`api_dev_key` quota — good enough when bursts at window edges aren't a real threat |
+| **Sliding window (log or counter)** | Count requests in a rolling N-second window, not a fixed clock boundary | More memory/compute per check (a log) or a slightly fuzzier approximation (weighted counter) | Anonymous per-IP limiting, where edge-bursting *is* the abuse pattern you're defending against |
+| **Token bucket** | Bucket refills at a steady rate; each request consumes a token; empty bucket = reject or queue | Needs a bit more state (current tokens + last-refill time) per key | Good when you want to allow occasional bursts up to a cap while still enforcing a steady average rate — common choice for the redirect endpoint itself (§16.3) |
+
+```mermaid
+flowchart TD
+    A["Request arrives\n(keyed by api_dev_key or IP)"] --> B{"Under quota per\nthe chosen algorithm?"}
+    B -->|"Yes"| C["Allow — process request"]
+    B -->|"No, first time this window"| D["429 Too Many Requests"]
+    B -->|"No, repeated abuse pattern\n(many 429s from same IP)"| E["Escalate: CAPTCHA challenge,\nthen temporary IP block"]
+
+    style C fill:#2e7d32,color:#fff
+    style E fill:#c62828,color:#fff
+```
+
+**One-line recall — "fixed is simple, sliding is fair, token allows bursts."** Pick fixed-window for the authenticated `api_dev_key` quota (simplicity is fine, the key is already a trust signal), and sliding-window or token-bucket for anonymous/per-IP limits where edge-bursting is the actual attack you're defending against.
 
 ### 16.3 Enumeration attacks on short codes
 
@@ -802,6 +914,7 @@ If keys are sequential or otherwise guessable (the exact failure mode of pure co
 - Sync scan at creation + async re-scan later — a link can go bad *after* it's already been shared, one-time scanning isn't enough.
 - Unpredictability (§9) isn't just a UX nicety, it's literally the mitigation for enumeration attacks — tie these two sections together if asked about either.
 - Anonymous shortening needs its own per-IP rate limit distinct from the per-`api_dev_key` limit — don't assume one limiter covers both authenticated and anonymous abuse.
+- Know the algorithm trade-off, not just the word "rate limiter" — fixed-window is simple but edge-bursty, sliding-window/token-bucket cost a bit more state but close that gap (§16.2).
 - Security is a cheap, high-value thing to raise unprompted — most candidates never mention phishing scanning at all, so it stands out.
 
 ---
@@ -822,6 +935,7 @@ If keys are sequential or otherwise guessable (the exact failure mode of pure co
 | Sharding strategy | Consistent hashing on `hash(short_key)` | Alphabetical range / shard-by-`owner_id` | Uniform load distribution; resharding only touches ring neighbors, not the whole dataset (§15) |
 | Expiry enforcement | Lazy check on read + active background reaper | Active-only, or lazy-only | Lazy protects correctness for free; active reclaims storage on its own schedule (§14.1) |
 | Malicious-URL handling | Sync scan at shorten time + periodic async re-scan | No scanning | A shortener hides destinations, making it a phishing target; one-time scanning misses links that turn malicious later (§16.1) |
+| Rate-limit algorithm | Fixed-window for `api_dev_key`, sliding-window/token-bucket for anonymous per-IP | One algorithm everywhere | Authenticated traffic tolerates fixed-window's edge-burst quirk; anonymous abuse specifically exploits it (§16.2) |
 
 ### Section cheat-sheet
 - Every "choice made" row should be defensible with **one non-functional requirement**, not "because that's what the tutorial said."
@@ -896,6 +1010,7 @@ If keys are sequential or otherwise guessable (the exact failure mode of pure co
 | UUID length | 36 characters (with hyphens), 128 bits |
 | Base62^3 keyspace (hand-traced example, §10.3) | 62³ = 238,327 |
 | Architecture evolution stages | 4: naive single-box → durable+cached → distributed+sharded → CDN+async-analytics (§5) |
+| Redirect p99 latency budget (illustrative, §12.5) | <100 ms cache-hit path, ~200-300 ms cold-path ceiling |
 | Lazy vs active expiry | Lazy = check on read (free, correctness); Active = scheduled reaper (cost, storage reclaim) (§14.1) |
 | Security triad | Scan (phishing) / Rate-limit (abuse) / Enumeration-proof (unpredictable keys) (§16) |
 
@@ -912,6 +1027,25 @@ If keys are sequential or otherwise guessable (the exact failure mode of pure co
 - **Capacity estimation chain — "W.R.S.B.C.S."**: **W**rite QPS → **R**ead QPS → **S**torage → **B**andwidth → **C**ache → **S**hards — six dominoes, replug new inputs and re-tip them in order (§4).
 - **Shortener security — "S.R.E."**: **S**can for phishing, **R**ate-limit abuse, **E**numeration-proof your keys (§16).
 - **Expiry — "check when clicked, sweep when idle"**: lazy read-time check is free correctness insurance; the active reaper is separately-scheduled housekeeping (§14.1).
+
+### 🆕 Quick recall: "if X, then Y"
+
+Under interview pressure, a lookup table beats trying to recall prose. If the interviewer names the constraint on the left, the answer on the right is your default reach:
+
+| If the constraint is… | Then reach for… |
+|---|---|
+| No coordination at all across writers, multi-DC | Snowflake-style distributed ID (§9.1) |
+| Willing to run Zookeeper/ticket table, want proven at scale | Range-based sequencer, Flickr-style (§9.1, §9.2) |
+| URL-content dedup is acceptable/desired | Hash-based ID + collision retry loop (§9.1, §9.5) |
+| Links read aloud, printed, or manually retyped | Base58 over Base62 (§10.2) |
+| Analytics/click-count is a stated requirement | 302 redirect, not 301 (§12.3) |
+| Pure link-shortening utility, performance-first, no analytics | 301 redirect (§12.3) |
+| One link goes viral, spikes past shard/cache capacity | CDN/edge cache in front of origin (§12.4) |
+| A hot key's cache entry just expired under load | Lock-on-miss or serve-stale, not a thundering herd (§12.6) |
+| Two writers race for the same custom alias | DB unique index is the arbiter, not app-level locking (§11) |
+| Sharding a key that must spread reads *and* writes evenly | `hash(short_key)` + consistent hashing, never alphabetical or `owner_id` (§15) |
+| Anonymous (no login) abuse from one IP | Per-IP sliding-window/token-bucket limiter, separate from the `api_dev_key` quota (§16.2) |
+| A link is later found to be malicious | Tombstone it, serve an interstitial warning — never silently keep redirecting (§16.1) |
 
 ---
 

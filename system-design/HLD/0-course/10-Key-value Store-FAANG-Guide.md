@@ -2,6 +2,8 @@
 
 > This chapter is, almost verbatim, a walkthrough of **Amazon's Dynamo paper** (2007) — one of the single most-referenced systems in FAANG system design interviews. If you understand this guide cold, you can answer "design a distributed key-value store," "design DynamoDB," and large chunks of "design Cassandra" / "design a distributed cache" from first principles — and you'll recognize the same building blocks (consistent hashing, quorums, vector clocks, gossip, Merkle trees, hinted handoff) reappearing across almost every other distributed-systems interview question.
 
+> **Enhancement notes:** the original content, structure, and voice are untouched — everything below adds to what was already strong rather than replacing it. New material (marked `🆕`) includes: a whiteboard-narration diagram of the architecture's evolution from v1 (single node) → v2 (sharded + consistent hashing) → v3 (full quorum/hinted-handoff/anti-entropy design) in §5; a data-model table showing what's physically stored per key in §4; a concrete numbered ring walk-through (actual hash positions, a node join, exactly which keys move) in §6; sequence diagrams for the quorum write and read paths plus a decision flowchart for picking `N`/`W`/`R` in §10; a decision flowchart for how a coordinator resolves vector-clock conflicts in §9; and a "quick mental math" round-number version of the capacity estimate in §3. A couple of dense paragraphs (the relational-database rationale in §1) were tightened into shorter sentences. Everything else — the requirements, existing diagrams, tables, cheat-sheets, and Golden Rules — was left as-is because it already held up.
+
 ---
 
 ## Interview Playbook — routing "what's actually being asked"
@@ -33,7 +35,7 @@ flowchart TD
 - A **value** is an opaque blob — the store makes no assumptions about its structure (unlike a relational database's rows/columns). Values are kept relatively small (KB–MB); large blobs (images, videos) are stored in a dedicated blob store, with only a *reference/link* kept in the value field.
 
 ### Why not just use a relational database?
-Traditional RDBMSs are built for a **rich query model** (joins, secondary indexes, ACID transactions) — which most large-scale, high-traffic applications don't actually need for their hottest access paths, and which becomes expensive to scale horizontally while preserving strong consistency and high availability (this is precisely the CAP-theorem tension — see §14). Amazon's original motivation: many of their internal services (shopping cart, session store, best-seller lists, product catalog) only ever need **primary-key access** — get a value by key, put a value by key — and paying the cost/complexity of a full RDBMS for that access pattern is wasteful.
+Traditional RDBMSs are built for a **rich query model**: joins, secondary indexes, ACID transactions. Most large-scale, high-traffic applications don't need any of that on their hottest access paths. And a rich query model is expensive to scale horizontally while still keeping strong consistency and high availability — that expense is precisely the CAP-theorem tension (§14). Amazon's original motivation was simpler: many of their internal services — shopping cart, session store, best-seller lists, product catalog — only ever need **primary-key access**. Get a value by key. Put a value by key. Paying for a full RDBMS's cost and complexity when that's all you need is wasteful.
 
 ### Canonical real-world use cases
 - Session storage for web applications (a session ID → session data blob)
@@ -98,6 +100,14 @@ If a single node can handle ~10,000 ops/sec:
 
 **The lesson to state explicitly**: with quorum-based replication, your **effective QPS per logical operation is multiplied by R (reads) or W (writes)**, not by 1 — this is a frequently-missed detail in capacity estimation for replicated systems, and naming it is a strong signal.
 
+#### 🆕 Quick mental math (round numbers, for when you're doing this live on a whiteboard)
+Skip the precise arithmetic above when you just need an order-of-magnitude gut check:
+```
+1B keys × 1 KB average value  = 1 TB raw data
+1 TB raw × N=3 replication    = 3 TB total storage to provision
+```
+Round numbers like this are what you reach for in the first 30 seconds of the estimation; the more precise 500M-key walkthrough above is what you reach for once the interviewer wants a real derivation.
+
 ---
 
 ## 4. API design
@@ -124,6 +134,20 @@ put(key, context, value)    → success/failure
 
 Dynamo specifically uses **MD5 hashing on the key** to produce a 128-bit identifier, which is what actually gets placed on the consistent-hash ring (§6).
 
+### 🆕 Data model — what's physically stored per key
+
+The API is small, but each stored object carries more than just "the value" once versioning (§9) and repair (§11) enter the picture. This is worth sketching explicitly, because "what's actually in the record?" is a common interviewer follow-up once you've drawn the API:
+
+| Field | Purpose | Set/updated by |
+|---|---|---|
+| `key` | 128-bit MD5 hash of the caller's key — this is what's placed on the ring | Computed once, at write time |
+| `value` | The opaque application payload (or a small list of sibling values, if unreconciled) | Client, via `put` |
+| `context` / vector clock | `(node, counter)` pairs recording write causality (§9) | Coordinator, on every write |
+| Replica timestamp (per copy) | Used for staleness bookkeeping and clock truncation (§9) | Coordinator, on every write |
+| Merkle-tree leaf hash | A hash of this key's value, rolled up into the owning virtual node's Merkle tree (§11.3) | Recomputed in the background by anti-entropy |
+
+The client only ever sees `value` and `context` through the API — the timestamp and Merkle leaf hash are internal bookkeeping the store maintains for its own repair mechanisms.
+
 ---
 
 ## 5. High-level architecture
@@ -144,6 +168,46 @@ graph TD
 Every node is functionally identical (no special "master" node — satisfying the hardware-heterogeneity requirement). The **coordinator** for a given key is simply the first node reached going clockwise on the consistent-hash ring (§6) — any node can act as coordinator for the keys it's responsible for.
 
 **Routing trade-off**: a generic load balancer decouples the client from ring topology but adds a network hop; a partition-aware client library (knows the ring layout, computes the right node directly) cuts latency by skipping that hop, at the cost of the client needing to track ring membership changes. **Real systems use both**: DynamoDB clients call a stateless HTTP endpoint (load-balancer style); Cassandra's official drivers are partition-aware (token-aware routing) for lower latency.
+
+### 🆕 How this design evolves on the whiteboard (v1 → v2 → v3)
+
+Interviewers rarely want the final architecture dropped on the board fully-formed — they want to watch you build it up, layer by layer, and explain *why* each layer gets added. This is the sequence to narrate, and each arrow maps to a later section of this chapter.
+
+```mermaid
+graph TD
+    subgraph V1["v1 — single node (starting point, not a real answer)"]
+        C1[Client] --> H1["One node: an in-memory hash table"]
+    end
+```
+*v1 is just the mental model from §1 — a plain `dict`. It has no capacity beyond one machine and no fault tolerance at all. State this out loud, then immediately explain why it breaks: one machine caps both storage and throughput, and any crash loses everything.*
+
+```mermaid
+graph TD
+    subgraph V2["v2 — sharded, with consistent hashing + plain replication"]
+        C2[Client] --> LB2{Router}
+        LB2 --> Coord2["Coordinator (ring position, §6)"]
+        Coord2 --> RA["Replica A"]
+        Coord2 --> RB["Replica B"]
+        Coord2 --> RC["Replica C"]
+    end
+```
+*v2 adds the consistent-hash ring (§6) so adding/removing nodes doesn't reshuffle everything, and adds a preference list (§8) so each key has `N` copies instead of one. This fixes capacity and durability — but writes still have no defined acknowledgment rule, so it's unclear how many replicas must confirm before a write "counts," and there's no plan yet for what happens when a replica is unreachable.*
+
+```mermaid
+graph TD
+    subgraph V3["v3 — the full design this chapter builds"]
+        C3[Client] --> LB3{Router}
+        LB3 --> Coord3["Coordinator"]
+        Coord3 -->|"W acks needed"| RA3["Replica A"]
+        Coord3 -->|"W acks needed"| RB3["Replica B"]
+        Coord3 -->|"W acks needed"| RC3["Replica C (down → hinted handoff, §11.1)"]
+        Coord3 -.->|"background sweep"| AE["Anti-entropy / Merkle-tree repair, §11.3"]
+        Coord3 -.->|"gossip"| Gos["Membership via gossip, §11.4"]
+    end
+```
+*v3 is what the rest of this chapter is actually about: quorum reads/writes (`N`/`W`/`R`, §10) give a precise, tunable acknowledgment rule; hinted handoff (§11.1) and read-repair (§11.2) handle short-lived node failures; anti-entropy (§11.3) handles permanent ones; gossip (§11.4) removes the need for a central membership service; and vector clocks (§9) resolve the conflicting writes that availability-first design inevitably produces.*
+
+**Why narrating this matters**: it shows the interviewer you understand *which problem each mechanism solves*, rather than reciting a memorized list of Dynamo buzzwords with no sense of what triggered each one.
 
 ---
 
@@ -178,6 +242,22 @@ graph TD
 ```
 
 When a node is **added**, only the immediate next node on the ring needs to hand off a portion of its keys to the newcomer — every other node is unaffected. This is the entire value proposition: **adding/removing a node moves `O(1/N)` of the keys, not `O(all keys)`.**
+
+#### 🆕 A concrete numeric walk-through
+Picture a small ring with hash space `0`–`359` (like a clock face, easier to reason about than a real 128-bit MD5 space):
+```
+hash(Node A) = 40
+hash(Node B) = 160
+hash(Node C) = 280
+
+hash(key "cart-42") = 200   → next node clockwise from 200 is Node C (280)  → owned by C
+hash(key "cart-99") = 50    → next node clockwise from 50  is Node B (160) → owned by B
+```
+Now **Node D joins** at position `100`:
+```
+hash(Node D) = 100   → sits between Node A (40) and Node B (160)
+```
+Only keys whose hash falls in `(40, 100]` move — they used to belong to B (the old next-clockwise node from that range) and now belong to D. Keys owned by A and C, and keys already owned by B from `(100, 160]`, don't move at all. That's the `O(1/N)` guarantee made concrete: one ring neighbor loses a slice of its range, nobody else is touched.
 
 ### The hotspot problem consistent hashing alone doesn't solve
 Hash placement is random, so ring "gaps" between adjacent nodes are uneven — a node covering an unusually large gap becomes a **hotspot**, receiving disproportionate traffic and becoming a bottleneck.
@@ -340,6 +420,21 @@ A **vector clock** is a list of `(node, counter)` pairs, one entry per node that
 - One **dominates** the other (every counter ≥, at least one >) → no real conflict, the dominant version is simply newer.
 - **Neither dominates** → the writes are truly **concurrent** → a conflict exists that must be reconciled.
 
+#### 🆕 Flowchart: how the coordinator picks a winner (or admits it can't)
+
+```mermaid
+flowchart TD
+    Start["Coordinator has two versions, V1 (clock C1) and V2 (clock C2)"] --> Cmp{"Compare every (node, counter) pair"}
+    Cmp -->|"C1 ≥ C2 on every node, > on at least one"| V1Wins["V1 dominates → discard V2, return V1"]
+    Cmp -->|"C2 ≥ C1 on every node, > on at least one"| V2Wins["V2 dominates → discard V1, return V2"]
+    Cmp -->|"Neither dominates the other"| Concurrent["True conflict — return BOTH V1 and V2<br/>+ merged context to the client"]
+    Concurrent --> App{"Does the app have a safe auto-merge rule?<br/>(e.g. CRDT, union of a set)"}
+    App -->|"Yes"| AutoMerge["Merge automatically, write back the merged value"]
+    App -->|"No"| Manual["Surface both versions to a human/business rule<br/>(e.g. 'restore both deleted cart items')"]
+```
+
+This is exactly what §10's read path means by "if responses disagree, return all conflicting versions" — the flowchart above is what the coordinator runs *before* deciding what to hand back to the client.
+
 ### Worked example (straight from the source material — memorize this shape)
 
 ```
@@ -427,15 +522,61 @@ This is the identical quorum-overlap logic covered in the companion [Databases c
 
 **The general rule to state out loud**: *"Latency of an operation is bound by the **slowest** of the `R` (or `W`) replicas it has to wait for — so pushing `R` or `W` down toward 1 buys you speed on that operation type at the cost of consistency guarantees on the other, and pushing either up toward `N` buys consistency at the cost of that operation's latency and availability (since more replicas must be reachable)."*
 
+**Concrete example worth having ready**: `N=3, W=2, R=2` gives `W+R=4 > N=3`, so read and write sets are guaranteed to overlap — "strong-ish" consistency — while still tolerating **one node being down** on either the read or the write path (you only need 2 of the 3 to respond either way). Push to `W=3, R=1` and you lose that tolerance on writes (all 3 must be up to write) in exchange for the fastest possible reads.
+
 ### What happens under the hood on a write
 1. The coordinator computes a new vector clock and writes the new version **locally first**.
 2. It sends the new version + vector clock to the `N-1` other nodes in the preference list.
 3. The write is considered successful once **`W-1` additional** nodes acknowledge (the coordinator's own local write counts as the first of the `W`).
 
+#### 🆕 Quorum write flow (N=3, W=2)
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Coord as Coordinator
+    participant R2 as Replica 2
+    participant R3 as Replica 3
+
+    C->>Coord: put(key, context, value)
+    Coord->>Coord: write locally (1st of W)
+    Coord->>R2: replicate
+    Coord->>R3: replicate
+    R2-->>Coord: ack (2nd of W → quorum reached)
+    Coord-->>C: success (does not wait for R3)
+    R3-->>Coord: ack (arrives later, still counted toward N total copies)
+```
+
 ### What happens under the hood on a read
 1. The coordinator requests the value from the top-`N` reachable nodes in the preference list.
 2. It waits for **`R`** responses.
 3. If the responses disagree (divergent, unreconciled histories), **all conflicting versions plus their merged context** are returned to the client for reconciliation (§9) — this is exactly why the API returns a *list* of values, not just one.
+
+#### 🆕 Quorum read flow (N=3, R=2)
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Coord as Coordinator
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+
+    C->>Coord: get(key)
+    Coord->>R1: fetch
+    Coord->>R2: fetch
+    R1-->>Coord: value + vector clock (1st of R)
+    R2-->>Coord: value + vector clock (2nd of R → quorum reached)
+    Coord-->>C: return value (or all versions + context, if they disagreed — see §9's flowchart)
+```
+
+### 🆕 Decision flowchart: picking N/W/R for a given use case
+```mermaid
+flowchart TD
+    Q1{"Can this data tolerate a brief stale read?"} -->|"No — must always see the latest write"| Strong["Favor R+W close to (or > ) N,<br/>e.g. R=N, W=N — strongest consistency,<br/>lowest availability if any replica is down"]
+    Q1 -->|"Yes — eventual consistency is fine"| Q2{"Which matters more: read latency or write latency?"}
+    Q2 -->|"Reads must be fastest (read-heavy workload)"| FastRead["Low R, high W — e.g. N=3, R=1, W=3"]
+    Q2 -->|"Writes must be fastest (write-heavy workload)"| FastWrite["Low W, high R — e.g. N=3, W=1, R=3"]
+    Q2 -->|"Both matter roughly equally"| Balanced["Balanced quorum — e.g. N=3, W=2, R=2<br/>(R+W>N, tolerates 1 node down on either path)"]
+```
+Session-store and shopping-cart use cases (this chapter's canonical examples) almost always land on the **balanced** branch — moderate latency on both sides, tolerates one failed node, and satisfies `R+W>N`.
 
 ### Sloppy quorum — the availability escape hatch
 A **strict quorum** requires exactly the top-`N` nodes on the preference list to respond — if one of them is temporarily down, the operation fails, which violates "always writable." Dynamo instead uses a **sloppy quorum**: the first `N` **healthy** nodes encountered (not necessarily the literal top `N` on the list) handle the operation. This directly motivates **hinted handoff** (§11.1) — if a node outside the "true" top-`N` temporarily stands in, it needs a way to hand the data back to the rightful owner once it recovers.

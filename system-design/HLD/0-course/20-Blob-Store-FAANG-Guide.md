@@ -1,5 +1,16 @@
 # Blob Store — FAANG System Design Interview Guide
 
+> **Enhancement notes:** this pass added an architecture evolution diagram
+> (v1 single-node → v2 metadata + chunking + replication → v3 erasure coding +
+> multi-region + async GC), a generic upload-flow sequence diagram (chunk →
+> checksum → write → commit metadata) to sit alongside the existing read-path
+> and multipart diagrams, an ER-style metadata schema diagram, a
+> replication-vs-erasure-coding decision flowchart, a garbage-collection
+> eligibility flowchart, a sharded-metadata-service diagram, and a strong-vs-eventual
+> consistency comparison table. Everything else — the requirements tables,
+> capacity math, existing diagrams, golden rules, and cheat sheet — was already
+> solid and is left as written; new material is marked with 🆕 in its heading.
+
 ## Mental model
 
 A blob store is **S3/GCS/Azure Blob in miniature**: a flat key → bytes store for
@@ -250,6 +261,55 @@ listContainers(accountID)
 `putBlob`/`getBlob` are logical signatures — real implementations stream in
 chunks or use **multipart upload** (see below) rather than one giant call.
 
+### 🆕 Architecture evolution: v1 → v2 → v3
+
+Nobody designs the final architecture in one shot — and narrating it as an
+evolution (rather than presenting v3 as if it fell from the sky) is itself a
+strong signal: it shows you know *why* each piece exists, not just *that* it
+exists.
+
+```mermaid
+flowchart TB
+    subgraph V1["v1 — single node (works for a demo, falls over at scale)"]
+        C1([Client]) --> S1["One server:<br/>files on local disk +<br/>a folder-path namespace"]
+    end
+
+    subgraph V2["v2 — split metadata from bytes, add chunking + replication"]
+        C2([Client]) --> FE2[Front-end]
+        FE2 --> M2[(Master / metadata service)]
+        FE2 --> DN2A[Data node A]
+        FE2 --> DN2B[Data node B]
+        FE2 --> DN2C[Data node C]
+        M2 -.chunk → node map.-> FE2
+    end
+
+    subgraph V3["v3 — erasure coding + multi-region + async GC"]
+        C3([Client]) --> FE3[Front-end]
+        FE3 --> M3[(Sharded metadata service)]
+        FE3 --> Hot["Hot tier:<br/>3x sync replication"]
+        FE3 -.async, off critical path.-> Cold["Cold tier:<br/>10+4 erasure coding"]
+        Hot -.async cross-region.-> Remote["Remote region<br/>(DR copy)"]
+        M3 -.tombstone.-> GC["Background GC<br/>reclaims orphaned chunks"]
+    end
+
+    V1 -->|"single disk fills up,<br/>one crash loses everything"| V2
+    V2 -->|"3x replication on<br/>ALL data gets expensive;<br/>one region isn't disaster-proof"| V3
+
+    style V1 fill:#742a2a,color:#fff
+    style V2 fill:#744210,color:#fff
+    style V3 fill:#2f855a,color:#fff
+```
+
+| Version | What it adds | What breaks that forces the next version |
+|---|---|---|
+| **v1 — single node** | One server, blobs as files on local disk, a path-based namespace | One disk's capacity is the whole system's capacity; one crash = total data loss; no concurrent access from multiple hosts |
+| **v2 — metadata service + chunked storage + replication** | Split "where is it" (metadata/master) from "the bytes" (data nodes); split blobs into chunks; replicate each chunk 3x across nodes/racks | Storage cost is 3x raw for *everything*, including data nobody reads anymore; still one region — a regional disaster loses all copies |
+| **v3 — erasure coding + multi-region + async GC** | Cold/warm data moves to 10+4 erasure coding (1.4x instead of 3x); async cross-region replication for disaster recovery; deletes become async tombstone + background reclaim | This is roughly where S3/Haystack/f4/Tectonic-class systems actually live — further evolution is about *scaling the metadata service itself* (sharding the master), covered in Bottlenecks below |
+
+*Mnemonic:* **"split it, spread it, shrink it."** v2 splits metadata from
+bytes and spreads copies across nodes; v3 shrinks the storage bill (erasure
+coding) and spreads copies across regions.
+
 ---
 
 ## Deep dive 1: three-layer abstraction & metadata
@@ -274,6 +334,58 @@ graph TD
 | Blob | `blob_ID` | `blob_ID` | list of chunks + data node IDs |
 
 *Mnemonic:* **"account owns containers, containers hold blobs, blobs are chunks"** — three nesting levels, each with its own ID space, each shardable independently.
+
+#### 🆕 Metadata schema (ER view): what's actually stored per row
+
+The diagram above shows the *concept*; this shows the *columns* — useful when
+an interviewer asks "okay, sketch the metadata table" directly.
+
+```mermaid
+erDiagram
+    ACCOUNT ||--o{ CONTAINER : owns
+    CONTAINER ||--o{ BLOB : contains
+    BLOB ||--o{ CHUNK : "split into"
+    CHUNK ||--o{ REPLICA : "stored as"
+
+    ACCOUNT {
+        string account_id PK
+        string owner_email
+        timestamp created_at
+    }
+    CONTAINER {
+        string container_id PK
+        string account_id FK
+        string access_level "private or public"
+    }
+    BLOB {
+        string blob_id PK
+        string container_id FK
+        string blob_name
+        int version
+        string state "active or tombstoned"
+        int size_bytes
+        string content_hash "for dedup"
+    }
+    CHUNK {
+        string chunk_id PK
+        string blob_id FK
+        int sequence_no
+        int byte_length "short on last chunk"
+        string checksum
+    }
+    REPLICA {
+        string chunk_id FK
+        string data_node_id
+        string rack_id
+        string status "sync or async or erasure-shard"
+    }
+```
+
+This is the row set that the ~200-bytes/row estimate in the capacity
+section is describing — `CHUNK` and `REPLICA` rows dominate the count
+(one blob fans out to `chunks × replicas` rows), which is exactly why the
+metadata store, not the blob bytes, is the thing that needs a sharded
+distributed database instead of a single SQL box.
 
 **Why fixed-size chunks, and why the size matters:** disks have near-constant
 latency across a *range* of transfer sizes (e.g., writing 4–8 MB costs about the
@@ -363,9 +475,75 @@ full read volume. This is the same "resolve once, reuse the answer" shape as a
 DNS cache or a browser's connection-reuse pool. See the staleness fix for this
 cache under Deep Dive 7 (Caching) below.
 
+#### 🆕 Consistency model: strong read-after-write vs. eventual
+
+This design chooses **strong read-after-write consistency for metadata**: once
+`putBlob` returns `200 OK`, every subsequent `getBlob` for that key sees the
+new object, everywhere, immediately. The mechanism is simple — the write
+isn't acknowledged to the client until *all* sync replicas (the 3
+intra-cluster copies) have confirmed the write, and reads are only ever
+served from a copy that has confirmed. There's no window where a replica can
+serve stale bytes for a *new* key, because a replica that hasn't caught up
+simply isn't in the read path yet.
+
+| | Strong (read-after-write) | Eventual |
+|---|---|---|
+| Guarantee | Read immediately after a successful write always sees it | Read immediately after a write *might* see stale/old data |
+| Cost | Write ack waits for all sync replicas to confirm | Write ack returns as soon as one copy is durable |
+| User-facing symptom if violated | "I uploaded a file and it 404s" — looks like data loss | Usually invisible — the object shows up a few ms/sec later |
+| Where this design uses it | Metadata (chunk→node mapping, blob existence) | Cross-region replica catch-up (the async copy in Deep Dive 4) — a reader in a remote region *can* briefly miss a very recent write until async replication lands |
+| Real example | S3 moved to strong read-after-write in Dec 2020 (previously eventual) | DNS propagation, most CDN cache fills |
+
+*If X then Y:* **if the interviewer asks "is this eventually consistent?",
+say "strong within a region, eventual only for the async cross-region copy
+— and only until that copy lands, typically sub-second."** That one sentence
+answers the question precisely instead of picking one label for the whole
+system.
+
 ---
 
 ## Deep dive 4: replication vs. erasure coding
+
+#### 🆕 Upload flow, end to end: chunk → checksum → write → commit metadata
+
+This is the write-path counterpart to Deep Dive 3's read path — the exact
+sequence an interviewer is checking for when they ask "walk me through what
+happens when I call `putBlob`":
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant FE as Front-end (API)
+    participant M as Master / metadata service
+    participant D1 as Data Node 1
+    participant D2 as Data Node 2
+    participant D3 as Data Node 3
+
+    C->>FE: PUT /container/blobName (bytes)
+    FE->>FE: split object into fixed-size chunks
+    FE->>FE: compute checksum per chunk (CRC32C/SHA-256)
+    FE->>M: request chunk → data-node placement
+    M-->>FE: {chunk1: [D1,D2,D3], chunk2: [D1,D2,D3], ...}
+    par write each chunk to its 3 replicas
+        FE->>D1: write chunk + checksum
+        FE->>D2: write chunk + checksum
+        FE->>D3: write chunk + checksum
+    end
+    D1-->>FE: ack (checksum verified on write)
+    D2-->>FE: ack
+    D3-->>FE: ack
+    FE->>M: commit blob record (chunks, checksums, node IDs, version)
+    M-->>FE: metadata committed
+    FE-->>C: 200 OK (blob path + version)
+    Note over C,D3: object is now readable — read-after-write consistency
+```
+
+The checksum is computed **before** the bytes leave the front-end and
+verified again **on write** at the data node — that's what catches silent
+corruption (bit rot, a flipped bit on the wire) at write time instead of
+discovering it months later on read. The blob only becomes visible to
+readers *after* the metadata commit — this ordering (bytes first, metadata
+pointer last) is what guarantees a reader never sees a half-written object.
 
 ### Two levels of replication
 
@@ -488,6 +666,28 @@ f4 (which moved *aged* photos from Haystack's triple-replication to erasure
 coding once access frequency dropped) — that's the canonical real-world
 justification for tiering replication strategy by data temperature.
 
+#### 🆕 Replication vs. erasure coding: the decision flowchart
+
+```mermaid
+flowchart TD
+    Start["New chunk needs a<br/>durability strategy"] --> Q1{"Written/read in the<br/>last N days<br/>(hot)?"}
+    Q1 -->|yes| Q2{"Is write latency<br/>customer-facing<br/>right now?"}
+    Q1 -->|no, cold/warm| EC["Erasure code (e.g. 10+4)<br/>~1.4x overhead, CPU-heavy rebuild,<br/>acceptable for infrequent access"]
+    Q2 -->|yes| Rep["3x synchronous replication<br/>~200% overhead, cheap/fast rebuild,<br/>low read/write latency"]
+    Q2 -->|no| Q3{"Is the object small<br/>(so EC's per-shard<br/>overhead dominates)?"}
+    Q3 -->|yes| Rep
+    Q3 -->|no| EC
+
+    style Rep fill:#2f855a,color:#fff
+    style EC fill:#2c5282,color:#fff
+```
+
+*If X then Y, compressed:* **if it's hot or latency-sensitive or small, replicate;
+if it's cold, warm, or large, erasure-code.** Age is the dominant signal in
+practice (this is literally what triggers Facebook's Haystack → f4
+migration), but size and latency sensitivity are the tie-breakers when age
+alone doesn't decide it.
+
 ---
 
 ## Deep dive 5: garbage collection & the delete lifecycle
@@ -513,6 +713,31 @@ only disk-utilization accounting lags.
 user-facing API call block on a slow background cleanup process. Acknowledge
 fast, reconcile state asynchronously — the same pattern shows up in queue-based
 systems' "soft delete + compaction" and in CDNs' "purge is eventually consistent."
+
+#### 🆕 Garbage collection eligibility flowchart
+
+A chunk isn't reclaimed the instant its blob is tombstoned — the GC has to
+check a few things first, or it deletes bytes something else still needs:
+
+```mermaid
+flowchart TD
+    Start["Background GC scans<br/>a tombstoned blob's chunks"] --> Q1{"Retention window<br/>elapsed (e.g. 30 days,<br/>for accidental-delete recovery)?"}
+    Q1 -->|no| Wait["Not eligible yet —<br/>recheck on next GC pass"]
+    Q1 -->|yes| Q2{"Reference count == 0?<br/>(dedup: another blob may<br/>point at the same chunk hash)"}
+    Q2 -->|no, refcount > 0| Keep["Not eligible —<br/>decrement refcount only,<br/>bytes stay"]
+    Q2 -->|yes| Q3{"All replicas/shards<br/>confirmed the delete<br/>(no in-flight reads holding a lease)?"}
+    Q3 -->|no| Wait
+    Q3 -->|yes| Reclaim["Eligible — free the chunk's<br/>disk space, remove metadata row"]
+
+    style Reclaim fill:#2f855a,color:#fff
+    style Keep fill:#744210,color:#fff
+    style Wait fill:#742a2a,color:#fff
+```
+
+The retention window and the refcount check are the two things people forget:
+skip the window and you can't recover from an accidental delete; skip the
+refcount and content-addressable dedup (see the curveballs section) silently
+corrupts every other blob sharing that chunk.
 
 ---
 
@@ -706,6 +931,34 @@ replicated and consistent, not just the master's in-memory cache of it.
 master per partition range) plus aggressive client/front-end caching of
 metadata so most reads never reach the master at all — the two techniques
 compound rather than compete.
+
+#### 🆕 Sharded metadata service, drawn out
+
+One master topping out around ~10K QPS (illustrative, not a hard constant —
+say so if asked) is fine until account count grows past what one instance's
+memory/CPU can index. The fix is the same shape as sharding any stateful
+service: a thin routing layer in front, N metadata shards behind it, each
+owning a disjoint range of the partition key.
+
+```mermaid
+flowchart LR
+    C([Client / Front-end]) --> R["Routing layer<br/>(hash or range of account_ID)"]
+    R --> M1[("Metadata shard 1<br/>accounts A–F")]
+    R --> M2[("Metadata shard 2<br/>accounts G–P")]
+    R --> M3[("Metadata shard 3<br/>accounts Q–Z")]
+    M1 --> DN["Data nodes<br/>(unchanged — still dumb chunk storage)"]
+    M2 --> DN
+    M3 --> DN
+
+    style R fill:#2b6cb0,color:#fff
+```
+
+This is exactly the move Google made going from GFS (single master) to
+Colossus (Curator-based sharded metadata layer), and what Azure Blob Storage's
+partition layer already does by design. **Say this out loud:** "the master
+node in my diagram is a stand-in for a metadata *service* — at higher scale
+it's sharded the same way the data itself is," which pre-empts the follow-up
+before the interviewer has to ask it.
 
 ### What happens on concurrent writes with the same blob name?
 **Point to ponder, answered:** the master node detects the name collision at

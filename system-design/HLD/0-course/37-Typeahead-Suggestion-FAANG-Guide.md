@@ -1,5 +1,16 @@
 # Design Typeahead Suggestion — FAANG Interview Guide
 
+> **Enhancement notes:** this pass adds material the original guide didn't cover explicitly —
+> (1) a dedicated **API design** section with request/response payloads, (2) a **real-time
+> trending / long-tail** deep dive (the original only had the ~15-minute batch pipeline, no
+> streaming path for breaking-news terms), (3) an **incremental-update vs. full-rebuild**
+> trade-off for the trie builder, (4) a **cache-layer deep dive** with an explicit hit/miss
+> decision flowchart across client → edge → Redis → trie, and (5) a **personalization-blending**
+> worked example plus a heuristic-vs-ML-ranking table. Everything else — the mental model,
+> capacity math, trie/partitioning deep dives, offline pipeline, snapshot lifecycle, security,
+> and cheat sheet — was already strong and is left structurally untouched (only light wording
+> tightening here and there). New material is marked with 🆕 in its heading.
+
 ## Mental model
 
 Typeahead is a **read-heavy, latency-obsessed, eventually-consistent** system. Two systems
@@ -44,10 +55,13 @@ exists to make that one sentence true.
 
 ## Table of contents
 [Interview Playbook](#interview-playbook) · [Requirements](#requirements-clarification) ·
-[Capacity Estimation](#capacity-estimation-worked) · [Design Evolution](#design-evolution-from-naive-to-production) ·
+[Capacity Estimation](#capacity-estimation-worked) · [🆕 API Design](#api-design) ·
+[Design Evolution](#design-evolution-from-naive-to-production) ·
 [Trie Deep Dive](#deep-dive-the-trie) · [Partitioning](#deep-dive-partitioning-the-trie) ·
+[🆕 Cache Layers](#deep-dive-cache-layers) ·
 [Build vs Buy](#real-world-implementation-choices-build-vs-buy) · [Offline Pipeline](#deep-dive-the-offline-update-pipeline) ·
-[Snapshot Lifecycle](#trie-snapshot-lifecycle) · [Ranking](#ranking-its-not-just-raw-frequency) ·
+[Snapshot Lifecycle](#trie-snapshot-lifecycle) · [🆕 Real-Time Trending](#deep-dive-real-time-trending--long-tail-queries) ·
+[Ranking](#ranking-its-not-just-raw-frequency) ·
 [Fuzzy Matching](#extension-fuzzy-matching--typo-tolerance) · [Evaluation](#evaluation-against-non-functional-requirements) ·
 [Client-Side](#client-side-optimizations) · [Failure Modes](#failure-modes--failover) ·
 [Security](#security--abuse-considerations) · [Monitoring](#monitoring--metrics) ·
@@ -145,6 +159,12 @@ Servers (application tier only, ignoring cache/DB tier):
      number is several multiples of 76.
 ```
 
+**Aside — raw keystrokes vs. actual requests (illustrative):** the math above assumes one
+request per keystroke, which is the worst case. A client-side debounce of ~150–160ms (see
+[Client-side optimizations](#client-side-optimizations)) collapses a fast typist's burst — typing
+an 8-character word in under a second might fire only 3–4 real requests instead of 8. Treat the
+QPS above as an upper bound you provision for, not the number you'd expect to see on average.
+
 ```mermaid
 pie showData
     title Bandwidth split (Mb/sec) — the surprising ratio
@@ -155,6 +175,62 @@ pie showData
 **Redo-the-chain test:** halve top-N (10→5) and outgoing bandwidth halves. Double average query
 length and both storage and bandwidth double. Practice re-deriving the chain live, not
 re-reciting the final numbers — interviewers change one input and watch what you do next.
+
+---
+
+## 🆕 API design
+
+Interviewers often want to see request/response shapes, not just the two-line API table below —
+know the actual contract for the read path (called on every keystroke) and the write path
+(called by ingestion, never by the client directly).
+
+### `GET /v1/suggestions?prefix={prefix}&limit={n}&session={sessionId}`
+
+Request:
+```json
+{
+  "prefix": "univ",
+  "limit": 8,
+  "sessionId": "abc123",
+  "locale": "en-US"
+}
+```
+
+Response (p99 target: 100ms round trip):
+```json
+{
+  "prefix": "univ",
+  "suggestions": [
+    { "text": "university", "score": 0.92 },
+    { "text": "universal", "score": 0.81 },
+    { "text": "university of california", "score": 0.77 }
+  ],
+  "source": "cache",
+  "servedAt": 1721000000000
+}
+```
+
+| Field | Notes |
+|---|---|
+| `prefix` | Required. Reject or truncate anything over ~100 chars — nothing legitimate is that long, and an unbounded string is an easy way to abuse trie traversal. |
+| `limit` | Optional, defaults to 10, capped server-side (e.g., max 20) regardless of what the client requests. |
+| `sessionId` | Optional. Present → personalization layer engages. Absent → pure global ranking. |
+| `source` | Debug/monitoring field — `cache`, `trie`, or `trending-overlay`. Cheap way to see which layer answered without adding a trace. |
+
+**Error handling:** this endpoint should almost never return a 5xx — on any internal failure,
+fail open with an empty `suggestions: []` and a 200, not an error the client has to special-case.
+Same "fail open" rule as the rest of the guide, just written as an API contract.
+
+### `POST /v1/queries` (ingestion, internal only)
+
+```json
+{ "query": "university of california", "userId": "u_9021", "timestamp": 1721000000000 }
+```
+
+Fire-and-forget from the client's perspective — the search box submits this once a query is
+committed, and it lands in the raw-log store (HDFS in this guide). It never touches the trie
+synchronously. **The read API and the write API don't share a code path, on purpose** — that's
+the one sentence worth saying out loud if asked to sketch the contract.
 
 ---
 
@@ -254,6 +330,45 @@ flowchart TB
 strong signal of depth.** Push the hottest global prefixes to edge/CDN nodes (even into an
 ISP's edge, per the source material), and blend a per-user history service into the final
 ranked list before it leaves the region.
+
+### 🆕 Stage 5 — real-time trending injection ("v3": the last gap)
+
+Stage 4 still has one gap: the cold path runs on a ~15-minute batch window (see
+[offline pipeline](#deep-dive-the-offline-update-pipeline)). That's fine for "university" slowly
+climbing in popularity — wrong for a breaking-news term that needs to show up in seconds, not a
+quarter of an hour.
+
+```mermaid
+flowchart TB
+    subgraph Batch["Batch cold path -- ~15 min, high volume"]
+        L1["Query logs"] --> HDFS3[("HDFS")] --> Agg3["Aggregator / MapReduce"]
+        Agg3 --> Cass3[("Cassandra")] --> TB3["Trie Builder"] --> Trie3["Main Trie
+        (full corpus)"]
+    end
+    subgraph Stream["Streaming path -- seconds, low volume"]
+        L2["Query logs"] --> K["Kafka topic"] --> SP["Stream processor
+        (sliding-window count)"]
+        SP --> TrendCache[("Trending overlay cache
+        top ~500 spiking terms")]
+    end
+    Q["getSuggestions(prefix)"] --> Merge{"Merge at query time"}
+    Trie3 --> Merge
+    TrendCache --> Merge
+    Merge --> R["Ranked top-N
+    (trending terms boosted, not
+    replacing global results)"]
+```
+
+The trending overlay is small — hundreds of terms, not millions — so it's cheap to check on
+every request. It never *replaces* the batch-built trie, it only adds candidates: a bug in the
+stream processor degrades to "missing the breaking-news boost," never to "suggestions vanish."
+Full mechanics (injection threshold, long-tail handling) are in the
+[real-time trending deep dive](#deep-dive-real-time-trending--long-tail-queries).
+
+**When to bring this up unprompted:** the interviewer says "breaking news," "trending," or "what
+if something goes viral right now." Naming "small overlay cache merged at query time, batch trie
+stays authoritative" is the depth signal — don't design the stream processor from scratch unless
+pushed to.
 
 ---
 
@@ -394,6 +509,51 @@ grows, not fixed once and forgotten.
 
 ---
 
+## 🆕 Deep dive: cache layers
+
+The [mental model diagram](#mental-model) shows one Redis box, but production typeaheads stack
+**four** cache layers between a keystroke and the trie. Each layer exists to avoid paying for the
+layer below it.
+
+```mermaid
+flowchart TD
+    A["Keystroke"] --> L1{"L1: client-side cache
+    (in-memory, per tab)"}
+    L1 -->|"hit"| R1["Render -- 0 network hops"]
+    L1 -->|"miss"| L2{"L2: CDN / edge cache
+    (shared across nearby users)"}
+    L2 -->|"hit"| R2["Render -- no origin round trip"]
+    L2 -->|"miss"| L3{"L3: Redis, in front
+    of the trie shard"}
+    L3 -->|"hit"| R3["Render -- no trie descent"]
+    L3 -->|"miss"| L4["L4: in-memory trie shard
+    (source of truth, always
+    has an answer)"]
+    L4 --> Fill["Fill L3; L2/L1
+    populate naturally on
+    the next request"]
+    Fill --> R4["Render"]
+```
+
+| Layer | Scope | Illustrative hit rate | Invalidated by |
+|---|---|---|---|
+| L1 client cache | One browser tab/session | High for backspacing/retyping the same prefix | Tab close, TTL of a few minutes |
+| L2 CDN/edge | Shared across a region's users | Very high for short, common prefixes ("a", "the") — low for long, rare ones | TTL (minutes), or push on a trending update |
+| L3 Redis | Shared across a shard's app servers | High — this is the layer that keeps most traffic off the trie shard entirely | TTL, or explicit purge on trie hot-swap |
+| L4 Trie shard | Always correct, always has an answer | N/A — not a cache, the source of truth | Only changes on offline rebuild / hot-swap |
+
+**Why hit rate drops as prefix length grows:** "a" is asked by nearly everyone; a 25-character
+prefix is asked by almost no one. Cache the short, common prefixes aggressively — high hit rate,
+small key space. Don't bother caching long-tail prefixes at every layer; they miss down to L4
+anyway, and L4 is O(prefix length + K) — cheap regardless of how rare the prefix is.
+
+**TTL vs. rebuild cadence — the rule that's easy to miss:** cache TTLs should be shorter than or
+equal to the offline rebuild window (see [offline pipeline](#deep-dive-the-offline-update-pipeline)).
+Otherwise a cache layer can serve data *staler than the trie itself already is*, which defeats
+the whole point of bounding staleness in the first place.
+
+---
+
 ## Real-world implementation choices: build vs buy
 
 Interviewers love asking "would you build this from scratch?" — know the alternatives and their
@@ -480,6 +640,25 @@ segment merges (new segments are built, old ones are never mutated in place).
 overhead. Longer windows (hourly) → cheaper, staler. State the trade-off and pick a number —
 there's no universally correct answer.
 
+#### 🆕 Incremental update vs. full rebuild
+
+Everything above rebuilds a **full** trie snapshot every window — simple and safe, but at
+Google-scale corpus sizes a full rebuild every 15 minutes is real CPU/IO cost. The alternative is
+an **incremental update**: re-walk only the paths whose top-K actually changed (a query bumped a
+leaf's frequency past a sibling's), redo the top-K merge for that one root-to-leaf path, and
+leave every untouched subtree exactly as it was.
+
+| | Full rebuild | Incremental update |
+|---|---|---|
+| Simplicity | Build once, swap once | More moving parts — must track *which* paths are dirty |
+| Cost per cycle | O(entire corpus) every window, regardless of how much changed | O(changed paths) — cheap when only a small fraction of terms shifted |
+| Correctness risk | Low — a fresh build is trivially consistent | Higher — needs the same hot-swap-per-node discipline as the whole tree, just applied per path |
+| When it's worth it | Small-to-mid corpus, or rebuild comfortably fits inside the update window | Corpus large enough that a full rebuild no longer fits inside the desired freshness window |
+
+**If X then Y:** if your update window (say 15 min) is comfortably longer than your full-rebuild
+time (say 3 min), skip incremental — it's complexity you don't need yet. Reach for it only once
+rebuild time starts creeping toward the window itself.
+
 ---
 
 ## Trie snapshot lifecycle
@@ -498,6 +677,57 @@ stateDiagram-v2
 The **Retiring** state is easy to skip in a first pass and is worth naming explicitly: you
 can't free the old trie's memory the instant a new one goes Active, because in-flight requests
 may still be reading from it. Reference-count or grace-period it out.
+
+---
+
+## 🆕 Deep dive: real-time trending & long-tail queries
+
+Two different problems hide under "the index isn't quite right yet":
+
+1. **Trending (too fresh)** — a term explodes in popularity faster than the batch window can
+   react (architecture in [Stage 5](#stage-5--real-time-trending-injection-v3-the-last-gap)).
+2. **Long tail (too rare)** — a prefix has so little history that the trie has nothing good to
+   return, or returns a handful of near-random matches.
+
+### Trending: the injection decision
+
+```mermaid
+flowchart TD
+    A["Query arrives for prefix P"] --> B{"Any term in the trending
+    overlay cache matches P?"}
+    B -->|"no"| C["Serve ranked results
+    from the main trie only"]
+    B -->|"yes"| D{"Spike score above
+    injection threshold?
+    (e.g. mention rate grew
+    more than 10x in 5 min)"}
+    D -->|"no"| C
+    D -->|"yes"| E["Inject the trending term into
+    the candidate list, then run
+    the normal ranking pipeline"]
+    E --> F["Return blended top-N
+    (trending term boosted,
+    not forced to #1)"]
+```
+
+**Illustrative numbers** — label these as assumptions, not measured facts: a stream processor
+holding a 5-minute sliding window over a sampled fraction of traffic can flag a spike with a few
+hundred bytes of state per candidate term. The full "currently trending" set — a few hundred to
+low thousands of terms — comfortably fits in memory on a single node; the overlay itself never
+needs sharding.
+
+### Long tail: don't force top-N padding
+
+If a prefix genuinely only has 2 historical matches, returning 2 is correct — **padding to 10
+with low-relevance junk is worse than showing fewer results.** Two concrete rules:
+- Set a minimum relevance/frequency floor; below it, drop the candidate instead of padding the list.
+- For a prefix with *zero* trie hits (a genuinely novel prefix), fail open exactly like an
+  outage: empty `suggestions: []`, not an error, and not a full-text-search fallback that blows
+  the latency budget.
+
+**Mnemonic:** *"Trending is a candidate you add, long tail is a candidate you're allowed to
+drop."* Both are exceptions layered on top of "just read the precomputed top-K" — neither one
+changes the core trie-read path.
 
 ---
 
@@ -530,6 +760,61 @@ flowchart LR
 **Real-world analogue:** Google's autocomplete blends global query frequency, personal search
 history, trending/spiking detection, and an explicit policy layer — ranking in production
 typeahead is never "just sort by count," it's a pipeline.
+
+### 🆕 Blending personalized and global signals, worked example
+
+"Personalization layered on top of global" is easy to say and easy to leave vague. Concretely,
+it's a weighted blend computed per candidate, evaluated only when a `sessionId`/user history is
+present:
+
+```
+final_score = (w_global x normalized_global_frequency) + (w_personal x normalized_personal_affinity)
+
+Illustrative weights: w_global = 0.7, w_personal = 0.3 for a user with thin history;
+shift toward w_personal = 0.5 for a user with a long, high-confidence search history.
+
+Example -- prefix "piz":
+  "pizza hut"          global_freq=0.90  personal_affinity=0.10  -> 0.7*0.90 + 0.3*0.10 = 0.66
+  "pizza near me"      global_freq=0.40  personal_affinity=0.95  -> 0.7*0.40 + 0.3*0.95 = 0.565
+  "pizza dough recipe" global_freq=0.20  personal_affinity=0.99  -> 0.7*0.20 + 0.3*0.99 = 0.437
+
+  Ranked: "pizza hut" > "pizza near me" > "pizza dough recipe"
+  -- a user who orders pizza a lot still sees "pizza hut" first; personalization nudges
+  the order, it doesn't override an overwhelmingly popular global result.
+```
+
+```mermaid
+flowchart TD
+    A["Candidates from trie top-K"] --> B{"sessionId present
+    with enough history?"}
+    B -->|"no"| C["Score = global frequency + decay only"]
+    B -->|"yes, thin history"| D["Score = 0.7 x global + 0.3 x personal"]
+    B -->|"yes, rich history"| E["Score = 0.5 x global + 0.5 x personal"]
+    C --> F["Sort, apply policy + diversity filters"]
+    D --> F
+    E --> F
+```
+
+**Recall line:** *personalization is a weight, not a switch* — never 100% personal (you'd lose
+the "everyone types this" signal that makes typeahead useful), never 0% personal once history
+exists (that's the whole point of the layer).
+
+### 🆕 When ranking becomes a learned model
+
+Everything above is a heuristic pipeline — frequency, decay, a hand-picked blend weight. A common
+senior-level follow-up: *"would you ever use ML here?"*
+
+| | Heuristic pipeline (this guide's default) | Learned ranking model |
+|---|---|---|
+| Inputs | Frequency, recency decay, hand-tuned blend weight | Same, plus CTR, dwell time, position bias, query-to-click embeddings |
+| Where it runs | Same request path, cheap arithmetic | A re-ranking pass over the trie's top-K candidates, not a replacement for the trie |
+| Latency cost | Near zero | A model-inference call — must stay inside the 100ms budget, so it re-ranks a short candidate list (K~20), never scores the whole corpus |
+| When to reach for it | Default answer, covers most interviews | Only if the interviewer pushes on relevance quality specifically |
+
+**Say this, don't over-build it:** *"Candidate generation stays the trie's job — it's the only
+thing fast enough to touch the whole corpus. If I add ML, it re-ranks the already-small top-K
+list, it doesn't replace the trie."* One sentence answers the follow-up without designing a
+feature store live.
 
 ---
 
@@ -690,6 +975,8 @@ Metrics an interviewer expects you to name when asked "how do you know this is w
 | SSD/DB query | ~1–10 ms (or worse under load) | Why a DB-backed prefix scan blows the latency budget by 10–100x |
 | Same-datacenter RTT | ~0.5–1 ms | Negligible vs. DB query — reinforces "the bottleneck is disk, not network" |
 | Outgoing : incoming bandwidth ratio (worked example) | ~150 : 1 | You're bandwidth-bound on suggestions returned, not keystrokes received |
+| Batch trie rebuild window | ~15 min (illustrative) | Freshness ceiling for the offline pipeline; anything fresher needs the streaming/trending path |
+| Trending-overlay reaction time | Seconds (illustrative) | Why a separate streaming path exists alongside the batch trie |
 
 ---
 
@@ -709,6 +996,12 @@ Metrics an interviewer expects you to name when asked "how do you know this is w
   simple and is provably skewed — call this out before the interviewer has to.
 - **Reach for the off-the-shelf structure (Redis sorted sets, Elasticsearch) before hand-rolling
   a trie service** — build the custom version only once scale genuinely demands the extra control.
+- **Trending is additive, never a replacement.** A real-time overlay boosts candidates on top of
+  the batch-built trie; if the overlay breaks, you lose the breaking-news boost, not the trie.
+- **Don't pad the long tail.** A prefix with 2 honest matches should return 2 — forcing 10 with
+  low-relevance junk is worse than showing fewer, correct results.
+- **Personalization is a weight, not a switch.** Blend global and personal scores; never let one
+  fully override the other.
 
 ---
 
@@ -746,6 +1039,15 @@ Metrics an interviewer expects you to name when asked "how do you know this is w
 - Build vs buy: Redis sorted sets or Elasticsearch completion suggester first; custom sharded
   trie only at Google/Amazon-scale ranking-control needs.
 - Fail open: no suggestions is an acceptable degraded state; a slow search box is not.
+- Trending needs a second, faster pipeline: batch trie (~15 min) handles the corpus, a small
+  streaming overlay (seconds) handles breaking-news spikes — merged at query time, never replacing
+  the trie.
+- Incremental trie updates only pay off once a full rebuild no longer fits inside your freshness
+  window — don't build them pre-emptively.
+- Cache stack is four layers deep (client -> edge/CDN -> Redis -> trie), each one shielding the
+  next; short/common prefixes cache well, long-tail prefixes don't and that's fine.
+- Ranking stays a heuristic pipeline by default; an ML re-ranker, if used, only reorders the
+  trie's already-small top-K, it never replaces candidate generation.
 
 **Formula chain:**
 ```
