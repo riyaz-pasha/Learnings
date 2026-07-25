@@ -10,12 +10,14 @@ Every guide so far in this series has been about answering a single question fas
 
 **Key facts:**
 - The real trade-off is **latency versus completeness**: batch can see the entire, final dataset before computing anything (accurate, but slow — hours); streaming must produce an answer using only the data that's arrived *so far* (fast — seconds — but provisional, and possibly revised)
+- A batch job's output is often stored as a **materialized view** — a precomputed, physically-stored result set, refreshed on the same schedule as the job — rather than recomputing the same expensive aggregation on every single read
 - **Windowing** is how streaming systems group an inherently endless flow of events into finite chunks to compute over — tumbling (fixed, non-overlapping), sliding (fixed size, overlapping), and session (gap-based, variable length) are the three common shapes
 - A **watermark** is a stream processor's explicit, engineered guess at "I am not expecting any more late data older than this point" — the mechanism that lets a window ever actually close, despite events arriving out of order
 - **Lambda architecture** runs a batch pipeline and a streaming pipeline in parallel (streaming for fast, approximate answers; batch for slow, guaranteed-correct ones that eventually override them); **Kappa architecture** simplifies this to streaming only, reprocessing history by replaying the event log itself when needed
 
 **Common interview gotchas:**
 - "Real-time" and "streaming" are not automatically the same thing — a stream processor still has real latency (seconds, not milliseconds), and a badly-tuned batch job running every minute can feel "real-time enough" for some use cases
+- A **materialized view** is not the same as a plain SQL `VIEW` — a plain view is just a saved query, recomputed fresh every time it's read; a materialized view is precomputed and physically stored, fast to read but only as fresh as its last refresh
 - A watermark is a heuristic, not a guarantee — it's possible for data to arrive even later than the watermark predicted, and a real system has to decide explicitly what happens to that late data (drop it, or update a result that was already emitted)
 - Kappa architecture didn't make Lambda's dual-pipeline complexity disappear — it traded "maintain two pipelines" for "make your streaming pipeline capable of the accuracy batch used to guarantee," which is its own real engineering effort
 - Exactly-once processing in a stream is the same idempotency problem the Distributed Systems series closed on, applied specifically to checkpointing a stream processor's own progress
@@ -55,7 +57,27 @@ The cost is baked into the definition: results are only as fresh as the last tim
 
 ---
 
-## Chapter 3: Stream Processing — React to Each Event, Continuously
+## Chapter 3: What a Batch Job Actually Produces — Materialized Views
+
+The nightly job computes "sales by category and region" once — but what happens when fifty different dashboards, viewed throughout the next day, all ask for that same report? Recomputing the full aggregation from raw order data on every single page view would be exactly the wasted, repeated work the Database Optimization guide's opening chapter described.
+
+```mermaid
+flowchart LR
+    Batch["Nightly batch job\ncomputes the aggregation ONCE"] --> Store["Stores the result as a\nMATERIALIZED VIEW —\na real, physical table"]
+    Dashboard1["Dashboard view #1"] --> Store
+    Dashboard2["Dashboard view #2"] --> Store
+    DashboardN["...50 more views"] --> Store
+```
+
+A **materialized view** is precisely this: the precomputed result of an expensive query or aggregation, physically stored so that reading it is a fast, direct lookup rather than a recomputation. It's worth distinguishing from a plain SQL `VIEW`, which is really just a saved query definition — reading a plain view still recomputes the underlying query fresh every time, giving no performance benefit at all; a materialized view is refreshed on a schedule (often the same schedule as the batch job that populates it) and read many times in between, exactly the read-many-times-relative-to-write-once shape the Data Compression guide's Chapter 4 used to decide when paying more upfront cost is worth it.
+
+This connects directly to two ideas already covered elsewhere in this body of work: it's the same underlying goal as the Database Optimization guide's caching lever — avoid recomputing something repeatedly requested — just implemented as a real, queryable table instead of an in-memory cache entry; and it's a simple, single-database-native version of the ArchitecturePatterns series' CQRS pattern, where a separate, denormalized read model is kept in sync with a source of truth specifically to make reads fast.
+
+The cost is the same staleness trade-off that's shown up throughout this series: a materialized view is only as fresh as its last refresh, and if the underlying data changes faster than the refresh schedule, readers see a genuinely outdated aggregation until the next batch run catches up.
+
+---
+
+## Chapter 4: Stream Processing — React to Each Event, Continuously
 
 **Stream processing** flips the assumption entirely: instead of waiting for a full day's data to accumulate, process each event the moment it arrives, continuously, with results available within seconds.
 
@@ -71,7 +93,7 @@ This is the exact mechanism underneath the ArchitecturePatterns series' Event-Dr
 
 ---
 
-## Chapter 4: Windowing — Carving an Endless Stream Into Chunks
+## Chapter 5: Windowing — Carving an Endless Stream Into Chunks
 
 A stream, by definition, never ends — but most useful computations ("orders per minute," "average order value in the last 5 minutes") need a finite chunk to compute over. **Windowing** is how a stream processor defines that chunk.
 
@@ -97,7 +119,7 @@ flowchart TB
 
 ---
 
-## Chapter 5: Watermarks — Deciding When a Window Can Actually Close
+## Chapter 6: Watermarks — Deciding When a Window Can Actually Close
 
 Here's the genuinely subtle problem windowing creates: events don't always arrive in the order they actually happened. A mobile customer's request, delayed by a spotty connection, might arrive at the stream processor several seconds — or minutes — after it was generated, and *after* other, later events have already arrived. If a 5-minute tumbling window simply closes the instant 5 minutes of processing time has passed, that late event gets excluded from the window it actually belongs to.
 
@@ -125,7 +147,7 @@ This is the single most important mechanical idea in real stream processing, and
 
 ---
 
-## Chapter 6: Lambda Architecture — Run Both, Let Batch Win Eventually
+## Chapter 7: Lambda Architecture — Run Both, Let Batch Win Eventually
 
 Faced with "streaming is fast but might be wrong; batch is slow but guaranteed right," an early, influential answer (popularized by Nathan Marz) was simply: **run both, in parallel, and reconcile.**
 
@@ -141,7 +163,7 @@ The customer sees the streaming layer's fast-but-provisional number the moment i
 
 ---
 
-## Chapter 7: Kappa Architecture — Just Use the Stream for Everything
+## Chapter 8: Kappa Architecture — Just Use the Stream for Everything
 
 **Kappa architecture** is the simplification that followed: what if the streaming pipeline were made accurate and complete enough that the separate batch pipeline wasn't needed at all? The key enabling idea: treat the event log itself (the message broker from the ArchitecturePatterns series' Event-Driven Architecture guide) as the durable, replayable source of truth. If you ever need to recompute history — fix a bug, change a calculation — **replay the log from the beginning** through the same streaming logic, rather than maintaining a whole second batch codepath to do it.
 
@@ -156,7 +178,7 @@ This is a real simplification — one pipeline, one codebase, one place logic ca
 
 ---
 
-## Chapter 8: Exactly-Once Processing, Applied to Streams
+## Chapter 9: Exactly-Once Processing, Applied to Streams
 
 A stream processor tracking a running total has to periodically checkpoint its own progress — "I've processed up through event #48,201" — so that if it crashes and restarts, it knows where to resume. This is precisely the Distributed Systems series' closing guide's problem, applied to a new layer: if the processor crashes *after* updating its running total but *before* recording the new checkpoint, restarting will reprocess events it already counted, double-counting them.
 
@@ -177,7 +199,7 @@ Real stream processors solve this the exact same way the Idempotency & Stateless
 
 ---
 
-## Chapter 9: The Cost
+## Chapter 10: The Cost
 
 **Lambda's cost is duplication, indefinitely.** Two pipelines, in practice often two different frameworks, computing the same business logic — every change has to be made (and tested) twice, and the two can drift subtly out of agreement if not maintained with real discipline.
 
@@ -185,9 +207,11 @@ Real stream processors solve this the exact same way the Idempotency & Stateless
 
 **Debugging a stream is harder than debugging a batch job, structurally.** A batch job's input is a fixed, known dataset — rerunning it is deterministic. A stream's behavior depends on timing, arrival order, and watermark tuning — the same non-determinism the ArchitecturePatterns series flagged repeatedly about distributed systems in general, here showing up specifically as "this bug only reproduces when events arrive in this particular order."
 
+**A materialized view is only as fresh as its refresh schedule.** Widening the refresh interval to save compute cost directly widens how stale a reader's view of the data can be — the exact same freshness-versus-cost dial the Database Optimization guide's caching chapter turned, just at the scale of a whole precomputed aggregation instead of a single cached value.
+
 ---
 
-## Chapter 10: Which One Do You Actually Reach For?
+## Chapter 11: Which One Do You Actually Reach For?
 
 ```mermaid
 flowchart TD
@@ -207,7 +231,8 @@ Most new systems today lean toward Kappa or pure streaming by default — the to
 ```mermaid
 flowchart TB
     A["Growing data volume — some\nquestions need completeness,\nsome need speed"] --> B["Batch: process everything at\nonce, on a schedule — accurate,\nslow, deterministic"]
-    B --> C["Stream: process each event\ncontinuously — fast, but must\nhandle out-of-order arrivals"]
+    B --> B2["Output stored as a materialized\nview — precomputed, fast to read,\nfresh only as of the last refresh"]
+    B2 --> C["Stream: process each event\ncontinuously — fast, but must\nhandle out-of-order arrivals"]
     C --> D["Windowing carves the endless\nstream into chunks; watermarks\ndecide when a window can close"]
     D --> E["Lambda runs both, reconciled;\nKappa simplifies to streaming\nonly, replaying the log for history"]
     E --> F["Handoff: the data itself is now\nprocessed efficiently — next, shrink\nthe actual bytes moving through\nall of this"]
@@ -218,7 +243,7 @@ flowchart TB
 | Latency | Hours (or longer) | Seconds |
 | Completeness | Full, guaranteed | Provisional — must handle late data |
 | Determinism | Fully deterministic | Depends on arrival order/timing |
-| Core mechanism | MapReduce over a fixed dataset | Continuous processing + windowing + watermarks |
+| Core mechanism | MapReduce over a fixed dataset; output often a materialized view | Continuous processing + windowing + watermarks |
 | Best for | Reports, reconciliation, anything needing full accuracy | Live dashboards, alerts, anything needing a fast reaction |
 
 **Where would you like to go next?** Natural threads from here:

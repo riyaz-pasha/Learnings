@@ -13,12 +13,14 @@ The Distributed Systems series closed with a fleet of stateless service instance
 - Common algorithms: **round robin** (simple rotation, ignores current load), **least connections** (send to whichever instance has the fewest active requests, adapts to load), **consistent hashing / IP hash** (the same client or key reliably lands on the same instance — needed for anything with per-instance state)
 - A load balancer only routes to instances it believes are healthy — **health checks** (active probing, or passive failure detection from real traffic) are what let it actually know that
 - Real, internet-scale traffic rarely hits just one load balancer — it typically passes through a **tiered hierarchy**: global DNS-based routing to a region, then a regional load balancer, then a local one in front of the actual instance pool
+- The pool itself isn't fixed size — **autoscaling** adds or removes instances based on real-time load (reactive) or known traffic patterns (predictive/scheduled), with the load balancer picking up newly-added instances automatically
 
 **Common interview gotchas:**
 - "Load balancer" and "API Gateway" overlap in practice but answer different questions — a load balancer distributes traffic across *identical* backend copies; a gateway (the Networking series' API Gateway guide) additionally routes *different* paths to *different* services, does auth, and aggregates responses
 - Round robin looks fair but isn't "smart" — it sends equal traffic to instances regardless of how loaded each one actually is, which is exactly why least-connections exists
 - A load balancer that routes based on something client-specific (IP hash, a cookie) is trading load-spreading precision for the ability to keep a client "sticky" to one instance — necessary for some workloads, actively harmful for purely stateless ones
 - The load balancer itself needs to not be a single point of failure — which is why real deployments run it in an active-active or active-passive pair, not as one box
+- A newly-autoscaled instance joins the pool completely cold — no warm cache, no warm connection pool — which is exactly why a poorly-tuned autoscaling policy can briefly make an overload *worse* before it gets better
 
 **The core trade-off:** the smarter and more content-aware a load balancer's routing decision is, the more work it has to do per request (and the more it needs to actually understand about the traffic) — versus a dumb, fast, protocol-agnostic router that can't make use of any information beyond where the packet is headed.
 
@@ -133,7 +135,39 @@ Each tier solves a different-scale version of the exact same problem this guide 
 
 ---
 
-## Chapter 7: The Cost — The Load Balancer Can't Become the New Bottleneck
+## Chapter 7: The Fleet Itself Isn't Fixed Size — Autoscaling
+
+Every chapter so far has assumed the pool of instances behind the load balancer is a known, fixed set. Real traffic isn't fixed at all — the bookstore's fleet might need 5 instances at 3am and 50 during a flash sale. A pool sized for the flash sale wastes money all night; a pool sized for the quiet hours falls over the moment the sale starts.
+
+```mermaid
+flowchart LR
+    Night["3am: 5 instances\nwould be plenty"] -.->|"but the pool is\nfixed at flash-sale\nsize, 24/7"| Waste["Wasted capacity,\nmost of the day"]
+```
+
+**Autoscaling** adds or removes instances automatically, and the load balancer's job barely changes — it simply picks up new instances as they join the pool and stops routing to ones that are shut down, the same health-check and routing machinery from earlier chapters, just applied to a pool that grows and shrinks on its own.
+
+**Reactive (threshold-based) scaling** watches a live metric — CPU utilization, request queue depth — and adds instances when it crosses a threshold, removing them when load drops back down.
+
+```mermaid
+sequenceDiagram
+    participant Monitor as Autoscaler
+    participant Pool as Instance Pool
+    Monitor->>Pool: CPU at 85% (threshold: 80%)
+    Monitor->>Pool: add 3 more instances
+    Note over Pool: new instances join,\nload balancer starts\nrouting to them
+    Monitor->>Pool: CPU back to 40%
+    Monitor->>Pool: remove 2 instances
+```
+
+**Predictive (scheduled) scaling** doesn't wait for the metric to cross a threshold at all — it scales ahead of a known pattern (traffic reliably spikes at 9am, or a flash sale has an announced start time), adding capacity *before* load arrives rather than reacting after it's already climbing.
+
+The tuning problem here echoes a theme this series keeps returning to: a **cooldown period** (a minimum wait between scaling actions) is necessary to stop the pool from thrashing — scaling up, immediately overcorrecting and scaling back down, then scaling up again — the same oscillation risk the ArchitecturePatterns series' Circuit Breaker guide called "flapping," just applied to instance count instead of a failure threshold.
+
+The subtlety worth remembering, and the reason autoscaling isn't purely a free win: a **newly-added instance starts completely cold** — no warm connection pool (the Database Optimization guide's Chapter 2), no warm in-memory cache. If autoscaling reacts only once load is already high, the new instances arrive at the worst possible moment to also be paying cold-start costs, which is exactly why predictive scaling — adding capacity *ahead* of an expected spike — is often worth the extra complexity for traffic patterns that are actually knowable in advance.
+
+---
+
+## Chapter 8: The Cost — The Load Balancer Can't Become the New Bottleneck
 
 **A load balancer is itself a potential single point of failure**, exactly the risk the Networking series' API Gateway guide raised about a shared front door — if it goes down, every instance behind it becomes unreachable regardless of how healthy they are. Real deployments run load balancers in redundant pairs (active-passive, with automatic failover, or active-active, sharing load between two or more balancer instances) rather than as one irreplaceable box.
 
@@ -141,9 +175,11 @@ Each tier solves a different-scale version of the exact same problem this guide 
 
 **Sticky routing (IP hash) trades even load distribution for consistency.** If one client happens to send a disproportionate amount of traffic, hashing them to a fixed instance means that instance carries a disproportionate share of the load too — the opposite problem least-connections was built to solve.
 
+**Autoscaling's own reaction time is a real cost.** Provisioning a new instance — booting it, running health checks, warming it up — takes real seconds to minutes, which is exactly why a scaling policy tuned only to react after load has already spiked can lag behind the traffic it's trying to absorb.
+
 ---
 
-## Chapter 8: Which Approach Do You Actually Reach For?
+## Chapter 9: Which Approach Do You Actually Reach For?
 
 ```mermaid
 flowchart TD
@@ -168,7 +204,8 @@ flowchart TB
     B --> C["L4 (fast, protocol-agnostic)\nvs L7 (content-aware,\nAPI-Gateway territory)"]
     C --> D["Round robin, least connections,\nor consistent hashing — depending\non whether state affinity matters"]
     D --> E["Health checks keep the pool\nhonest; a tiered hierarchy\nhandles real internet scale"]
-    E --> F["Handoff: the fleet can now absorb\nload — next, protect it from any\nsingle client consuming more\nthan its fair share"]
+    E --> F["Autoscaling grows and shrinks\nthe pool itself — reactive or\npredictive, watching for cold-start\ncosts and thrashing"]
+    F --> G["Handoff: the fleet can now absorb\nload — next, protect it from any\nsingle client consuming more\nthan its fair share"]
 ```
 
 | | Layer 4 | Layer 7 |
