@@ -97,21 +97,27 @@
 - **Idempotency & Stateless Services**
 
 ## Security & Compliance
-- **OAuth2, OpenID Connect, JWT**
-- **Access Control Models**
-  - RBAC (Role-Based)
-  - ABAC (Attribute-Based)
+- **Authentication & Authorization Fundamentals**
+  - Password Hashing (bcrypt, scrypt, Argon2)
+  - Session-Based vs. Token-Based Auth
+  - Access Control Models: RBAC (Role-Based) vs. ABAC (Attribute-Based)
+- **OAuth2, OpenID Connect & JWT**
+  - Authorization Code Flow with PKCE, Client Credentials Flow
+  - JWT Internals: Claims, HS256 vs. RS256, Revocation & Refresh Rotation
 - **API Security**
-  - HMAC, JWT, API Keys
+  - API Keys, HMAC Request Signing, Bearer Tokens, mTLS
 - **Zero Trust Architecture**
-- **DDoS Protection Techniques**
-- **Secure Coding Best Practices**
-  - OWASP Top 10
+  - NIST SP 800-207, BeyondCorp, Micro-Segmentation
+- **Secrets Management & PKI**
+  - Vault/KMS, Dynamic Secrets, Envelope Encryption, SPIFFE/SPIRE
 - **Data Encryption**
-  - At Rest and In-Transit
-- **Authentication & Authorization**
+  - At Rest and In-Transit, Symmetric vs. Asymmetric, Envelope Encryption, Key Rotation
+- **Secure Coding Best Practices**
+  - OWASP Top 10 (SQL Injection, XSS, CSRF, SSRF)
+- **DDoS Protection Techniques**
+  - Volumetric, Protocol, and Application-Layer Attacks
 - **Compliance Standards**
-  - GDPR, HIPAA, etc.
+  - GDPR, HIPAA, SOC 2, PCI-DSS
 
 ## Cloud & DevOps
 - **Cloud Providers**
