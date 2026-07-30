@@ -19,7 +19,7 @@ You should already be comfortable with the common data structures:
 You should also understand:
 
 - Recursion
-- Big-O notation
+- [Big-O notation](02-big-o-notation.md)
 
 If any of these feel shaky, it's worth a quick refresher before diving in — the course assumes you know *what* these structures are and jumps straight to *when and why* to reach for them.
 

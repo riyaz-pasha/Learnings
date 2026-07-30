@@ -8,6 +8,7 @@ A from-scratch markdown rewrite of the *Decode the Coding Interview in Java: Rea
 
 - [00 Course Overview](00-getting-started/00-course-overview.md)
 - [01 Who Should Take This Course?](00-getting-started/01-who-should-take-this-course.md)
+- [02 Big-O Notation: Basics to Mastery](00-getting-started/02-big-o-notation.md)
 
 ### 01 Netflix
 
