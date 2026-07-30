@@ -1,6 +1,6 @@
 # Decode the Coding Interview in Java — Course Notes
 
-A from-scratch markdown rewrite of the *Decode the Coding Interview in Java: Real-World Examples* course (educative.io). Each chapter frames a set of classic interview patterns as features of a real product, followed by bare ("DIY") practice versions of the same patterns. Every lesson has a plain-English problem walkthrough, a Mermaid diagram, complete verified-by-execution Java code, and a complexity analysis.
+A from-scratch markdown rewrite of the *Decode the Coding Interview in Java: Real-World Examples* course. Each chapter frames a set of classic interview patterns as features of a real product, followed by bare ("DIY") practice versions of the same patterns. Every lesson has a plain-English problem walkthrough, a Mermaid diagram, complete verified-by-execution Java code, and a complexity analysis.
 
 ## Chapters
 

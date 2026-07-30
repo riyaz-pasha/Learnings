@@ -18,8 +18,8 @@ You should already be comfortable with the common data structures:
 
 You should also understand:
 
-- [Recursion](https://www.educative.io/edpresso/what-is-recursion)
-- [Big-O notation](https://www.educative.io/edpresso/what-is-big-o-notation)
+- Recursion
+- Big-O notation
 
 If any of these feel shaky, it's worth a quick refresher before diving in — the course assumes you know *what* these structures are and jumps straight to *when and why* to reach for them.
 
