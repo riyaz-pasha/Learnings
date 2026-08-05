@@ -1,4 +1,7 @@
 {
+    "markdown.styles": [
+        "/Users/riyaz/Personal/Learning/markdown-theme-2.css"
+    ],
     "colorful-markdown.styles": {
         "heading": {
             "color": "#f3bb7a",
@@ -71,6 +74,49 @@
             "color": "#c8d3f5",
             "border": "1px solid #434c5e"
         }
+    },
+    "editor.tokenColorCustomizations": {
+        "textMateRules": [
+            {
+                "scope": "markup.heading.markdown",
+                "settings": {
+                    "foreground": "#ff7b72",
+                    "fontStyle": "bold"
+                }
+            },
+            {
+                "scope": "markup.bold.markdown",
+                "settings": {
+                    "foreground": "#f2cc60",
+                    "fontStyle": "bold"
+                }
+            },
+            {
+                "scope": "markup.italic.markdown",
+                "settings": {
+                    "foreground": "#a5d6ff",
+                    "fontStyle": "italic"
+                }
+            },
+            {
+                "scope": "markup.quote.markdown",
+                "settings": {
+                    "foreground": "#7fb7c5"
+                }
+            },
+            {
+                "scope": "markup.inline.raw.markdown",
+                "settings": {
+                    "foreground": "#ffb86c"
+                }
+            },
+            {
+                "scope": "markup.underline.link.markdown",
+                "settings": {
+                    "foreground": "#58a6ff"
+                }
+            }
+        ]
     },
     "jdk.notebook.projects.mapping": {
         "/Users/riyaz/Personal/Learning/AI/RAG/rag-tutorial-1/notebook/document.ipynb": "/Users/riyaz/Personal/Learning/system-design/HLD/0-concepts/kafka/tutorial"
