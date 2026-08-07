@@ -42,3 +42,6 @@ dependencies = [
 dev = [
     "jupytext>=1.19.5",
 ]
+
+[tool.jupytext]
+formats = "ipynb,md"

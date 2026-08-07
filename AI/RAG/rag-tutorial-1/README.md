@@ -69,10 +69,19 @@ uv run jupyter lab
 
 ### Markdown preview for notebooks
 
-Notebooks under `course/basics/notebooks/` are paired with Jupytext (`.ipynb` ↔ `.md`) so their markdown cells can be edited/previewed as plain Markdown (e.g. with Markdown Preview Enhanced) while staying in sync with the notebook. To pair another notebook the same way:
+The project is configured for [Jupytext](https://jupytext.readthedocs.io/) pairing (`[tool.jupytext]` in `pyproject.toml`), so markdown cells can be edited/previewed as plain Markdown (e.g. with Markdown Preview Enhanced) while staying in sync with the notebook. Pairing itself is opt-in per notebook — it's not applied to every `.ipynb` automatically.
+
+To pair a specific notebook (generates a `.md` mirror next to it):
 
 ```bash
 uv run jupytext --set-formats ipynb,md --sync path/to/notebook.ipynb
 ```
 
-Saving either the `.ipynb` or its paired `.md` keeps both in sync (via the "Jupytext Sync" VS Code extension, or by re-running the command above).
+To bulk-pair every notebook in the repo instead:
+
+```bash
+find . -name "*.ipynb" -not -path "*/.venv/*" -not -path "*/.ipynb_checkpoints/*" \
+  -exec uv run jupytext --set-formats ipynb,md --sync {} \;
+```
+
+Once a notebook is paired, saving either the `.ipynb` or its `.md` file keeps both in sync (via the "Jupytext Sync" VS Code extension, or by re-running the command above).
