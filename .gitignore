@@ -35,3 +35,6 @@ yarn-error.log*
 
 .idea/
 venv
+
+# Claude Code local-only settings (machine-specific permissions)
+.claude/settings.local.json
