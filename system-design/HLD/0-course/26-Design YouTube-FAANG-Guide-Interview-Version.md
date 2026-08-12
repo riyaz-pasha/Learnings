@@ -240,6 +240,15 @@ sequenceDiagram
 
 **The actual resume mechanic (what happens when the app is killed mid-upload and reopened):** the client doesn't have to trust its own local bookkeeping — it can ask the blob store directly via `ListParts(upload_id)`, which returns every part the store has *durably* received an ETag for so far. Diff that against "all parts this file needs" and only the missing ones get re-uploaded. This is what makes resumability survive not just a network drop but a full app/device restart — the source of truth for "what's already uploaded" lives in the blob store, not in local app state.
 
+**Under the hood — the exact question to have a crisp answer for: "does anyone need to know the total chunk count upfront?" No, at no step:**
+
+- **Chunking itself is a pure client-side, local decision** — no server round trip needed to decide it. The client has the file on disk, picks a part size from policy (e.g. "64MB, or 100MB if file > 5GB to stay under the 10,000-part ceiling"), and computes `total_parts = ceil(file_size / part_size)` entirely offline. Nobody outside the client needs to be told this number to make the system work.
+- **`POST /videos` (step 1) only carries metadata** (title, visibility, maybe `content_length` for a progress bar) — it is *not* "here are my N chunks." Its only job is to create the metadata row and ask the blob store to open a multipart upload session, which returns an `upload_id`. `CreateMultipartUpload` in the real S3/GCS API takes no part count at all — it doesn't know or care yet how many parts are coming.
+- **Each per-part presigned URL (step 2) is scoped to exactly one `(upload_id, part_number)` pair** — nothing about total count is needed to mint it. You could request part #1's URL, upload it, then decide five minutes later you want part #2's URL — the API has no notion of "part 2 of how many."
+- **The total part count is only ever established implicitly, at the very end**, when the client calls `complete-multipart` with the *full list* of `{part_number, etag}` pairs it collected. The blob store's completion step validates that the part numbers it received are exactly the contiguous set the client claims finished the object, and reassembles them in order. That list's length *is* the total — nothing before this point ever declares it.
+
+So the real sequence is: **plan chunks locally → open a session (no count needed) → request+upload each part one at a time or in parallel (no count needed per part) → tell the store the final list when done (this is where "how many parts" first becomes known to anyone but the client).**
+
 ```mermaid
 flowchart LR
     classDef new fill:#ffe08a,stroke:#8a6d00,stroke-width:2px,color:#000
@@ -255,11 +264,13 @@ flowchart LR
 ```
 
 **Upload flow (delta from v2)**
-1. `POST /videos` → metadata row created, plus blob store told "start a multipart upload" → get an `upload_id`.
-2. For each part `i`: client calls `POST /videos/{id}/parts/{i}` → gets a presigned PUT URL for that part.
+
+0. Client computes the chunk plan **locally, no network call**: pick a part size from policy → `total_parts = ceil(file_size / part_size)`. This number lives only on the client for now (e.g. to drive a progress bar); it is never sent to the server or the blob store at this point.
+1. `POST /videos` → metadata row created (title/visibility only, no chunk info), and Upload Service asks the blob store to open a multipart session → gets back an `upload_id`. The blob store does not need, and does not ask for, the total part count here.
+2. For each part `i` from 1 to `total_parts`: client calls `POST /videos/{id}/parts/{i}` → Upload Service asks the blob store for a presigned PUT URL scoped to `(upload_id, part_number=i)` only — again, no total count involved.
 3. Client `PUT`s each part directly to blob storage, in parallel (bounded concurrency) — blob storage returns an `ETag` per part.
-4. Client tracks `{part_number, etag}` for every succeeded part locally, so a crashed upload can resume by checking which parts are already confirmed and only re-uploading missing ones.
-5. Once all parts succeed, client calls `POST /videos/{id}/complete-multipart` with the full `{part_number, etag}` list → blob storage assembles the final object.
+4. Client tracks `{part_number, etag}` for every succeeded part locally (and can double-check against the blob store's own `ListParts(upload_id)` if it's unsure), so a crashed upload resumes by uploading only the parts still missing.
+5. Once all `total_parts` parts succeed, client calls `POST /videos/{id}/complete-multipart` with the full `{part_number, etag}` list, in order — **this is the first time the blob store learns how many parts there were**, implicitly, from the length of that list. It validates the numbering is contiguous and assembles the final object.
 6. Same as v2 from here: status flips to `READY` (or, from v4 onward, kicks off transcoding).
 
 ```mermaid
@@ -269,28 +280,37 @@ sequenceDiagram
     participant DB as Metadata DB
     participant BS as Blob Storage
 
-    U->>UP: POST /videos (metadata)
-    UP->>BS: initiate multipart upload
+    Note over U: Step 0 — purely local, no network call:<br/>pick part size, compute total_parts = ceil(file_size / part_size)
+
+    U->>UP: POST /videos (title, visibility — no chunk info)
+    UP->>BS: CreateMultipartUpload (no part count passed)
     BS-->>UP: upload_id
     UP->>DB: INSERT metadata (status=UPLOADING, upload_id)
     UP-->>U: {video_id, upload_id}
 
-    loop for each part i
+    loop for each part i = 1..total_parts (client-known only)
         U->>UP: POST /videos/{id}/parts/{i}
-        UP->>BS: request presigned PUT URL for part i
+        UP->>BS: presign UploadPart(upload_id, part_number=i)
         BS-->>UP: presigned_url_i
         UP-->>U: presigned_url_i
         U->>BS: PUT part i bytes
         BS-->>U: ETag_i
     end
 
-    Note over U: network drop? re-upload only missing parts
+    Note over U: network drop? re-upload only missing parts<br/>(diff against ListParts(upload_id) if unsure)
 
     U->>UP: POST /videos/{id}/complete-multipart {parts:[{i,ETag_i}...]}
+    Note over BS: total part count is only learned here —<br/>implicitly, from the length of this list
     UP->>BS: CompleteMultipartUpload(upload_id, parts)
     BS-->>UP: final blob_url
     UP->>DB: UPDATE status=UPLOADED
 ```
+
+**Under the hood — what happens to the parts after `CompleteMultipartUpload`: stitched into one object, not kept as separate chunks.** The blob store reassembles all parts into a **single contiguous object** under the original key — the individual parts stop being separately addressable the moment completion succeeds. A `GET` on that key afterward returns it exactly as if it had been uploaded via one single `PUT`; there is no way to tell from the *outside* that it was ever chunked. Two nuances worth having ready:
+- The resulting object's ETag is not a plain content MD5 the way a single-PUT object's is — it's a hash-of-hashes, often rendered like `abc123-14` (the `-14` being the part count), so you *can* tell after the fact that it was multipart-assembled, even though the bytes are one seamless file.
+- Internally the blob store may still physically stripe/replicate that "single object" across many disks/nodes for durability — but that's the store's own sharding, invisible to us; logically and via the API it is one object, one key.
+
+**Don't conflate this with the HLS/DASH segments introduced in v5** — those (`seg0.ts`, `seg1.ts`, ...) are a *deliberate, permanent* set of separate objects the player fetches individually for adaptive streaming. Multipart's chunks are a *transient upload mechanism* that disappears into one object the instant upload finishes; segments are a *product decision* made later, at transcode time, for an unrelated reason (letting the player switch quality mid-playback). The video gets "split into pieces" twice in this design, for two unrelated reasons — worth stating that distinction explicitly if it looks like it's getting merged into one idea.
 
 **DB schema (delta):**
 
@@ -495,6 +515,30 @@ seg2.ts
 #EXT-X-ENDLIST
 ```
 
+**Under the hood — where do the manifest and segment files actually live? No new storage system: they're plain objects in the *same* blob storage bucket as everything else, just a lot more of them, at predictable keys.**
+
+Concrete key layout, extending the rendition layout from v4:
+
+```
+s3://renditions/{video_id}/master.m3u8              ← master manifest (tiny text file, ~1KB)
+s3://renditions/{video_id}/480p/playlist.m3u8        ← per-resolution playlist (tiny text file)
+s3://renditions/{video_id}/480p/seg0.ts              ← actual video bytes for seconds 0-5
+s3://renditions/{video_id}/480p/seg1.ts              ← seconds 5-10
+s3://renditions/{video_id}/480p/seg2.ts              ← ...
+s3://renditions/{video_id}/720p/playlist.m3u8
+s3://renditions/{video_id}/720p/seg0.ts
+s3://renditions/{video_id}/720p/seg1.ts
+s3://renditions/{video_id}/1080p/playlist.m3u8
+s3://renditions/{video_id}/1080p/seg0.ts
+...
+```
+
+**How they get there mechanically:** ffmpeg's HLS/DASH muxer *directly emits* the playlist file and the segment files as its output — you point ffmpeg at "produce HLS output" instead of "produce one .mp4," and it writes `playlist.m3u8` + `seg0.ts, seg1.ts, ...` straight to local disk on the transcode worker. The worker then just `PUT`s each of those output files to blob storage as its own ordinary object, one per file, exactly like any other upload in this design — a manifest is a text file, a segment is a small binary file; neither needs special handling by the blob store. The worker builds the **master manifest** itself afterward (or via a muxer flag), writing one small text file that references the per-resolution playlist paths.
+
+**How the DB fits in — it stores exactly one pointer, not the tree.** Only `videos.master_manifest_url` (pointing at the `master.m3u8` object) gets written to the DB, once, when the video flips to `READY`. Nothing about individual segments, or even the per-resolution playlists, is tracked in the DB at all — the DB would otherwise have to grow a row per segment (hundreds per video), which is exactly the kind of unnecessary DB scaling this design avoids everywhere else. The player discovers everything else (which resolutions exist, how many segments each has) by *reading the manifest's contents*, not by asking our API.
+
+**How relative paths inside the manifest resolve** (worth knowing precisely, it trips people up): entries like `480p/playlist.m3u8` inside `master.m3u8`, and `seg0.ts` inside a per-resolution playlist, are **relative URLs** — resolved by the player exactly like a relative link in an HTML page, relative to the URL the containing file was itself fetched from. This is *why* the whole rendition tree is portable: it works unchanged whether it's served straight from the blob store's own domain or later fronted by a CDN with a completely different domain (v9) — nothing inside the manifest files needs to be rewritten when we add a CDN, because the paths were never absolute to begin with.
+
 **Under the hood: the exact client-side algorithm that picks a resolution — this is the answer to "how does adaptive bitrate actually decide?", and it's worth memorizing the concrete thresholds, not just the word "adaptive":**
 
 After every segment finishes downloading, the player does two measurements and one decision:
@@ -621,25 +665,32 @@ sequenceDiagram
 
 ### v8 — Cache
 
-**Idea:** even with multi-region + blob storage, every metadata read and every manifest fetch still hits the DB / blob store. This is a 1000:1 read-heavy system with a strong power-law (a small number of videos get most of the views) — an in-memory cache (Redis/Memcached) in front of the metadata DB and manifests eliminates the vast majority of repeat reads.
+**Idea:** even with multi-region + blob storage, every metadata read and every manifest fetch still hits the DB / blob store. This is a 1000:1 read-heavy system with a strong power-law (a small number of videos get most of the views) — an in-memory cache (Redis/Memcached) in front of both eliminates the vast majority of repeat reads.
 
-**What we cache:** video metadata and manifest content (both read on every playback start, and don't change once a video is `READY`). We do **not** cache raw video segments here — large binary blobs belong at a CDN edge (v9), not app-tier Redis.
+**What we cache — two distinct things, with two distinct sources of truth (don't merge them into one mental "cache the video" bucket):**
+1. **Video metadata** (title, status, `master_manifest_url` itself, etc.) — source of truth is the **Metadata DB** (a row).
+2. **Manifest content** — the actual bytes of `master.m3u8` — source of truth is **Blob Storage** (an object), per v5. The DB never stores manifest content, only the URL pointing at it. So caching the manifest means caching a copy of a *blob-storage object*, and its cache-miss path is a `GET` against blob storage, not a DB query.
+
+We do **not** cache raw video segments here — large binary blobs belong at a CDN edge (v9), not app-tier Redis. (Manifests are cached here because they're tiny text files re-read on every playback start; segments are cached at the CDN because they're the actual bandwidth-heavy payload.)
 
 **Cache key design**
 
-| Data | Key format | TTL | Invalidation |
-|---|---|---|---|
-| Metadata | `video:meta:{video_id}` | 1 hour | On any write to that video's metadata row, explicitly delete/update the key |
-| Manifest | `video:manifest:{video_id}` | 24 hours (immutable once READY) | Invalidate only if video is re-transcoded/re-published |
+| Data | Key format | TTL | Fallback on miss | Invalidation |
+|---|---|---|---|---|
+| Metadata | `video:meta:{video_id}` | 1 hour | Metadata DB (`SELECT`) | On any write to that video's metadata row, explicitly delete/update the key |
+| Manifest content | `video:manifest:{video_id}` | 24 hours (immutable once READY) | **Blob Storage** (`GET master.m3u8`) — *not* the DB | Invalidate only if video is re-transcoded/re-published |
 
 ```mermaid
 flowchart LR
     classDef new fill:#ffe08a,stroke:#8a6d00,stroke-width:2px,color:#000
     classDef existing fill:#eee,stroke:#999,color:#333
     U([Client]):::existing --> UP[Upload Service]:::existing
-    UP -->|"🆕 check cache first"| C[("🆕 Cache — Redis")]:::new
+    UP -->|"🆕 check cache first (metadata)"| C[("🆕 Cache — Redis")]:::new
     C -.->|"🆕 miss → fall through"| DB[("Metadata DB")]:::existing
     DB -.->|"🆕 populate on miss"| C
+    UP -->|"🆕 check cache first (manifest content)"| C
+    C -.->|"🆕 miss → fall through to BLOB, not DB"| BS[("Blob Storage")]:::existing
+    BS -.->|"🆕 populate on miss"| C
 ```
 
 ```mermaid
@@ -648,20 +699,33 @@ sequenceDiagram
     participant UP as Upload Service
     participant C as Cache (Redis)
     participant DB as Metadata DB
+    participant BS as Blob Storage
 
     U->>UP: GET /videos/{id}
     UP->>C: GET video:meta:{id}
     alt cache hit
-        C-->>UP: metadata
+        C-->>UP: metadata (incl. master_manifest_url)
     else cache miss
         UP->>DB: SELECT metadata WHERE id
-        DB-->>UP: metadata
+        DB-->>UP: metadata (incl. master_manifest_url)
         UP->>C: SET video:meta:{id} (TTL 1h)
     end
-    UP-->>U: metadata + manifest url
+    UP-->>U: metadata + master_manifest_url
+
+    Note over U: separately, when the player requests the manifest itself
+    U->>UP: GET /videos/{id}/manifest
+    UP->>C: GET video:manifest:{id}
+    alt cache hit
+        C-->>UP: manifest content
+    else cache miss — note the fallback is BLOB STORAGE, not the DB
+        UP->>BS: GET master.m3u8 (the object, per v5)
+        BS-->>UP: manifest content
+        UP->>C: SET video:manifest:{id} (TTL 24h)
+    end
+    UP-->>U: manifest content
 ```
 
-**Tradeoff:** removes most DB load, lowers p99 latency, at the cost of a consistency question — a viewer might see slightly stale metadata (e.g. a title edit) for up to the TTL. Acceptable here (metadata edits aren't safety/consistency-critical). Status transitions (`TRANSCODING`→`READY`) should be invalidated explicitly, not just TTL'd, so a viewer isn't told "still processing" long after it's actually ready.
+**Tradeoff:** removes most DB *and* blob-storage load, lowers p99 latency, at the cost of a consistency question — a viewer might see slightly stale metadata (e.g. a title edit) for up to the TTL. Acceptable here (metadata edits aren't safety/consistency-critical). Status transitions (`TRANSCODING`→`READY`) should be invalidated explicitly, not just TTL'd, so a viewer isn't told "still processing" long after it's actually ready.
 
 **Under the hood: this Redis cache is one of two cache layers, not the only one.** The other layer is plain **HTTP caching** via `Cache-Control` response headers, enforced by every intermediary (browser, CDN in v9) without any Redis involved — these two layers answer different questions and it's worth being explicit about which is which:
 
