@@ -2,7 +2,7 @@
 
 > **Enhancement notes:** This pass added (1) an explicit Requirements Clarification (functional + non-functional) subsection and a Data Model subsection under §3, (2) an architecture-evolution walkthrough — v1 single row → v2 fixed-N shards → v3 adaptive shards + write-behind cache — under a new §5.0, (3) an adaptive shard-count decision flowchart under §6.1, (4) a 3-way "exact sharded vs HyperLogLog vs in-memory batching" comparison table under §6.5, and (5) a compact "if X → then Y" recall table under §15. It also tightens a couple of dense run-on sentences (§6.6, §8) for plain-language clarity. Everything else — mental model, playbook, capacity math, disambiguation tables, failure modes, golden rules — was already solid and is left untouched. New material is marked with a 🆕 in its heading.
 
-> Building block. Not a full system — a technique you slot into "design X at scale" whenever X has a number that gets hammered by concurrent writes: likes, views, votes, impressions, rate-limit counters, inventory counts.
+> **Building block:** Not a full system — a technique you slot into "design X at scale" whenever X has a number that gets hammered by concurrent writes: likes, views, votes, impressions, rate-limit counters, inventory counts.
 
 ---
 
@@ -10,7 +10,9 @@
 
 **One doorbell, one visitor at a time. A stadium turnstile bank, 50 gates, one crowd.**
 
-A single counter is a single row/variable protected by a lock (or a single DB row's write throughput ceiling). Every writer queues behind it. A **sharded counter** splits that one counter into `N` independent sub-counters ("shards"), scatters writes across them in parallel, and **sums them up only when someone reads**.
+A single counter is a single row/variable protected by a lock (or a single DB row's write throughput ceiling). Every writer queues behind it.
+
+A **sharded counter** splits that one counter into `N` independent sub-counters ("shards"), scatters writes across them in parallel, and **sums them up only when someone reads**.
 
 ```
 Hot counter (BAD):           Sharded counter (GOOD):
@@ -26,7 +28,9 @@ Hot counter (BAD):           Sharded counter (GOOD):
                                    read = Σ shards
 ```
 
-Trade you're making: **you move cost from the write path to the read path.** Writes become cheap and parallel; reads become an aggregation (fan-out + sum, or a cached rollup).
+Trade you're making: **you move cost from the write path to the read path.**
+
+Writes become cheap and parallel; reads become an aggregation (fan-out + sum, or a cached rollup).
 
 ### Interview cheat-sheet — Mental Model
 - Say it in one line: "shard the hot row so writes parallelize; pay for it on reads by aggregating or caching."
@@ -74,7 +78,11 @@ flowchart TD
 
 ## 3. What It Is
 
-A **sharded counter** (aka **distributed counter**) replaces one logical counter with `N` physical sub-counters ("shards"). Writers pick one shard (by hash, round-robin, random, or load-aware routing) and increment/decrement *that* shard only. Readers sum all shards to get the total, either on-demand (fan-out read) or from a periodically-refreshed cached aggregate.
+A **sharded counter** (aka **distributed counter**) replaces one logical counter with `N` physical sub-counters ("shards").
+
+Writers pick one shard (by hash, round-robin, random, or load-aware routing) and increment/decrement *that* shard only.
+
+Readers sum all shards to get the total, either on-demand (fan-out read) or from a periodically-refreshed cached aggregate.
 
 ```
 createCounter(counter_id, number_of_shards)   // one logical counter → N physical rows
@@ -133,7 +141,11 @@ value: {sum, computed_at}
 ttl:   T seconds (§5.4)
 ```
 
-`counters_metadata` is small — one row per entity — but read on every write, so cache it aggressively (golden rule #9). `shard_values` is the hot path: N keys per counter, written constantly. `aggregate_cache` only exists if you chose the cached-rollup read strategy (§6.3) over pure fan-out.
+`counters_metadata` is small — one row per entity — but read on every write, so cache it aggressively (golden rule #9).
+
+`shard_values` is the hot path: N keys per counter, written constantly.
+
+`aggregate_cache` only exists if you chose the cached-rollup read strategy (§6.3) over pure fan-out.
 
 ### Interview cheat-sheet — What it is
 - Three APIs to name: `createCounter`, `writeCounter`, `readCounter` — mention metadata store tracks `counter_id → shard_count → shard locations`.
@@ -145,7 +157,9 @@ ttl:   T seconds (§5.4)
 
 ## 4. Why It Exists — The Hot Key / Heavy Hitters Problem
 
-Real systems have power-law traffic: a tiny number of posts/tweets/videos get disproportionate interaction ("heavy hitters problem"). Example from source material: Twitter averages ~6,000 tweets/sec (360K/min, ~500M/day), and a single celebrity tweet can pull in **millions of likes** within minutes.
+Real systems have power-law traffic: a tiny number of posts/tweets/videos get disproportionate interaction ("heavy hitters problem").
+
+Example from source material: Twitter averages ~6,000 tweets/sec (360K/min, ~500M/day), and a single celebrity tweet can pull in **millions of likes** within minutes.
 
 If likes for that tweet are `UPDATE tweets SET like_count = like_count + 1 WHERE id = X`:
 
@@ -166,9 +180,19 @@ graph LR
 
 ### Concrete before/after: one viral tweet
 
-**Before (single row):** Tweet `id=9876` (a buzzer-beater clip) pulls 80,000 likes in 3 minutes — ~444 writes/sec sustained, bursting to ~2,000 writes/sec. Every write runs `UPDATE tweets SET like_count = like_count + 1 WHERE id = 9876`. A single MySQL row tops out around 1,000-2,000 writes/sec before lock-wait dominates — at the 2,000/sec peak, p99 write latency jumps from ~5ms to 400ms+, and writes start timing out.
+**Before (single row):**
+Tweet `id=9876` (a buzzer-beater clip) pulls 80,000 likes in 3 minutes — ~444 writes/sec sustained, bursting to ~2,000 writes/sec.
 
-**After (20 shards, random selection):** The same 2,000 writes/sec peak scatters across 20 shard rows — each shard sees ~100 writes/sec, nowhere near any single-row ceiling. p99 write latency stays at ~5ms. The total work is unchanged; what changed is that no single lock queue absorbs all of it.
+Every write runs `UPDATE tweets SET like_count = like_count + 1 WHERE id = 9876`.
+
+A single MySQL row tops out around 1,000-2,000 writes/sec before lock-wait dominates — at the 2,000/sec peak, p99 write latency jumps from ~5ms to 400ms+, and writes start timing out.
+
+**After (20 shards, random selection):**
+The same 2,000 writes/sec peak scatters across 20 shard rows — each shard sees ~100 writes/sec, nowhere near any single-row ceiling.
+
+p99 write latency stays at ~5ms.
+
+The total work is unchanged; what changed is that no single lock queue absorbs all of it.
 
 ```mermaid
 graph LR
@@ -301,7 +325,9 @@ sequenceDiagram
     AS-->>U: total count
 ```
 
-Key design point from the source material: **do not lock all shards before summing.** Summation is inherently a **snapshot-in-time approximation** — by the time you report the value, writes have already changed it. This is fine for like/view counts; it is *not* fine for money.
+Key design point from the source material: **do not lock all shards before summing.**
+
+Summation is inherently a **snapshot-in-time approximation** — by the time you report the value, writes have already changed it. This is fine for like/view counts; it is *not* fine for money.
 
 ### 5.4 Cache staleness lifecycle
 
