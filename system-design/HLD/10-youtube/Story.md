@@ -1688,6 +1688,107 @@ A few milliseconds of lag is fine
 
 ---
 
+## 🆚 CDN vs. Read Replicas — Which Read Goes Where?
+
+At this point you know two tools for handling read-heavy traffic: **CDNs** (Chapter 4) and **read replicas** (just now). A very common interview trap is to say *"reads are 100:1, so let's just add more read replicas"* — as if that's the whole answer. It isn't.
+
+**The fix: stop asking "is this read-heavy?" and start asking "what KIND of read is this?"**
+
+A single YouTube page load fires off several completely different reads:
+
+```
+Loading a video page = MANY reads, hitting DIFFERENT systems:
+
+1. Video segments (the actual stream)     → ??? 
+2. Video metadata (title, description)    → ???
+3. View count, like count                 → Redis (already covered)
+4. Comments                               → ???
+5. Recommendations ("up next")            → separate recs service
+6. Search results                         → Elasticsearch
+```
+
+Only some of these are "add a read replica" problems. Let's figure out which.
+
+### Why a read replica can't serve video bytes
+
+It's tempting to think "reads are reads — just replicate the video table and spread the load." But a read replica is still **a database, answering database queries** — it inherits every limitation of that model:
+
+```
+Read replica serving video segments ❌
+─────────────────────────────────────
+- Still lives in a handful of datacenters (not near every viewer)
+- Every viewer pays a network hop to SOME datacenter (5-50ms, often more)
+- A DB replica is built to answer SQL queries fast,
+  not to stream gigabytes of binary blobs to millions
+  of concurrent connections
+- Adding more replicas doesn't fix distance — a viewer in
+  Mumbai is still far from a replica in Virginia
+```
+
+A CDN solves a *different* problem than a replica does — **distance**, not query throughput:
+
+```
+CDN serving video segments ✅
+─────────────────────────────
+- Edge PoPs sit ~20-50km from the viewer (§ Chapter 4)
+- Video segments are IMMUTABLE once transcoded
+  → perfect for caching with a long TTL, forever
+- ONE cache miss per edge region pulls the segment in;
+  every viewer after that in that region hits the cache
+- The origin server / database is never touched again
+  for that segment — no query load at all
+```
+
+This is the part people miss: for video bytes, **the CDN doesn't add capacity on top of the database — it removes the database from the read path almost entirely.** The 100:1 read-write ratio this doc keeps mentioning gets absorbed mostly by the CDN, before a single read replica ever sees that traffic.
+
+### Where read replicas actually earn their keep
+
+Read replicas are for reads that are **structured, mutable, and need a query engine** — not "fetch this static blob and hand it over":
+
+```
+✅ Video metadata (title, description, uploader)
+   Cache-Aside on Redis first, DB read replica on cache miss.
+   Changes occasionally (creator edits it) — not per second.
+
+✅ Comments
+   Needs pagination, sorting, filtering — "top 20 comments,
+   sorted by likes, page 3." A CDN cannot do this; there's
+   no query capability at a cached edge blob.
+
+❌ View / like counts
+   NOT a good fit for read replicas either — too write-heavy
+   (billions of increments/day). This is Redis INCR's job,
+   as covered above — not a DB replica concern at all.
+
+❌ Video segments
+   Never touch the DB after upload + transcode is done.
+   100% a CDN concern.
+```
+
+The CDN has no concept of SQL, joins, or "sort by newest" — it just serves bytes by URL. So the moment a read needs real query semantics, it has to go through the database tier (cache → replica), not the CDN.
+
+### Putting it together
+
+```
+┌────────────────────────────┬───────────────────────────────┐
+│  Read type                 │  Handled by                   │
+├────────────────────────────┼───────────────────────────────┤
+│  Video/audio segments       │  CDN (edge cache)              │
+│  Thumbnails                 │  CDN (edge cache)               │
+│  Video metadata              │  Redis cache-aside → DB replica│
+│  Comments                   │  DB read replica (paginated)   │
+│  View/like counts            │  Redis (INCR, not DB at all)   │
+│  Search                     │  Elasticsearch                 │
+│  Recommendations            │  Dedicated recs service          │
+└────────────────────────────┴───────────────────────────────┘
+```
+
+**The rule of thumb:** if the read is "give me this immutable blob by ID/URL" → CDN. If the read needs filtering, sorting, joins, or the data changes often → cache-aside + read replica. Don't reach for "add more replicas" to fix a video-serving problem — that's the wrong tool for that job, no matter how many you add.
+
+> *"Read replicas and CDNs solve different problems, even though both handle 'read-heavy' traffic. CDNs solve the geographic-distance problem for immutable, cacheable content — video segments and thumbnails — by serving them from an edge PoP near the viewer, which removes almost all of that traffic from our database entirely. Read replicas solve the query-throughput problem for structured, queryable data — video metadata and comments — where we still need SQL semantics like pagination and sorting. High-frequency counters like views and likes go to Redis instead of either, because they're too write-heavy for replicas and don't need CDN-style caching. So our 100:1 read-write ratio is handled by three different mechanisms, chosen by what kind of read it actually is — not by blindly adding capacity to one layer."*
+
+---
+
 ## 🔪 Sharding — Solving Write Heavy & Storage Problems
 
 Replication handles **reads.** But what about:
@@ -1903,6 +2004,232 @@ This is slow and complex ❌
 If 90% of your queries are "get videos by user" → shard by user_id. User's videos are all on one shard.
 
 For the 10% of queries that ARE cross-shard (like trending/search) → use a **separate specialized service** (like Elasticsearch for search) instead of querying sharded DB directly.
+
+---
+
+### 🌍 The Data Residency Problem: When Sharding Isn't Just About Load
+
+Here's a twist that catches most people off guard in interviews.
+
+So far, sharding has been purely a **load-distribution problem**: `hash(user_id) % N` spreads writes evenly so no single shard gets overloaded. But that formula says nothing about **where on Earth** shard N physically lives.
+
+```
+A creator in Mumbai uploads a video.
+
+shard_id = hash(user_id) % 4 → Shard 2
+
+...but where IS Shard 2?
+
+If all 4 shards live in us-east-1:
+Mumbai user's data → flies to Virginia, USA → stored there ❌
+
+Hash sharding doesn't know or care about geography.
+It only cares about even distribution.
+```
+
+That's fine — until the law gets involved.
+
+**Data localization / data sovereignty laws** require that certain data about a country's citizens be stored (and sometimes processed) *inside that country's borders*. This isn't hypothetical for a YouTube-scale product:
+
+```
+🇮🇳 India   — RBI mandates payment data stay in India;
+              IT rules push heavily toward local storage for user data
+🇷🇺 Russia  — Personal data of Russian citizens MUST be
+              stored on servers physically inside Russia (Federal Law 242-FZ)
+🇨🇳 China   — Cybersecurity Law requires "critical" data and
+              personal info to stay on Chinese soil
+🇪🇺 EU      — GDPR doesn't force in-EU storage, but forbids
+              transferring EU citizens' data to countries without
+              "adequate" protection — many companies just keep it in-EU anyway
+```
+
+If your sharding logic is just `hash(user_id) % N` across a single global pool of shards, you have **no way to guarantee** any of this. You need a second layer on top of sharding.
+
+#### The Fix: Geo-Partitioned Sharding
+
+Combine **region-based partitioning** (coarse, legally driven) with **hash-based sharding** (fine, load-driven) — region decides the *pool*, hash decides the *shard within the pool*:
+
+```
+shard_id = region_code + ( hash(user_id) % shards_per_region )
+
+┌─────────────────────────────┐   ┌─────────────────────────────┐
+│   🇮🇳 INDIA REGION (Mumbai)  │   │   🌐 GLOBAL REGION (US-East) │
+│                             │   │                             │
+│  IN-Shard-0  IN-Shard-1     │   │  US-Shard-0   US-Shard-1     │
+│  IN-Shard-2  IN-Shard-3     │   │  US-Shard-2   US-Shard-3     │
+│                             │   │                             │
+│  Blob storage: India bucket │   │  Blob storage: US bucket     │
+│  Replicas: India only       │   │  Replicas: US, EU, Asia      │
+│  Backups: India only        │   │  Backups: anywhere            │
+└─────────────────────────────┘   └─────────────────────────────┘
+
+Within IN-shards: hash-based (even load, no hot shard)
+Across regions:   determined by residency law, NOT by hash
+```
+
+This is exactly **Strategy 3 (Directory-Based Sharding)** from earlier in this chapter — except now the directory isn't just tracking load ranges, it's tracking **legal jurisdiction**:
+
+```
+┌──────────────┬──────────────────┬─────────────┐
+│  user_id     │  Home Country     │  Shard Pool │
+├──────────────┼──────────────────┼─────────────┤
+│  84213...    │  India            │  IN-Shard-2 │
+│  91004...    │  Russia           │  RU-Shard-1 │
+│  10552...    │  USA              │  US-Shard-3 │
+│  33871...    │  Germany (EU)     │  EU-Shard-0 │
+└──────────────┴──────────────────┴─────────────┘
+
+At signup / upload time, a "directory" or "routing" service resolves:
+1. What is this creator's declared/verified home country?
+2. Which regional shard pool does that map to?
+3. Route the write (and every future read) to that pool.
+```
+
+#### How the assignment actually happens
+
+1. **At account creation**, the user's home country is captured (billing address, phone country code, government-ID verification for creators — whatever your compliance team requires) and stored as `data_residency_region` on the account.
+2. **Every upload** — video file, thumbnail, metadata row — gets routed through the directory service to the shard pool *and* blob storage bucket that match that region. The `hash(user_id) % shards_per_region` step only picks the shard *within* that pool, so you still get even load distribution.
+3. **Replication is constrained too.** This is the part teams forget. It's not enough to place the primary copy correctly — replicas and backups must also stay in-region. A India-locked row cannot be replicated to a US read-replica just because it would make US reads faster. If the law says "no copy leaves the country," that includes your DR backups.
+4. **CDN caching is generally fine** — caching an already-public video's *bytes* at an edge PoP outside the country is usually not what these laws restrict (they target storage/processing of personal data, not delivery of public content). But some stricter regimes (China) do also police where the CDN edges themselves can be.
+
+---
+
+### What happens when you watch a residency-locked video from another country?
+
+Say the video's origin (DB shard + blob bucket) is pinned to India, and you're watching from the US. Two very different things happen to **video bytes** vs **metadata**:
+
+```
+VIDEO BYTES (the actual stream)
+─────────────────────────────────
+1st US viewer:  CDN edge (US) → cache MISS
+                → fetches segments from India origin
+                → one-time round trip: ~200-250ms extra
+                → segment cached at US edge with normal TTL
+
+2nd+ US viewer: CDN edge (US) → cache HIT
+                → served locally, no India round trip ✅
+                → Same speed as any other video
+
+→ Cost of residency is paid ONCE per edge region, not per viewer.
+```
+
+```
+METADATA (title, view count, comments, likes)
+────────────────────────────────────────────
+Every read → hits the India DB shard directly
+             (no cross-region replica allowed, by law)
+
+US viewer → ~200-250ms round trip, EVERY TIME
+            (This does NOT get cheaper with more viewers —
+             there's no "metadata CDN" by default)
+```
+
+So yes — **you will see latency**, but it shows up differently depending on what you're loading:
+
+| What | First view (any region) | Later views (same region) |
+|---|---|---|
+| Video playback | Slower (~200-250ms extra to fetch from India origin, then cached) | Normal speed — served from local CDN edge |
+| View count / likes / comments | Slower, always | **Still slower** — every read hits India, no local replica |
+
+The common fix for the second row: replicate a **sanitized, non-sensitive read-model** (view count, title, thumbnail URL — nothing that identifies the creator or falls under the residency law) to global read replicas or a cache layer, while the **authoritative, legally-sensitive record** stays locked to the home country. That's the same idea as the doc's CDN section (§ Chapter 4) — separate "what must stay local" from "what's safe to spread globally" — just applied to the database layer instead of the video-delivery layer.
+
+---
+
+### 🧭 Replica Read-Routing: Which Node Actually Serves the Read?
+
+We now have two axes stacked on top of each other — **sharding** (which cluster has this data?) and **replication** (which copy do we read from?) — plus, for some data, a **residency boundary** that limits where copies are allowed to exist at all. Let's untangle how a single read request actually gets routed.
+
+#### Step 1: A shard is really a mini master-replica cluster
+
+"We have 4 shards, each replicated 3x" doesn't mean 12 identical replicas of everything — it means **each shard owns its own replica set**, holding only that shard's slice of data:
+
+```
+Shard 1 (users 0-25M)                    Shard 2 (users 25-50M)
+┌───────────────────────────┐            ┌───────────────────────────┐
+│  Master 1  (writes)         │            │  Master 2  (writes)         │
+│    ├── Replica 1a (reads)    │            │    ├── Replica 2a (reads)    │
+│    ├── Replica 1b (reads)    │            │    ├── Replica 2b (reads)    │
+│    └── Replica 1c (reads)    │            │    └── Replica 2c (reads)    │
+└───────────────────────────┘            └───────────────────────────┘
+
+A read for user_id = 12345 needs TWO routing decisions:
+1. SHARD routing: hash(12345) % 4 → Shard 2
+2. REPLICA routing: which of Master2 / Replica2a / 2b / 2c serves it?
+```
+
+#### Step 2: nearest-replica routing (for unrestricted data)
+
+Once you know the shard, the default rule is: **route reads to the nearest healthy replica, not the master.** This is the same "distance dominates latency" logic as the CDN section — just applied to database reads instead of video bytes:
+
+```
+Viewer in Singapore reads a shard whose replicas are:
+  Master     → Virginia, USA
+  Replica A  → Virginia, USA  (same DC as master)
+  Replica B  → Frankfurt, Germany
+  Replica C  → Singapore              ← nearest!
+
+Route to → Replica C
+Latency: ~5-20ms (local) vs. ~200-250ms (all the way to the master)
+```
+
+The cost you accept: **replication lag** (§ earlier in this chapter). Fine for view counts, comments, metadata — nobody notices a few hundred milliseconds of staleness there.
+
+**When to force the read to the master instead of the nearest replica:**
+
+```
+→ PRIMARY, when:
+  - Read-your-own-writes: user just uploaded/edited, and immediately
+    reloads their own channel page (same as Option 1, Replication Lag section)
+  - The read feeds a decision that can't tolerate staleness
+    (e.g. "did this payment succeed?")
+
+→ NEAREST REPLICA, for everything else:
+  - Watching videos, browsing, view counts, comments, metadata
+  - This is ~99% of actual read traffic on a platform like this
+```
+
+#### Step 3: residency-locked shards break the "nearest replica" rule
+
+For a shard pool locked to a country (India, Russia, China — § above), replicas can only exist **inside that country's borders.** You lose the option of placing a replica close to a foreign viewer, even though that's exactly what would help:
+
+```
+🇮🇳 India shard pool (residency-locked)          🌐 Global shard pool (unrestricted)
+┌─────────────────────────────────┐             ┌─────────────────────────────────┐
+│  Master (Mumbai)                  │             │  Master (Virginia)                │
+│    ├── Replica A (Mumbai)  ✅       │             │    ├── Replica A (Virginia) ✅      │
+│    ├── Replica B (Bengaluru) ✅     │             │    ├── Replica B (Frankfurt) ✅     │
+│    └── Replica C (Singapore) ❌    │             │    └── Replica C (Singapore) ✅     │
+│        NOT ALLOWED — data would     │             │        Perfectly fine — no law     │
+│        leave India's borders        │             │        restricts this              │
+└─────────────────────────────────┘             └─────────────────────────────────┘
+```
+
+So the extra replicas you *are* allowed to add (Mumbai, Bengaluru) buy you fault tolerance and load distribution **within India** — but they do nothing for a Singapore viewer's latency, because you're legally barred from putting one where it would actually help.
+
+```
+Singapore viewer reads India-locked metadata:
+  → No nearby replica exists (not allowed to exist)
+  → Forced to hit an India-based node, every time
+  → ~200-250ms round trip — does NOT improve by adding
+    more replicas, because none can be placed closer
+
+Singapore viewer reads US-hosted (unrestricted) metadata:
+  → A Singapore replica IS allowed
+  → Fast, same as any normal global read
+```
+
+This is exactly why the sanitized-global-read-model workaround from the previous section exists — it's the only lever left once "just add a nearby replica" is off the table for legal reasons.
+
+**Putting the routing logic together:**
+
+| Scenario | Serve from |
+|---|---|
+| Normal read, unrestricted data, replica nearby | Nearest replica |
+| Just wrote this data, reading it right back | Primary (temporarily) |
+| Residency-locked data, viewer in the same country | Local in-country replica |
+| Residency-locked data, viewer in a *different* country | Forced to the in-country master/replica — no local option exists — full cross-border latency, unavoidable unless a sanitized global copy exists |
+
+> *"Hash-based sharding alone only guarantees even load — it says nothing about geography. For data-residency requirements like India, Russia, or GDPR, we add a region layer on top: `shard_id = region_code + hash(user_id) % shards_per_region`. A directory service resolves each user's home region and routes uploads, replicas, and backups to stay within that region's shard pool — hash sharding still balances load within the pool. For reads, we route to the nearest healthy replica by default — same distance-driven logic as our CDN — except inside a residency-locked shard, where replicas can't be placed outside the country, so foreign viewers are forced to hit the in-country node directly. Cross-border viewers pay a one-time CDN cache-miss cost for video bytes, which then caches normally at the edge. Metadata reads stay slower permanently unless we replicate a sanitized, non-sensitive read-model globally while keeping the authoritative record residency-locked."*
 
 ---
 
