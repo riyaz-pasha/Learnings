@@ -2,7 +2,7 @@
 
 > **What this file is:** The technical reference file (`27-Design Quora-FAANG-Guide.md`) is your blueprint for interviews — containing API shapes, database schemas, trade-off tables, and cheat sheets. This file is a companion narrative: it tells the exact same engineering story as a continuous, plain-English journey. 
 >
-> We follow a fictional company named **PlantParent** (a Q&A platform for houseplant hobbyists asking questions like *"Why are my monstera's leaves turning yellow?"*). As PlantParent grows, its engineers keep running into performance and architectural bottlenecks. Every time they deploy a quick patch, that patch creates the next bottleneck — until the system evolves into the exact architecture used by top tech companies today.
+> We follow a fictional company named **CineBuff** (a Q&A platform for movie enthusiasts and cinema lovers asking questions like *"What does the spinning top at the end of Inception really mean?"* or *"Why did Christopher Nolan shoot Oppenheimer in 70mm IMAX?"*). As CineBuff grows, its engineers keep running into performance and architectural bottlenecks. Every time they deploy a quick patch, that patch creates the next bottleneck — until the system evolves into the exact architecture used by top tech companies today.
 >
 > Every bottleneck and fix in this story comes directly from real-world, documented engineering decisions:
 > - **Quora:** Migration from HBase to MyRocks for low-latency ranking storage, long-polling notification delivery, and 1-level nested comment capping.
@@ -34,7 +34,7 @@
 ## Chapter 1 — The Counter That Couldn't Count Straight
 
 ### The Initial Setup
-PlantParent starts small with a few thousand hobbyists. It uses a single MySQL database containing an `answers` table. The table stores the answer text alongside a simple integer column called `vote_count`.
+CineBuff starts small with a few thousand film lovers. It uses a single MySQL database containing an `answers` table. The table stores the answer text alongside a simple integer column called `vote_count`.
 
 ```mermaid
 erDiagram
@@ -46,7 +46,7 @@ erDiagram
     }
 ```
 
-When an answer hits 100 upvotes, the system sends the author a celebratory email: *"You hit gold status!"* 
+When an answer hits 100 upvotes, the system sends the author a celebratory email: *"You hit Gold Critic status!"* 
 
 To implement this, the backend application code runs a straightforward three-step process whenever someone clicks the upvote button:
 1. **Read** the current `vote_count` from the database.
@@ -56,11 +56,11 @@ To implement this, the backend application code runs a straightforward three-ste
 ---
 
 ### The Bottleneck: Lost Updates Under Traffic
-One afternoon, a popular gardening newsletter with 80,000 subscribers links directly to a PlantParent answer about yellow monstera leaves. 
+One afternoon, a popular movie podcast with 80,000 subscribers links directly to a CineBuff answer explaining the timeline of *Interstellar*. 
 
 In the first 12 minutes, the analytics service logs **340 individual upvote clicks**. However, when an engineer checks the database immediately after, `vote_count` shows only **217** `[illustrative]`. **123 real votes vanished into thin air.** 
 
-To make matters worse, the author receives the *"You hit gold status!"* email **three separate times**.
+To make matters worse, the author receives the *"You hit Gold Critic status!"* email **three separate times**.
 
 #### Step-by-Step Breakdown of the Race Condition:
 Why did the counter lose 123 votes? Because reading a number, modifying it in code, and writing it back requires **two separate network round trips**. 
@@ -82,7 +82,7 @@ Time T4: Voter B calculates (99 + 1 = 100) ==> Writes vote_count = 100 to DB
 ### The Fix: Atomic Increments
 Stop reading the number before updating it. Instead, tell the database engine to increment the column natively in **one single, indivisible operation**.
 
-**The Analogy:** Think of a mechanical turnstile counter at a stadium entrance. Every time a person pushes through the gate, the mechanical gear ticks up by exactly 1. Nobody has to read the number display, calculate the next number in their head, and manually repaint the dial.
+**The Analogy:** Think of a mechanical turnstile counter at a movie theater entrance. Every time a person pushes through the gate, the mechanical gear ticks up by exactly 1. Nobody has to read the number display, calculate the next number in their head, and manually repaint the dial.
 
 In SQL, this is written as:
 ```sql
@@ -124,9 +124,9 @@ Atomic increments make the counter accurate, but a new problem immediately arise
 
 The `vote_count` column sits in the **same database row** as the answer's text `body`. When database updates run, MySQL acquires an **exclusive row-level lock** on that specific row.
 
-During the newsletter traffic spike:
+During the podcast traffic spike:
 1. Incoming votes hit the row at **30 votes per second** `[illustrative]`.
-2. The original author opens the app to fix a typo in the answer's text.
+2. The original author opens the app to fix a typo in their movie breakdown.
 3. The author's edit request (`UPDATE answers SET body = ...`) is forced to wait **2.3 seconds** `[illustrative]` while the database processes the queue of row locks for incoming votes.
 
 Content updates and vote counts are completely unrelated, yet they are fighting for the exact same database row lock.
@@ -148,7 +148,7 @@ Instead:
 2. The API immediately returns a `200 OK` success response to the user.
 3. A background worker reads events off the queue and updates a dedicated counter store asynchronously.
 
-**The Analogy:** Think of a ballot drop box placed at the back of an election hall. Voters drop their paper ballots into the slot and leave immediately. They do not stand around waiting for election officials to count each ballot. Official counters collect the ballots and tally them on their own schedule in a separate room.
+**The Analogy:** Think of a ballot drop box placed outside a film festival auditorium. Moviegoers drop their paper vote stubs into the slot and walk away to catch the next screening. They do not stand around waiting for festival staff to tally each vote. Festival staff collect the stubs and count them on their own schedule in an office upstairs.
 
 ```mermaid
 flowchart LR
@@ -172,7 +172,7 @@ By decoupling the pipeline, editing an answer touches only the `answers` table, 
 ---
 
 ### The Next Bottleneck: Hot Key Contention
-Eight months later, a major home-and-garden magazine features PlantParent's monstera answer as its *"Answer of the Day."*
+Eight months later, a major movie news site features CineBuff's breakdown of *Inception* as its *"Film Theory of the Day."*
 
 Over the next 3 hours, the answer receives **8,400 upvotes**, arriving in concentrated bursts of **60 concurrent vote requests per second** `[illustrative]`. 
 
@@ -183,7 +183,7 @@ In Redis or single-threaded counter stores, atomic operations on a single key mu
 * While operating on key `answer:42:votes`, only one write executes at a time.
 * As concurrency surges to 60 requests/sec, incoming commands line up in the server socket buffer.
 * Individual operation latency rises from **<1ms to over 40ms** `[illustrative]`.
-* Users experience visible delay on the upvote button for trending answers.
+* Users experience visible delay on the upvote button for trending movie answers.
 
 ---
 
@@ -214,7 +214,7 @@ Single Counter Key:  1 key handles 60 writes/sec  (High Bottleneck)
 20 Sharded Keys:    20 keys handle ~3 writes/sec per shard (Zero Bottleneck)
 ```
 
-**The Analogy:** Instead of placing one single ballot drop box in a massive auditorium, place 20 drop boxes around the room. Voters spread out evenly across all 20 boxes, eliminating lines. Later, an election official walks around, collects the tallies from all 20 boxes, and posts the grand total on a whiteboard.
+**The Analogy:** Instead of placing one single ballot drop box outside the cinema, place 20 drop boxes around the multiplex lobby. Moviegoers spread out evenly across all 20 boxes, eliminating lines. Later, an employee walks around, collects the tallies from all 20 boxes, and posts the total score on the theater marquee.
 
 ```mermaid
 sequenceDiagram
@@ -248,7 +248,7 @@ Mobile connections frequently drop packets. If a user on a shaky 4G connection t
 3. The mobile client application automatically retries the network request 2 seconds later.
 4. The retried request reaches the server and lands on a shard as a **brand-new +1 increment**.
 
-PlantParent's telemetry reveals that **~4% of daily vote requests are client-side retries or double-taps** `[illustrative]`. Because counters only know how to increment numbers, every retry inflates the count illegally. Furthermore, the system has no way to answer the basic query: *"Has User X already voted on Answer Y?"*
+CineBuff's telemetry reveals that **~4% of daily vote requests are client-side retries or double-taps** `[illustrative]`. Because counters only know how to increment numbers, every retry inflates the count illegally. Furthermore, the system has no way to answer the basic query: *"Has User X already voted on Answer Y?"*
 
 ---
 
@@ -284,7 +284,7 @@ ON DUPLICATE KEY UPDATE vote_state = 'upvoted';
 
 If a network retry or accidental double-tap occurs, the second write simply re-asserts `vote_state = 'upvoted'`. The database row remains unchanged, making the write completely **idempotent**.
 
-**The Analogy:** Think of a guest logbook at a wedding. If you sign your name on Line 14, signing your name again on Line 14 does not add a new guest to the party. The total guest count is derived from the count of *unique registered names*, not the total number of pen strokes.
+**The Analogy:** Think of a VIP guest list for a movie premiere. If you sign your name on Line 14 of the VIP register, writing your name on Line 14 again does not add a second person to the theater. The total guest count is derived from the count of *unique registered names*, not the total number of pen strokes.
 
 ```mermaid
 stateDiagram-v2
@@ -313,9 +313,9 @@ Storing per-user state allows us to split the consistency requirements of the ap
 ### The Next Bottleneck: Votes Do Not Equal Quality
 With accurate, idempotent voting in place, a major product issue emerges.
 
-On a question asking *"How often should I water my monstera?"*, a joke answer—*"Just talk to it nicely, plants can sense fear"*—accumulates **1,240 upvotes** and ranks #1. Meanwhile, a detailed, accurate guide written by a certified horticulturist receives **340 upvotes** and sits buried at #3.
+On a question asking *"How did Thanos snap his fingers in metal armor?"*, a joke answer—*"He sprayed WD-40 inside the gauntlet first"*—accumulates **1,240 upvotes** and ranks #1. Meanwhile, a detailed, technical explanation written by a verified Marvel VFX supervisor receives **340 upvotes** and sits buried at #3.
 
-Sorting content purely by raw upvote totals rewards funny, short, or controversial posts while burying deep, authoritative answers.
+Sorting content purely by raw upvote totals rewards funny memes and quick jokes while burying deep, authoritative answers.
 
 ---
 
@@ -331,11 +331,11 @@ To rank answers accurately, we must combine multiple signals rather than relying
 
 #### Multi-Signal Inputs:
 * **Vote Metrics:** Upvotes, downvotes, and upvote-to-downvote ratios.
-* **Engagement Signals:** Total views, read-through rates, and average dwell time (did users read for 45 seconds or leave after 2 seconds?).
-* **Author Authority:** Topic-specific credibility score of the author (e.g., answers written by users with a high acceptance rate in *Botany*).
+* **Engagement Signals:** Total views, read-through rates, and average dwell time (did users read the movie analysis for 45 seconds or leave after 2 seconds?).
+* **Author Authority:** Topic-specific credibility score of the author (e.g., answers written by users with a high acceptance rate in *Film Theory* or *VFX*).
 * **Content Freshness & Edits:** Time decay algorithms and recency of updates.
 
-**The Analogy:** Judging a talent competition based purely on audience applause rewards the funniest comedian, not the most skilled musician. To select the true winner, judges use detailed scorecards that evaluate technique, originality, and execution alongside audience reaction.
+**The Analogy:** Judging an Oscar category based purely on crowd applause volume rewards the loudest comedy blockbusters over masterfully crafted dramas. Film academy judges use detailed scorecards evaluating cinematography, screenplay, sound design, and acting alongside audience reception.
 
 ```mermaid
 flowchart LR
@@ -360,7 +360,7 @@ How do major Q&A and community platforms solve ranking?
 ---
 
 ### The Trade-off: Cold-Start Latency
-Because scoring runs offline in batch jobs, a brand-new answer posted 2 minutes ago has no historical engagement data (views, dwell time, votes). 
+Because scoring runs offline in batch jobs, a brand-new movie breakdown posted 2 minutes ago has no historical engagement data (views, dwell time, votes). 
 
 It temporarily defaults to a fallback position (*"Newest Answers"*) below older scored answers until the offline batch job runs. **This is an intentional trade-off:** we accept slight delay in ranking new answers to keep heavy ML model computations off the synchronous request path.
 
@@ -374,9 +374,9 @@ It temporarily defaults to a fallback position (*"Newest Answers"*) below older 
 ## Chapter 6 — The Reply Chain Fourteen Levels Deep
 
 ### The Bottleneck: Deep Recursive Comment Trees
-Underneath answers, PlantParent allows users to post comments and reply to existing comments. 
+Underneath movie breakdowns, CineBuff allows users to post comments and reply to existing comments. 
 
-On an answer discussing tap water for ferns, a debate spirals into a reply chain **14 levels deep** `[illustrative]`. 
+On an answer debating whether *Interstellar* is scientifically accurate about black holes, a debate spirals into a reply chain **14 levels deep** `[illustrative]`. 
 
 Each comment record contains a `parent_comment_id` foreign key pointing to its parent comment.
 
@@ -408,7 +408,7 @@ flowchart TD
         R_C4 --> R_Dots["... up to 14+ levels deep ..."]
     end
 
-    subgraph PlantParent["Quora / PlantParent: Capped 1-Level Nesting"]
+    subgraph CineBuff["Quora / CineBuff: Capped 1-Level Nesting"]
         direction TB
         P_C1["Top Comment"] --> P_R1["Direct Reply A"]
         P_C1 --> P_R2["Direct Reply B"]
@@ -416,8 +416,8 @@ flowchart TD
     end
 ```
 
-* **Reddit's Choice:** Reddit supports infinite nested comment trees because deep discussion threads *are* the core product experience. They accept complex tree-building infrastructure to support this UX.
-* **Quora's Choice:** On Quora (and PlantParent), the primary value sits in the main **Answer**, while comments are secondary. Quora explicitly **caps comment nesting at 1 level** (a top-level comment and its direct replies—no grandchildren).
+* **Reddit's Choice:** Reddit supports infinite nested comment trees because deep threaded discussion *is* the core product experience. They accept complex tree-building infrastructure to support this UX.
+* **Quora's Choice:** On Quora (and CineBuff), the primary value sits in the main **Answer**, while comments are secondary. Quora explicitly **caps comment nesting at 1 level** (a top-level comment and its direct replies—no grandchildren).
 
 ---
 
@@ -428,7 +428,7 @@ Keep the `parent_comment_id` column in the database, but enforce a hard rule in 
 * If a user attempts to reply to a Level-1 reply, the API automatically attaches the new reply to the **Top-level comment**, converting deep trees into a flat list of replies.
 
 #### Trade-Off:
-Users occasionally type manual workarounds like *"@John replying to your point about tap water..."*. We accept this minor UX friction to guarantee flat $O(1)$ query patterns and predictable 15ms rendering latencies across all comment sections.
+Users occasionally type manual workarounds like *"@Christopher replying to your point about black hole physics..."*. We accept this minor UX friction to guarantee flat $O(1)$ query patterns and predictable 15ms rendering latencies across all comment sections.
 
 ---
 
@@ -440,7 +440,7 @@ Users occasionally type manual workarounds like *"@John replying to your point a
 ## Chapter 7 — The Follow List That Turned Into a Firehose
 
 ### The Bottleneck: Fan-Out Write Storms
-PlantParent allows users to follow topics (e.g., *"Succulents"*, *"Orchids"*). When a new answer is posted under a topic, it must appear in the activity feeds of all users following that topic.
+CineBuff allows users to follow movie topics (e.g., *"Sci-Fi Movies"*, *"Marvel / MCU"*). When a new answer is posted under a topic, it must appear in the activity feeds of all users following that topic.
 
 #### Initial Naive Implementation: Push-On-Write
 When a user posts an answer, a background worker fetches all followers of that topic and inserts a feed entry into every follower's timeline table.
@@ -448,7 +448,7 @@ When a user posts an answer, a background worker fetches all followers of that t
 ```
 Mathematical Breakdown of Fan-Out Bottleneck:
 
-Topic: "Succulents" has 42,000 followers [illustrative]
+Topic: "Marvel / MCU" has 42,000 followers [illustrative]
 Worker Write Capacity: 2,000 feed inserts/second [illustrative]
 
 Time to process 1 answer: 42,000 / 2,000 = 21 SECONDS
@@ -500,14 +500,14 @@ Because users read feeds constantly but write answers infrequently, heavy cachin
 
 ---
 
-## Chapter 8 — Five Hundred People Ask About Brown Leaf Tips
+## Chapter 8 — Five Hundred People Ask About Inception's Ending
 
 ### Search Architecture: Inverted Index & Query Caching
-PlantParent's initial search uses a SQL `LIKE '%brown tips%'` wildcard query across 220,000 questions `[illustrative]`. P99 latency reaches **1.8 seconds** `[illustrative]`, causing search timeouts.
+CineBuff's initial search uses a SQL `LIKE '%inception ending%'` wildcard query across 220,000 questions `[illustrative]`. P99 latency reaches **1.8 seconds** `[illustrative]`, causing search timeouts.
 
 #### The Fix:
-1. Build an **Inverted Index** (using Elasticsearch/Lucene) that tokenizes question text into inverted term lists (`"brown" -> [Q10, Q45, Q99]`).
-2. Add a **Normalized Query Cache** layer to serve frequent searches (`"brown leaf tips"`) instantly from memory.
+1. Build an **Inverted Index** (using Elasticsearch/Lucene) that tokenizes question text into inverted term lists (`"inception" -> [Q10, Q45, Q99]`).
+2. Add a **Normalized Query Cache** layer to serve frequent searches (`"inception spinning top"`) instantly from memory.
 
 ```mermaid
 sequenceDiagram
@@ -517,8 +517,8 @@ sequenceDiagram
     participant QC as Normalized Query Cache
     participant Idx as Inverted Index
 
-    U->>S: Search "brown leaf tips"
-    S->>QC: Check query cache for "brown leaf tips"
+    U->>S: Search "inception ending explained"
+    S->>QC: Check query cache for "inception ending explained"
     
     alt Cache Hit
         QC-->>S: Return cached list of question_ids
@@ -535,10 +535,10 @@ sequenceDiagram
 ---
 
 ### The Deeper Problem: Corpus Fragmentation
-Fast search exposes a major content issue: the question *"Why are my plant's leaves getting brown tips?"* has been asked **over 500 times** in slightly different variations:
-* *"Tips of leaves turning brown houseplant"*
-* *"Why do leaf edges go brown"*
-* *"Brown leaf tips on monstera"*
+Fast search exposes a major content issue: the question *"What does the spinning top at the end of Inception mean?"* has been asked **over 500 times** in slightly different variations:
+* *"Inception ending spinning top explained"*
+* *"Did Cobb dream the ending of Inception?"*
+* *"Was Cobb still in a dream at the end of Inception?"*
 
 Instead of one high-quality canonical question containing 20 great answers, the platform has 500 fragmented question threads, each containing 1 or 2 thin answers.
 
@@ -580,7 +580,7 @@ flowchart TD
 ## Chapter 9 — The Kid Asking "Are We There Yet" From the Back Seat
 
 ### The Bottleneck: Short Polling Wastes Server Capacity
-PlantParent introduces real-time notifications (*"Someone answered your question!"*). 
+CineBuff introduces real-time notifications (*"Someone answered your movie question!"*). 
 
 The mobile app polls the server every 3 seconds (`GET /updates`).
 
@@ -630,7 +630,7 @@ sequenceDiagram
 3. If an event occurs, the server immediately flushes data down the open connection and completes the response.
 4. If no event occurs after 60 seconds, the server returns a `204 No Content` timeout, and the client instantly opens a new long-poll connection.
 
-**The Analogy:** The driver tells the child: *"Quietly wait. I will speak up the exact second we pull into the driveway."*
+**The Analogy:** The driver tells the child: *"Quietly wait. I will speak up the exact second we pull into the cinema parking lot."*
 
 ---
 
@@ -648,7 +648,7 @@ sequenceDiagram
 ## Chapter 10 — The Bouncer at the Door
 
 ### The Bottleneck: Spam and Coordinated Vote Rings
-As PlantParent grows, bad actors appear: affiliate marketing bots post link-stuffed answers, and vote-buying rings manipulate rankings (**900 upvotes in 40 minutes** on a single answer from newly registered accounts `[illustrative]`).
+As CineBuff grows, bad actors appear: affiliate marketing bots post link-stuffed answers ("Watch free movies here!"), and vote-buying rings manipulate rankings (**900 upvotes in 40 minutes** on a single movie review from newly registered accounts `[illustrative]`).
 
 ---
 
@@ -688,8 +688,8 @@ stateDiagram-v2
 ## Chapter 11 — Anonymous Hides the Name, Not the Row
 
 ### Privacy & Trust Requirements
-PlantParent users request two final features:
-1. **Anonymous Posting:** Users want to ask sensitive questions without displaying their identity publicly.
+CineBuff users request two final features:
+1. **Anonymous Posting:** Users want to ask sensitive questions (e.g., *"I didn't like The Godfather, am I crazy?"*) without displaying their identity publicly.
 2. **User Blocking:** Users want to block abusive individuals from appearing in their feeds or comment sections.
 
 ---
@@ -724,7 +724,7 @@ erDiagram
 ```
 
 * **Storage:** The `answers` table always records the true `author_id` alongside an `is_anonymous = true` boolean flag. This ensures moderation tools can trace abusive posts back to real accounts.
-* **Serving:** When returning payload JSON, the API layer inspects `is_anonymous`. If `true`, it strips `author_id` and overwrites `author_name` with `"Anonymous User"` for all viewers except the author themselves.
+* **Serving:** When returning payload JSON, the API layer inspects `is_anonymous`. If `true`, it strips `author_id` and overwrites `author_name` with `"Anonymous Movie Buff"` for all viewers except the author themselves.
 
 ---
 
@@ -806,7 +806,7 @@ mindmap
 > **Answer:** Yes, it limits deep sub-debates. However, Q&A platforms prioritize the main Answer over comments. Capping nesting at 1 level guarantees flat database queries and fast, predictable rendering latencies, avoiding the recursive rendering overhead faced by platforms like Reddit.
 
 ### Q6: "Why reference Twitter's celebrity fan-out model for a topic-based platform?"
-> **Answer:** Because fan-out math is identical regardless of entity type. Whether 50,000 users follow a celebrity or a topic, writing 50,000 rows on post creation causes the exact same write-storm bottleneck. Twitter's hybrid push/pull pattern is the standard solution for high-fanout entities.
+> **Answer:** Because fan-out math is identical regardless of entity type. Whether 50,000 users follow a celebrity or a movie topic, writing 50,000 rows on post creation causes the exact same write-storm bottleneck. Twitter's hybrid push/pull pattern is the standard solution for high-fanout entities.
 
 ### Q7: "Why use a cheap lexical pass (LSH) before semantic vector embeddings?"
 > **Answer:** Computational efficiency. Comparing one new question against 220,000 existing questions using deep vector models is computationally expensive and slow. MinHash/LSH filters the corpus down to a few candidates in milliseconds, allowing vector models to run only on the shortlist.
