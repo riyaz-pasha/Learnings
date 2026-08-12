@@ -68,6 +68,8 @@ Read top to bottom like an interview transcript.
 - After transcoding into 4 renditions (480p/720p/1080p/4K), assume ~3× the source size total across renditions → **~150 TB/day** of stored video
 - Over 5 years: 150TB × 365 × 5 ≈ **~270 PB** → this scale is *why* we don't build our own storage; we lean on a blob store (S3-class) from day one.
 
+**A number worth flagging before an interviewer catches it first:** the 20,000 req/sec above is **playback *sessions*** (one manifest fetch per video-start), not the real request volume hitting storage. Once adaptive streaming (v5) is in place, each session is actually **dozens to ~100+ additional segment `GET`s** (a 10-min video at 5s segments ≈ 120 segment fetches). So the *real* backend/CDN request rate is closer to **20,000 × ~100 ≈ 2,000,000 req/sec** at peak — two orders of magnitude above the session-start number. State this distinction explicitly: it's the actual reason a CDN (v9) isn't optional at this scale, not just the manifest-fetch rate alone.
+
 **Takeaway:** this is an extreme **read-heavy** system (1000:1) with **petabyte-scale, ever-growing storage** and a **CPU-heavy async side-job** (transcoding). Every version below is a consequence of these three facts.
 
 ---
@@ -84,6 +86,8 @@ Read top to bottom like an interview transcript.
 | `POST /videos/{id}/parts/{n}` → presigned URL per part | v3 | Get a presigned URL for one multipart chunk |
 | `POST /videos/{id}/complete-multipart` | v3 | Finalize multipart upload with part ETags |
 | `GET /videos/{id}/manifest` | v5 | Fetch the HLS/DASH manifest instead of a raw file URL |
+
+**A REST convention worth stating explicitly, not just implying: every state-mutating `POST` here needs an idempotency key.** `POST /videos`, `POST /videos/{id}/complete`, and `POST /videos/{id}/complete-multipart` all create or transition a resource — a client-side timeout followed by an automatic retry (completely normal on a flaky mobile network, the exact failure mode this whole design is built around) must not create a second `videos` row or double-fire a transcode job. The standard fix: the client sends an `Idempotency-Key` header (a client-generated UUID, stable across retries of the *same* logical request); the server upserts on that key instead of blindly inserting, so a retried request returns the original result rather than creating a duplicate. `POST /videos/{id}/parts/{n}` needs the same property for a different reason — see the `upload_parts` unique-constraint fix in v3 below, which is what actually enforces it at the data layer rather than just at the API layer.
 
 ---
 
@@ -238,6 +242,8 @@ sequenceDiagram
 
 **Concrete numbers worth stating out loud:** S3's real constraint is every part must be **≥5MB except the last part**, max **10,000 parts** per object, max **5GB** per part — so for a 5GB video, ~50–1000 parts depending on chosen part size (we'd pick ~64–100MB parts for a file that size to stay well under the 10,000-part ceiling). Client-side, we cap **parallel part uploads at ~4–6 concurrent** (matches typical mobile/broadband concurrent-connection sweet spot — more parallelism competes for the same finite bandwidth and stops helping past that point).
 
+**Tying this back to our own stated max (clarifying question #1, 256GB):** the 10,000-part ceiling means our *minimum viable average part size* for the largest file we support is `256GB / 10,000 ≈ 25.6MB`. Our chosen 64–100MB part-size policy comfortably clears that floor (256GB ÷ 100MB = ~2,560 parts) — worth stating this derivation out loud rather than just quoting "64-100MB" as a magic number; it shows the part-size choice is a consequence of our own stated limits, not an arbitrary pick.
+
 **The actual resume mechanic (what happens when the app is killed mid-upload and reopened):** the client doesn't have to trust its own local bookkeeping — it can ask the blob store directly via `ListParts(upload_id)`, which returns every part the store has *durably* received an ETag for so far. Diff that against "all parts this file needs" and only the missing ones get re-uploaded. This is what makes resumability survive not just a network drop but a full app/device restart — the source of truth for "what's already uploaded" lives in the blob store, not in local app state.
 
 **Under the hood — the exact question to have a crisp answer for: "does anyone need to know the total chunk count upfront?" No, at no step:**
@@ -271,7 +277,7 @@ flowchart LR
 3. Client `PUT`s each part directly to blob storage, in parallel (bounded concurrency) — blob storage returns an `ETag` per part.
 4. Client tracks `{part_number, etag}` for every succeeded part locally (and can double-check against the blob store's own `ListParts(upload_id)` if it's unsure), so a crashed upload resumes by uploading only the parts still missing.
 5. Once all `total_parts` parts succeed, client calls `POST /videos/{id}/complete-multipart` with the full `{part_number, etag}` list, in order — **this is the first time the blob store learns how many parts there were**, implicitly, from the length of that list. It validates the numbering is contiguous and assembles the final object.
-6. Same as v2 from here: status flips to `READY` (or, from v4 onward, kicks off transcoding).
+6. Same as v2 from here: status flips straight to `READY` — v3 only changes *how* bytes get uploaded (chunked, resumable), not what happens afterward. There's still no transcoding at this point, so "done uploading" and "done, period" are the same moment, exactly like v2.
 
 ```mermaid
 sequenceDiagram
@@ -303,7 +309,7 @@ sequenceDiagram
     Note over BS: total part count is only learned here —<br/>implicitly, from the length of this list
     UP->>BS: CompleteMultipartUpload(upload_id, parts)
     BS-->>UP: final blob_url
-    UP->>DB: UPDATE status=UPLOADED
+    UP->>DB: UPDATE status=READY
 ```
 
 **Under the hood — what happens to the parts after `CompleteMultipartUpload`: stitched into one object, not kept as separate chunks.** The blob store reassembles all parts into a **single contiguous object** under the original key — the individual parts stop being separately addressable the moment completion succeeds. A `GET` on that key afterward returns it exactly as if it had been uploaded via one single `PUT`; there is no way to tell from the *outside* that it was ever chunked. Two nuances worth having ready:
@@ -320,10 +326,12 @@ New table `upload_parts` (optional — can also be reconstructed by asking the b
 
 | Column | Type | Notes |
 |---|---|---|
-| video_id | UUID (FK) | |
+| video_id | UUID (FK, indexed) | |
 | part_number | int | |
 | etag | text | |
 | status | enum | `PENDING`,`UPLOADED` |
+
+**Constraint worth stating explicitly:** `UNIQUE (video_id, part_number)`. Without it, a client retrying `POST /videos/{id}/parts/{i}` after a timeout — normal on the flaky network this whole version exists to survive — inserts a second row for the same part instead of updating the first. The unique constraint turns a naive `INSERT` into a safe `UPSERT` target, which is what actually makes the "request the same part's URL twice" case safe, not just the API-level idempotency-key convention above.
 
 **Tradeoff:** resumability and parallel-part speed, at the cost of more upload-side bookkeeping (part tracking) and a slightly more complex client. **Upload story is now closed** — everything from here is about making the *stream* side better, then scaling, then optimizing.
 
@@ -365,8 +373,8 @@ stateDiagram-v2
     READY --> [*]
 ```
 
-**Upload flow (delta from v3)**
-1–6. Same as v3 through "upload complete" (status flips to `UPLOADED`).
+**Upload flow (delta from v3):** steps 1–5 are the identical multipart mechanics from v3 (chunk, presign each part, upload, complete-multipart) — nothing about *how bytes get uploaded* changes here. What changes is **what "complete" means**: in v3, completion meant the video was immediately watchable, so it went straight to `READY`. Now there's real work left to do before it's watchable, so completion instead lands on `UPLOADED` — an intermediate state that didn't need to exist until this version introduced something that happens *after* upload finishes.
+6. `POST /videos/{id}/complete-multipart` → status flips to `UPLOADED` (not `READY` — that's the v3→v4 behavior change, worth calling out explicitly rather than letting it look accidental).
 7. Before queueing anything expensive, a worker runs a cheap **validation pass** — inspect the container/codec (e.g. via `ffprobe`), confirm it's actually a playable video, check duration against our cap (clarifying question #1), run a policy/hash check. Status → `VALIDATING`. Fail fast here; don't burn transcode CPU on a corrupt or rejected upload.
 8. Upload Service (or the validation worker) publishes a **transcode job** message onto a queue.
 9. A pool of **Transcode Workers** consume the queue, pull the source file from Blob Storage, run ffmpeg to produce each rendition, and push each rendition to Blob Storage (same or separate bucket).
@@ -413,29 +421,44 @@ sequenceDiagram
 
 **DB schema (delta from v3):**
 
-`videos.status` gains `UPLOADED`, `TRANSCODING`.
+`videos.status` gains `UPLOADED`, `VALIDATING`, `TRANSCODING` (matching the state diagram above — easy to forget `VALIDATING` since it's a short-lived state, but it needs its own value if we want to show a viewer *why* their upload is stuck, e.g. "checking file" vs. "encoding").
 
 New table `renditions`
 
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID (PK) | |
-| video_id | UUID (FK → videos.id) | |
+| video_id | UUID (FK → videos.id, indexed) | |
 | resolution | enum | `480p`,`720p`,`1080p`,`4K` |
 | blob_url | text | |
 | status | enum | `PENDING`,`PROCESSING`,`READY`,`FAILED` |
 
-**Queue message schema** (`transcode-jobs` queue)
+**Constraint worth stating explicitly:** `UNIQUE (video_id, resolution)`. This is exactly what makes the earlier claim "the worker's DB write is an idempotent upsert on `(video_id, resolution)`" (§4 under-the-hood, at-least-once delivery) actually true rather than aspirational — a redelivered `video-transcode-jobs` message re-running the same `(video_id, resolution)` transcode must update the existing row, not insert a duplicate. Also index `videos.status` — every operational query this system needs beyond "fetch one video" (e.g. "find uploads stuck in `TRANSCODING` for >1hr" for the ops dashboard) filters on status.
 
-```json
+**Topic and message schema:**
+
+- **Topic:** `video-transcode-jobs`
+- **Kafka record key:** `video_id` — note this is the *broker-level* record key (what Kafka actually partitions on), not a field inside the JSON payload. Getting this distinction right matters: putting `"partition_key": "video_id"` inside the value body is a common but meaningless gesture — Kafka never reads inside your payload to decide partitioning, only the record key (set separately by the producer call) does that.
+- **Producer:** Upload Service (after the validation pass, not before — we don't want to burn queue capacity on jobs that'll just get rejected).
+- **Consumer group:** `transcode-workers` (the worker pool from the diagram above).
+- **Delivery semantics:** at-least-once — a redelivered message must be safe to reprocess. This is why the worker's DB write is an **idempotent upsert on `(video_id, resolution)`**, not a blind `INSERT` (enforced by the `UNIQUE (video_id, resolution)` constraint above): reprocessing the same job twice must not create duplicate rendition rows.
+- **Failure handling:** an `attempt` counter in the payload, incremented by the worker on each retry; after a configured max (e.g. 5), the worker publishes to a **dead-letter topic** `video-transcode-jobs-dlq` instead of retrying forever — a job stuck in an infinite retry loop (e.g. a permanently-corrupt source file that somehow passed validation) would otherwise silently consume worker capacity forever with no operator visibility. The DLQ is what an ops dashboard actually watches.
+
+**Kafka record:**
+```
+key:   "{video_id}"          ← this is what Kafka partitions on
+value (JSON):
 {
   "job_id": "uuid",
   "video_id": "uuid",
   "source_blob_url": "s3://raw-videos/abc.mp4",
   "requested_resolutions": ["480p", "720p", "1080p", "4K"],
+  "attempt": 1,
   "enqueued_at": "2026-08-12T10:00:00Z"
 }
 ```
+
+**A second topic exists alongside this one** — `video-lifecycle-events`, published whenever a video's status changes, fanning out to search indexing, notifications, and CDN pre-warm decisions without those services needing to know anything about Upload/Transcode internals. See §8 for its schema and consumers — it's the backbone behind the "if time permits" features in §6, not a separate P0 concern, so it's covered there rather than repeated per-version.
 
 **Tradeoff:** we now pay upfront CPU cost per upload (transcode once) instead of per view — correct given 1000:1 read:write. Cost: added system complexity (queue, workers, per-rendition status tracking) and a delay between "upload complete" and "video actually watchable in all resolutions."
 
@@ -604,8 +627,10 @@ sequenceDiagram
         LB->>UP2: failover to DC-B
     end
     UP1->>DB: read (local replica)
-    DB-->>UP1: metadata
-    UP1->>BS: fetch manifest/segments
+    DB-->>UP1: metadata (incl. master_manifest_url)
+    UP1-->>U: metadata + manifest url
+    Note over U,BS: Client still fetches segments DIRECTLY from Blob Storage<br/>(the v2/v5 presigned-URL model — UP/LB are never in this path)
+    U->>BS: GET manifest + segments (direct)
     BS-->>U: stream
 ```
 
@@ -660,6 +685,8 @@ sequenceDiagram
 **DB schema:** add `videos.home_region` and `renditions.replicated_regions` (set) so we know if a viewer's region has the bytes locally yet, or must temporarily pull cross-region.
 
 **Tradeoff:** massively improves latency for a global user base and adds a second failure domain (regional disaster ≠ total outage). Cost: cross-region replication lag (a video may not be instantly available everywhere), and real distributed-systems complexity — mitigated here since a given video's metadata is only ever written from its home region (no multi-writer conflicts).
+
+**Drawback (why v8):** even with a copy of the data sitting in-region, every single metadata read and every manifest fetch still round-trips to the regional DB or regional blob store. A hot, viral video still hammers the same DB row and the same blob object on every one of its millions of views *within that region* — multi-region solved *distance*, not *repeat-read volume*. We need something in front of both that absorbs repeat reads without going back to the DB/blob store at all.
 
 ---
 
@@ -832,7 +859,7 @@ erDiagram
 
 ## 6. If time permits — other features (light sketch, not full designs)
 
-- **Search:** index video metadata (title, description, tags, transcript) into a search engine (Elasticsearch/OpenSearch). Write path: on video publish, push a document to the index (async, via the same kind of queue as transcoding). Read path: `GET /search?q=...` hits the search cluster directly, not the metadata DB — search is a fundamentally different query shape (full-text, ranking) than a metadata-DB point lookup.
+- **Search:** index video metadata (title, description, tags, transcript) into a search engine (Elasticsearch/OpenSearch). Write path: the Search Indexer subscribes to the `video-lifecycle-events` topic (§4's v4 and §8) and pushes a document to the index whenever a video reaches `READY` — no direct coupling to Upload/Transcode services. Read path: `GET /search?q=...` hits the search cluster directly, not the metadata DB — search is a fundamentally different query shape (full-text, ranking) than a metadata-DB point lookup.
 - **Like:** a `likes` table (`user_id`, `video_id`, unique constraint) plus a denormalized `like_count` on the video row, incremented via an async counter/queue (not a synchronous DB increment on every like — hot videos would create write contention on one row). Classic **sharded counter** pattern.
 - **Comment:** a `comments` table keyed by `video_id`, paginated by `created_at`/cursor; at scale, comments for a single viral video are themselves a read-heavy, high-fanout problem — same shape as the top-level system, one level down.
 - **Recommendation:** an offline/batch ML pipeline (watch history + engagement signals → candidate generation → ranking) that pre-computes a "home feed" per user, refreshed periodically (not on every request) and served from a cache — recommendation is a **read-mostly, precomputed** system, not something we compute live per request.
@@ -852,3 +879,59 @@ erDiagram
 | v7 | Multi-region | Global low latency + regional fault isolation | Every read still round-trips to DB/blob store |
 | v8 | Cache (Redis) for metadata & manifests | Huge read-heavy system — avoid redundant DB/blob hits | Bytes still travel from our region to every viewer |
 | v9 | CDN for manifests & segments | Serve bytes from an edge near the viewer — the actual scaling unlock | (End of core Upload/Stream design; extend into Search/Like/Comment/Recommendation next) |
+
+---
+
+## 8. Technology choices — DB, Queue, Cache, and why
+
+Naming the concrete tech, and justifying each choice against the *actual access patterns this design produces* (not just "use Postgres for relational data" as a reflex) — this is the question interviewers ask right after the architecture is on the board.
+
+### Metadata DB → relational (MySQL/PostgreSQL), sharded once table size demands it
+
+**Why relational, not NoSQL:** the schema has real foreign-key relationships (`videos` → `renditions` → `upload_parts`), and every upload goes through a genuine multi-step state machine (`PENDING_UPLOAD → UPLOADING → UPLOADED → VALIDATING → TRANSCODING → READY/FAILED`, v4's state diagram). Losing a transition mid-write — e.g. a video flips to `READY` while one rendition row is still `PENDING` — is exactly the class of bug ACID transactions prevent for free. A NoSQL store makes you hand-roll that guarantee at the application layer for no benefit here.
+
+**Why sharding isn't about write throughput:** our own capacity math (§2) puts write QPS at ~20/sec average — trivially handled by a single primary. The real pressure to shard is (a) unbounded row-count growth over years (billions of videos), and (b) needing regional read replicas once v6/v7 exist. Concretely: MySQL/PostgreSQL fronted by **Vitess** (or Citus for Postgres) once table size justifies it, sharded by `video_id` hash — keeps one video's rows (and its renditions) on the same shard, so the common "fetch this video + its renditions" query never crosses a shard boundary. This is also the real, documented choice YouTube's own infrastructure makes.
+
+**If an interviewer pushes for NoSQL anyway:** DynamoDB/Cassandra are workable — access is almost entirely a point lookup by `video_id` — but you give up the free cross-table transaction guarantee above and must reimplement it (e.g. via a saga or a status-reconciliation job). Given write volume never demanded giving that up, it's not the right trade here.
+
+### Queue → Kafka (log-based), not a plain point-to-point queue (SQS/RabbitMQ)
+
+**Why log-based specifically:** this design has more than one independent consumer type reacting to the same event — transcode workers, plus (once §6 is in scope) search indexing, notifications, and CDN pre-warm decisions. A point-to-point queue (SQS-style) deletes a message once *one* consumer acks it — fine for a single job queue, wrong once multiple unrelated services need to see the same event. A log-based broker lets each consumer group track its own offset independently, and a consumer that was down can replay from where it left off instead of losing messages that "someone else" already consumed.
+
+**Kafka record key = `video_id`** on every topic below — guarantees all events for one video land on the same partition, processed in order by whichever consumer instance owns it. Without this, two status-update messages for the same video could land on different workers and get processed out of order. (Worth being precise here: this is the broker-level record key set by the producer call, not a field inside the JSON payload — see v4's note on the same point.)
+
+- **`video-transcode-jobs`** — producer: Upload Service (post-validation); consumer group: `transcode-workers`; at-least-once delivery, so the worker's DB write must be an idempotent upsert on `(video_id, resolution)` (schema + DLQ policy in v4).
+- **`video-lifecycle-events`** — producer: whichever service just changed a video's status; consumers, each in its **own** consumer group so one slow subscriber never blocks another: Search Indexer, Notification Service, CDN pre-warm/popularity tracker, Analytics. This is the fan-out backbone behind every §6 feature — Upload/Transcode never need to know search or notifications exist, they just publish one event.
+  ```
+  key:   "{video_id}"
+  value (JSON):
+  {
+    "event_id": "uuid",
+    "video_id": "uuid",
+    "event_type": "STATUS_CHANGED",
+    "from_status": "TRANSCODING",
+    "to_status": "READY",
+    "occurred_at": "2026-08-12T10:11:10Z"
+  }
+  ```
+  `event_id` exists specifically so consumers can de-duplicate — at-least-once delivery means Search Indexer et al. may see the same event twice, and each consumer should be tracking "have I already applied this `event_id`" rather than assuming exactly-once.
+
+### Cache → Redis, not Memcached
+
+**Why Redis over plain Memcached:** we need per-key TTLs with different values (1h metadata / 24h manifest, v8) and horizontal scaling via Redis Cluster's built-in consistent hashing. Memcached is a perfectly reasonable, operationally simpler alternative *if* the cache stays purely key→value — the deciding factor here is that Redis's richer data structures (`INCR` for buffered counters, sorted sets, etc.) are exactly what §6's Like counters need next, so picking Redis now avoids running two different caching systems later for what's conceptually the same layer.
+
+**Sharding:** by `video_id` hash across the Redis Cluster — same reasoning as the metadata DB, keeps one video's cache entries colocated so a single request never needs a cross-node lookup.
+
+**Data structure — Hash, not a serialized-JSON String, for `video:meta:{video_id}`.** v8 wrote this as a plain `SET`/`GET` of a JSON blob for simplicity, but the more idiomatic Redis choice is `HSET video:meta:{id} title "..." status "READY" master_manifest_url "..."` / `HGETALL video:meta:{id}` — a Hash. Two concrete reasons: (1) updating just `status` (which changes far more often than `title`) becomes a single `HSET video:meta:{id} status TRANSCODING`, not a full read-modify-write-serialize-write cycle on the whole blob, which is both slower and racier under concurrent writers; (2) a consumer that only needs `status` can `HGET` that one field without deserializing the whole object. Plain String+JSON is fine for the manifest-content cache (`video:manifest:{video_id}`) since that's genuinely opaque, atomic, immutable content with no sub-fields worth reading individually.
+
+**Cache stampede protection — a real gap worth naming, not just TTL tuning.** When a *popular* video's `video:meta:{video_id}` key expires, potentially thousands of concurrent requests for that same viral video can all miss at once and hammer the DB simultaneously — the exact "hot key" scenario this design keeps calling out (v9's whole justification, §6's sharded-counter pattern). Standard fix: a short-lived lock key (`SET video:meta:lock:{video_id} 1 NX EX 5`) — the first request to miss acquires the lock and repopulates the cache; every other concurrent miss sees the lock already held and either waits briefly or serves slightly-stale data instead of all hitting the DB at once. A cheaper complementary trick: jitter the TTL (`3600 + random(0, 300)` seconds) so keys for different videos don't all expire in the same instant, spreading the miss load over time instead of a synchronized wave.
+
+**Eviction policy:** `allkeys-lru` (or `volatile-lru` since every key here already carries a TTL) — under memory pressure Redis evicts least-recently-used keys automatically rather than us hand-managing capacity; this is safe precisely because every cached value here has an authoritative source of truth to fall back to (DB or blob storage) — nothing in this cache layer is the only copy of anything.
+
+### Blob storage → S3-class object storage (already justified throughout v1→v9)
+
+Restating briefly for completeness: this is the one storage tier that isn't a "pick a database" decision at all — object storage's 11-nines replication (v2) is a property we get for free from the store itself, with no equivalent durability story to build ourselves.
+
+### What we deliberately did *not* reach for
+
+**A graph database.** Nothing in Upload/Stream (or even the §6 sketch) has a graph-shaped access pattern — no traversal, no "friends of friends." If Search/Recommendation ever grow past their light sketch, the next tools would be a dedicated search engine (Elasticsearch/OpenSearch, for full-text + ranking) and a vector/embedding store (for recommendation candidate generation) — neither of which is a relational-vs-NoSQL-vs-graph choice; they're a different tool for a fundamentally different access pattern, and naming that distinction is worth more in an interview than defaulting to "graph DB for a social platform" out of pattern-matching habit.
