@@ -77,6 +77,35 @@ Time T4: Voter B calculates (99 + 1 = 100) ==> Writes vote_count = 100 to DB
 * **Outcome 1 (Lost Vote):** Voter B's write lands last and overwrites Voter A's write. Two users clicked upvote, but the database counter only incremented by 1.
 * **Outcome 2 (Duplicate Emails):** Three concurrent requests (Voter A, Voter B, Voter C) all read `99` at T1, calculated `100` at T2, and independently triggered three separate email notifications.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor VoterA as Voter A
+    actor VoterB as Voter B
+    actor VoterC as Voter C
+    participant DB as MySQL Database
+    participant Email as Email Worker
+
+    Note over VoterA, Email: Timeline of Lost Updates & Duplicate Emails
+    VoterA->>DB: T1: Read vote_count (Returns 99)
+    VoterB->>DB: T2: Read vote_count (Returns 99 - Stale!)
+    VoterC->>DB: T2: Read vote_count (Returns 99 - Stale!)
+    
+    Note over VoterA, VoterC: App calculates: 99 + 1 = 100
+    
+    par Email Side Effects (Triggered 3 Separate Times!)
+        VoterA->>Email: 100 reached! Send "Gold Critic" Email #1
+        VoterB->>Email: 100 reached! Send "Gold Critic" Email #2
+        VoterC->>Email: 100 reached! Send "Gold Critic" Email #3
+    end
+
+    VoterA->>DB: T3: Write vote_count = 100
+    VoterB->>DB: T4: Write vote_count = 100 (Overwrites Voter A!)
+    VoterC->>DB: T4: Write vote_count = 100 (Overwrites Voter B!)
+
+    Note over DB: Result: 3 clicks occurred, but DB shows 100 (+1 vote instead of +3).<br/>123 total votes lost during spike!
+```
+
 ---
 
 ### The Fix: Atomic Increments
@@ -131,6 +160,23 @@ During the podcast traffic spike:
 
 Content updates and vote counts are completely unrelated, yet they are fighting for the exact same database row lock.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor V1 as Voters (30 votes/sec)
+    actor Author as Answer Author
+    participant DB as MySQL Row Lock Queue
+
+    V1->>DB: Atomic INCR vote_count (Acquires exclusive row lock on answer #42)
+    activate DB
+    Author->>DB: UPDATE answers SET body = 'fixed typo' (Request Queued)
+    Note over Author, DB: Author edit request waits behind 30 votes/sec queue...
+    Note over Author, DB: Lock Wait Duration: 2.3 Seconds!
+    DB-->>V1: Vote ACK
+    deactivate DB
+    Note over Author, DB: Author edit finally executes after vote lock releases
+```
+
 ---
 
 ### How to Explain This in an Interview
@@ -184,6 +230,22 @@ In Redis or single-threaded counter stores, atomic operations on a single key mu
 * As concurrency surges to 60 requests/sec, incoming commands line up in the server socket buffer.
 * Individual operation latency rises from **<1ms to over 40ms** `[illustrative]`.
 * Users experience visible delay on the upvote button for trending movie answers.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Voters as 60 Concurrent Voters / Sec
+    participant Socket as Redis Socket Buffer
+    participant Engine as Single-Threaded Engine
+
+    loop 60 requests/sec target single key "answer:42:votes"
+        Voters->>Socket: Send INCR answer:42:votes
+        Note over Socket, Engine: Incoming commands queue sequentially in socket buffer
+        Socket->>Engine: Execute INCR #1 (<1ms)
+        Socket->>Engine: Execute INCR #2 (<1ms)
+        Note over Voters, Engine: Socket queue delay inflates latency from <1ms to 40ms!
+    end
+```
 
 ---
 
@@ -249,6 +311,25 @@ Mobile connections frequently drop packets. If a user on a shaky 4G connection t
 4. The retried request reaches the server and lands on a shard as a **brand-new +1 increment**.
 
 CineBuff's telemetry reveals that **~4% of daily vote requests are client-side retries or double-taps** `[illustrative]`. Because counters only know how to increment numbers, every retry inflates the count illegally. Furthermore, the system has no way to answer the basic query: *"Has User X already voted on Answer Y?"*
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor App as Mobile App (Shaky 4G)
+    participant VS as Vote Service
+    participant Shard as Counter Shard #7
+
+    App->>VS: 1. Click Upvote button
+    VS->>Shard: 2. INCR shard #7 (99 -> 100)
+    VS-->>App: 3. Return 200 OK (Response packet dropped on 4G network!)
+    
+    Note over App: App times out waiting for ACK,<br/>automatically retries 2s later
+    
+    App->>VS: 4. Retry Upvote request (Duplicate)
+    VS->>Shard: 5. INCR shard #7 (100 -> 101)
+    
+    Note over Shard: Duplicate Vote Counted! 1 user counted as 2 votes.
+```
 
 ---
 
@@ -364,6 +445,26 @@ Because scoring runs offline in batch jobs, a brand-new movie breakdown posted 2
 
 It temporarily defaults to a fallback position (*"Newest Answers"*) below older scored answers until the offline batch job runs. **This is an intentional trade-off:** we accept slight delay in ranking new answers to keep heavy ML model computations off the synchronous request path.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Author as Movie Critic
+    participant DB as MySQL Shard
+    participant App as Serving API
+    participant ML as Offline ML Batch Pipeline
+    participant KV as MyRocks Rank Store
+
+    Author->>DB: t=0: Post new deep-dive review
+    App->>DB: t=1m: Render question page
+    Note over App: No rank_score exists yet in MyRocks!<br/>Falls back to "Newest First" position.
+    
+    ML->>DB: t=15m: Batch job reads engagement signals (views/dwell time)
+    ML->>KV: t=16m: Write computed rank_score to MyRocks
+    
+    App->>KV: t=17m: Render question page
+    KV-->>App: Return precomputed rank_score (Promotes answer to #1)
+```
+
 ---
 
 ### How to Explain This in an Interview
@@ -459,6 +560,24 @@ $$\text{Total Inserts} = 5 \times 42,000 = 210,000 \text{ writes}$$
 $$\text{Queue Backlog Time} = \frac{210,000}{2,000} = 105 \text{ seconds (1.75 minutes)}$$
 
 Users' feeds lag behind real-time activity by several minutes because workers cannot write feed records fast enough.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Author as Popular Author
+    participant Queue as Kafka Fan-Out Queue
+    participant Worker as Fan-Out Worker (2,000 writes/sec)
+    participant Feeds as 42,000 Follower Feeds
+
+    Author->>Queue: Post Answer under "Marvel / MCU" (42k followers)
+    
+    loop 21 Seconds Execution Window
+        Queue->>Worker: Fetch batch of follower IDs
+        Worker->>Feeds: Write 2,000 feed rows / sec
+    end
+    
+    Note over Queue, Feeds: 1 post takes 21 seconds to propagate.<br/>5 concurrent posts = 105s queue backlog!
+```
 
 ---
 
@@ -618,7 +737,7 @@ sequenceDiagram
         deactivate S
         C->>S: GET /updates (Re-open Long Poll immediately)
     else Timeout Reached (60s elapsed)
-        S-->>C: 204 No Content (Timeout)
+        S-->>C: 204 No Content (Connection Timeout)
         deactivate S
         C->>S: GET /updates (Re-open Long Poll immediately)
     end
@@ -678,6 +797,26 @@ stateDiagram-v2
    * **Score < 0.50:** Content remains live without intervention.
 3. **Offline Graph Clustering (Anti-Vote Manipulation):** Detects vote rings by identifying accounts that share IP subnets, registration timestamps, and vote-clustering behavior (accounts that exclusively vote on each other's posts). Suspicious votes are **down-weighted in ranking algorithms silently** rather than deleted outright, preventing attackers from gaming the detection system.
 
+```mermaid
+flowchart TD
+    subgraph Ring["Coordinated Vote Ring (Same IP Subnet / Cluster)"]
+        Acc1["Bot Account 1\n(Created Today)"]
+        Acc2["Bot Account 2\n(Created Today)"]
+        Acc3["Bot Account 3\n(Created Today)"]
+    end
+    
+    Target["Target Answer\n(900 upvotes in 40 mins)"]
+    
+    Acc1 -->|Upvote| Target
+    Acc2 -->|Upvote| Target
+    Acc3 -->|Upvote| Target
+    
+    Target --> GraphAnalyzer["Offline Velocity Monitor & Graph Cluster Analyzer"]
+    
+    GraphAnalyzer --> Detect{"Pattern Detected?\n(Same IP Subnet + Vote Cluster)"}
+    Detect -->|Yes| Downweight["Down-weight votes in Rank Score\n(Keep public UI uninterrupted, queue account for review)"]
+```
+
 ---
 
 ### How to Explain This in an Interview
@@ -721,6 +860,26 @@ erDiagram
         bigint blocked_id FK
         timestamp created_at
     }
+```
+
+```mermaid
+flowchart TD
+    subgraph DB["Database Row (Always Stores Real Author ID)"]
+        Row["answer_id: 42\nauthor_id: 8091 (Real User ID)\nis_anonymous: true\nbody: 'I didn't like The Godfather'"]
+    end
+
+    API["API Gateway / Response Transformer"]
+    
+    Row --> API
+    
+    API --> Viewer1{"Viewer = Author (ID 8091)?"}
+    Viewer1 -->|Yes| Public1["Render: 'By You (Anonymous to others)'"]
+    
+    API --> Viewer2{"Viewer = General Public?"}
+    Viewer2 -->|Yes| Public2["Render: 'By Anonymous Movie Buff'\n(author_id masked)"]
+    
+    API --> Mod{"Viewer = Admin / Moderator?"}
+    Mod -->|Yes| AdminView["Render: 'Author ID: 8091'\n(Full auditability preserved)"]
 ```
 
 * **Storage:** The `answers` table always records the true `author_id` alongside an `is_anonymous = true` boolean flag. This ensures moderation tools can trace abusive posts back to real accounts.
