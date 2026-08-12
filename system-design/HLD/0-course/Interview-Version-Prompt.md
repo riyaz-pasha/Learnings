@@ -4,11 +4,21 @@ A reusable prompt for turning any system-design problem into an **Interview-Vers
 
 **Core mental model:** scope to P0 functional requirements only, then build the architecture as a strict version ladder — v1 (naive) → v2 → ... → vN — where **every version exists because the previous version's drawback demanded it**. The version count is **not fixed** — evolve as many versions as the problem's P0 flows genuinely require, don't pad and don't truncate. Each version must be detailed enough to survive not just an interviewer's follow-up but your own later "wait, how does that actually work?" — which is where most real gaps in a first pass get found (that's what the audit pass below exists for).
 
+**Style lesson baked into this version:** the first real run of this prompt produced technically correct but dense output — long sentences chained together with multiple em-dashes, parentheticals nested inside parentheticals, jargon strung end to end. It read as "hard English," not something a person could scan quickly. Depth and plain language aren't actually in tension; that first draft was optimizing for cramming information into fewer sentences instead of writing sentences a person can read at normal speed. The style rule below is now the first instruction inside the prompt, not an afterthought — it outranks everything else if they ever conflict.
+
 ---
 
 ## The prompt (verbatim, swap `{PROBLEM}` and `{OUTPUT}`)
 
 > Design `{PROBLEM}` as an **Interview-Version** companion doc — not a narrative, not a learning rewrite. The audience is me, about to walk into an interview, and I need to be able to (a) evaluate whether a proposed architecture actually satisfies the P0 requirements, and (b) answer "how does that work under the hood" with no assumptions left unstated.
+>
+> **Write it in plain, human English — this rule outranks every other instruction below if they ever conflict.** Short sentences. One idea per sentence. Explain it the way you'd talk someone through it out loud, not the way a spec is written. Concretely:
+> - If a sentence needs two em-dashes and a parenthetical to say one thing, that's not "precise," it's overloaded — split it into two or three plain sentences instead.
+> - Never nest a parenthetical inside another parenthetical. If the aside needs its own aside, it's a new sentence.
+> - Say a stacked string of qualifiers once, plainly, instead of piling on ("genuinely," "explicitly," "deliberately," "necessarily" in the same sentence is a sign to cut, not season further).
+> - Prefer the everyday word over the formal one — "use" not "utilize," "show" not "demonstrate," "because" not "given that."
+> - Read each paragraph out loud in your head as you write it. If you'd run out of breath before the sentence ends, it's too long — break it.
+> - Being exact and being easy to read are not in tension. Cut the sentence, don't cut the accuracy.
 >
 > **Scope discipline:** open by scoping to **P0 functional requirements only**. State the scoping line the way you'd say it to an interviewer. Answer every clarifying question the interviewer would reasonably ask (limits, consistency needs, single-region vs. global, read:write ratio, etc.) with a concrete assumed answer up front — these answers must then be honored consistently by every later version, not contradicted, and later derived numbers (e.g. a chunk-size policy, a partition count) should visibly trace back to them rather than appearing as disconnected magic numbers.
 >
