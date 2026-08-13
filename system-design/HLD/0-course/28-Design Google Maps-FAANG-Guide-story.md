@@ -38,18 +38,18 @@ Every chapter below shows how this simple pattern scales up to solve increasingl
 
 ---
 
-## Chapter 1 — The Night ParcelPath Tried to Run Dijkstra Across All of Texas
+## Chapter 1 — The Night ParcelPath Tried to Run Dijkstra Across All of Telangana
 
 ### The Initial Setup
-In the early days, ParcelPath is a small delivery-routing startup based in Austin, Texas. Instead of paying third-party mapping APIs per request, they decide to build their own routing engine. 
+In the early days, ParcelPath is a small delivery-routing startup based in Hyderabad, Telangana. Instead of paying third-party mapping APIs per request, they decide to build their own routing engine. 
 
 They start with the simplest possible design:
 1. Load the **entire road network** into server memory as a single graph.
 2. In this graph, **intersections are vertices (nodes)**, and **road segments are edges**.
 3. Run **Dijkstra's Shortest Path algorithm** from scratch whenever a truck needs a route.
 
-### Why It Worked in Austin
-Austin’s road network is relatively compact:
+### Why It Worked in Hyderabad
+Hyderabad’s road network is relatively compact:
 - **Vertices (Intersections):** ~45,000 `[illustrative]`
 - **Edges (Road Segments):** ~115,000 `[illustrative]`
 - **Dijkstra Execution Time:** ~70 milliseconds per route query.
@@ -59,8 +59,8 @@ A single decent server handles 150 requests per second with room to spare. The e
 
 ---
 
-### Expanding to all of Texas: The Performance Wall
-Six months later, ParcelPath expands nationwide, starting with statewide coverage across Texas. Delivery trucks now route out of major hubs in Austin, Houston, Dallas, and San Antonio.
+### Expanding to all of Telangana: The Performance Wall
+Six months later, ParcelPath expands nationwide, starting with statewide coverage across Telangana. Delivery trucks now route out of major hubs in Hyderabad, Khammam, Warangal, and Mahbubnagar.
 
 The road network graph is no longer a single city—it covers an entire state:
 - **Vertices (Intersections):** ~1.8 million `[illustrative — roughly 40x the size of a mid-sized metropolitan graph]`.
@@ -78,9 +78,9 @@ Let me break down the hardware math to show why this breaks down:
 
 ```mermaid
 flowchart LR
-    A["Route Request Arrives<br/>(Austin to Round Rock)"] --> B["Load Full Graph:<br/>1.8 Million Intersections"]
+    A["Route Request Arrives<br/>(Hyderabad to Medchal)"] --> B["Load Full Graph:<br/>1.8 Million Intersections"]
     B --> C["Run Dijkstra Algorithm<br/>From Scratch"]
-    C --> D["Explore Outward in<br/>All Directions Across Texas"]
+    C --> D["Explore Outward in<br/>All Directions Across Telangana"]
     D --> E["3.4 Seconds Later:<br/>Answer Computed<br/>(Only needed 20 km of road)"]
 
     style A fill:#01579b,stroke:#00324d,color:#ffffff,stroke-width:2px
@@ -91,26 +91,26 @@ flowchart LR
 ```
 
 ### Why Did This Latency Spike Happen?
-Dijkstra does not know where the destination is relative to the origin. It explores all directions equally. Even if a driver only needs to travel 20 kilometers north from Austin to Round Rock, Dijkstra explores hundreds of miles west toward El Paso and east toward Houston before completing.
+Dijkstra does not know where the destination is relative to the origin. It explores all directions equally. Even if a driver only needs to travel 20 kilometers north from Hyderabad to Medchal, Dijkstra explores hundreds of kilometers northwest toward Nizamabad and east toward Khammam before completing.
 
 ---
 
 ### The Solution: Segmentation (The Atlas Analogy)
 Instead of holding the entire state as one massive graph, **segment the map into smaller grid tiles**, just like pages in a printed paper atlas.
 
-- You never unfold a 10-foot map of the United States just to navigate across your neighborhood. You open the specific page containing your city.
+- You never unfold a 10-foot map of the whole country just to navigate across your neighborhood. You open the specific page containing your city.
 - You only turn to an adjacent page when your route explicitly crosses the boundary of your current page.
 
-ParcelPath splits Texas into **5 mile × 5 mile geographic segments**:
-- Austin becomes a grid of ~30 segments.
-- The entire state of Texas is partitioned into a few thousand segments.
+ParcelPath splits Telangana into **5 mile × 5 mile geographic segments**:
+- Hyderabad becomes a grid of ~30 segments.
+- The entire state of Telangana is partitioned into a few thousand segments.
 - Each segment graph is stored independently in memory on routing servers.
-- Inside a single 5×5 mile segment, running Dijkstra is fast again — back down near that **original ~70ms** from Chapter 1's early Austin-only days. That's not a coincidence: one segment is roughly the same size as Austin's whole original graph was, so it gets roughly the same latency. The graph a query has to touch shrank by about 1/2,000th, and the latency shrank right along with it.
+- Inside a single 5×5 mile segment, running Dijkstra is fast again — back down near that **original ~70ms** from Chapter 1's early Hyderabad-only days. That's not a coincidence: one segment is roughly the same size as Hyderabad's whole original graph was, so it gets roughly the same latency. The graph a query has to touch shrank by about 1/2,000th, and the latency shrank right along with it.
 
 ---
 
 ### The New Problem: Cross-Segment Routing
-Intra-city local deliveries inside one segment run lightning-fast. But ParcelPath introduces an overnight shipping route from **Austin to Dallas (~200 km, straight-line)**.
+Intra-city local deliveries inside one segment run lightning-fast. But ParcelPath introduces an overnight shipping route from **Hyderabad to Warangal (~150 km, straight-line)**.
 
 This route crosses **~40 individual map segments**:
 - Running Dijkstra 40 separate times independently inside each segment and stitching the edges together by guesswork fails completely.
@@ -135,14 +135,14 @@ To route between different segments without loading the entire state graph, we u
 
 ```mermaid
 flowchart LR
-    subgraph SegA["Segment A: Austin-North"]
+    subgraph SegA["Segment A: Hyderabad-North"]
         direction LR
         A_start(("Origin<br/>v1")) --- A_int(("Internal<br/>v2"))
         A_int --- E1(("Exit Point<br/>A1"))
         A_int --- E2(("Exit Point<br/>A2"))
     end
 
-    subgraph SegB["Segment B: Waco Central"]
+    subgraph SegB["Segment B: Siddipet Central"]
         direction LR
         E3(("Exit Point<br/>B1")) --- B_int(("Internal<br/>v3"))
         E4(("Exit Point<br/>B2")) --- B_dest(("Destination<br/>v4"))
@@ -161,13 +161,13 @@ flowchart LR
 
 ---
 
-### Step-by-Step Example: Austin to Dallas Route
-When a user requests a route from Austin to Dallas:
+### Step-by-Step Example: Hyderabad to Warangal Route
+When a user requests a route from Hyderabad to Warangal:
 
 1. **Bounding Box Filter (Haversine Distance):**
-   - Calculate straight-line distance (Haversine formula) between Austin and Dallas (~200 km).
+   - Calculate straight-line distance (Haversine formula) between Hyderabad and Warangal (~150 km).
    - Draw an elliptical search corridor connecting origin and destination.
-   - Filter down candidate segments from 3,000 across Texas to just **28 corridor segments**.
+   - Filter down candidate segments from 3,000 across Telangana to just **28 corridor segments**.
 
 2. **Construct the Meta-Graph:**
    - Instead of loading all 100,000+ intersections inside those 28 segments, extract **only their exit points**.
@@ -219,9 +219,9 @@ erDiagram
 ### The New Pipeline Problem: Precomputation Lockouts
 Precomputed exit tables work brilliantly—until real-world road changes happen.
 
-When a new subdivision opens in East Austin with 40 new intersections, that segment's pairwise exit table must be recalculated. On launch day, ParcelPath runs this recomputation **synchronously on the live routing server**:
+When a new layout opens in Uppal (East Hyderabad) with 40 new intersections, that segment's pairwise exit table must be recalculated. On launch day, ParcelPath runs this recomputation **synchronously on the live routing server**:
 - Recomputing all-pairs shortest paths for the updated segment takes **12 minutes** `[illustrative]`.
-- During those 12 minutes, the live routing service locks up, causing all delivery routes into East Austin to fail.
+- During those 12 minutes, the live routing service locks up, causing all delivery routes into Uppal to fail.
 
 ### The Immutable Rule of Cache Management
 > **Never block live user traffic to update a precomputed routing cache.**
@@ -238,11 +238,11 @@ When a new subdivision opens in East Austin with 40 new intersections, that segm
 ## Chapter 3 — Turning a Typed Address into a Coordinate
 
 ### The Problem: Addresses Are Free Text, Graphs Need Coordinates
-Neither Dijkstra nor segment graphs understand text like `"2100 Guadalupe St, Austin, TX"`. Routing engines only operate on exact latitude and longitude coordinates.
+Neither Dijkstra nor segment graphs understand text like `"Plot 8-2-120, Banjara Hills, Hyderabad, Telangana"`. Routing engines only operate on exact latitude and longitude coordinates.
 
 ParcelPath’s naive v1 approach:
-- Query a database table containing 2.4 million Texas address rows using an SQL wildcard search:
-  `SELECT lat, lng FROM addresses WHERE address_string LIKE '%2100 Guadalupe%'`
+- Query a database table containing 2.4 million Telangana address rows using an SQL wildcard search:
+  `SELECT lat, lng FROM addresses WHERE address_string LIKE '%8-2-120 Banjara Hills%'`
 - **Performance:** At low traffic, table scans take ~85ms.
 - **At 500 req/sec:** 500 concurrent table scans pin database CPU to 95%, causing p99 latencies to skyrocket past **900ms**.
 
@@ -252,7 +252,7 @@ ParcelPath’s naive v1 approach:
 Forward geocoding converts human-readable text into a geographic coordinate (`Text -> Lat/Lng`).
 
 Instead of scanning relational table rows, treat forward geocoding as a **text search problem**:
-1. **Tokenize:** Break addresses into normalized terms (e.g., `2100`, `guadalupe`, `st`, `austin`, `tx`).
+1. **Tokenize:** Break addresses into normalized terms (e.g., `8-2-120`, `banjara`, `hills`, `hyderabad`, `telangana`).
 2. **Inverted Index:** Build an inverted index mapping each term to matching Address IDs.
 3. **Rank Results:** Score matches using string closeness (Levenshtein distance), location popularity, and proximity to the user's current view.
 4. **Result:** Token lookup completes in **~4 milliseconds**.
@@ -273,28 +273,28 @@ sequenceDiagram
     participant SpatialIdx as Spatial Index (S2)
 
     Note over Client, TextIdx: 1. Forward Geocoding (Text to Coordinate)
-    Client->>Geo: forwardGeocode("2100 Guadalupe St")
-    Geo->>TextIdx: Token Search ("2100", "guadalupe", "austin")
+    Client->>Geo: forwardGeocode("Banjara Hills, Hyderabad")
+    Geo->>TextIdx: Token Search ("8-2-120", "banjara", "hyderabad")
     TextIdx-->>Geo: Return Address Record (ID: 9482)
-    Geo-->>Client: Return Coordinate (30.2849° N, 97.7404° W)
+    Geo-->>Client: Return Coordinate (17.4126° N, 78.4482° E)
 
     Note over Client, SpatialIdx: 2. Reverse Geocoding (Coordinate to Address Name)
-    Client->>Geo: reverseGeocode(30.2849° N, 97.7404° W)
+    Client->>Geo: reverseGeocode(17.4126° N, 78.4482° E)
     Geo->>SpatialIdx: Nearest Neighbor Query (Radius = 30m)
     SpatialIdx-->>Geo: Return Closest Building Address
-    Geo-->>Client: Return "2100 Guadalupe St, Austin, TX"
+    Geo-->>Client: Return "Plot 8-2-120, Banjara Hills, Hyderabad, Telangana"
 ```
 
 | Operation | Input | Output | Primary Data Structure | Use Case |
 | :--- | :--- | :--- | :--- | :--- |
-| **Forward Geocoding** | Text string (`"2100 Guadalupe"`) | `(Lat, Lng)` coordinate | Inverted Index / Trie | User types destination in search bar. |
-| **Reverse Geocoding** | `(Lat, Lng)` point | Text address (`"2100 Guadalupe"`) | Spatial Index (R-Tree / S2) | Displaying current location address on UI. |
+| **Forward Geocoding** | Text string (`"Banjara Hills"`) | `(Lat, Lng)` coordinate | Inverted Index / Trie | User types destination in search bar. |
+| **Reverse Geocoding** | `(Lat, Lng)` point | Text address (`"Banjara Hills"`) | Spatial Index (R-Tree / S2) | Displaying current location address on UI. |
 | **Map Matching (Ch. 7)** | Noisy GPS ping | Exact **Road Edge ID** | Hidden Markov Model + Graph | Snapping driver pings to road network. |
 
 ---
 
 ### The New Problem: Spatial Proximity Queries
-Reverse geocoding needs a fast way to answer: *"What address is closest to coordinate (30.2849, -97.7404)?"*
+Reverse geocoding needs a fast way to answer: *"What address is closest to coordinate (17.4126, 78.4482)?"*
 
 Text inverted indexes cannot perform 2D spatial distance calculations. We need a dedicated **spatial index**.
 
@@ -311,7 +311,7 @@ Text inverted indexes cannot perform 2D spatial distance calculations. We need a
 A **Geohash** converts a 2D `(latitude, longitude)` coordinate into a single 1D alphanumeric string by interleaving the binary bits of latitude and longitude.
 
 #### Step-by-Step Bit Interleaving Example
-Suppose latitude is `30.2849` and longitude is `-97.7404`:
+Suppose latitude is `17.4126` and longitude is `78.4482`:
 1. Express latitude and longitude as binary strings based on repeated midpoint partitioning of global bounds.
 2. Interleave latitude and longitude bits:
    - Latitude bits: `1 0 1 1 0...`
@@ -345,7 +345,7 @@ Geohashing works well until ParcelPath encounters the **Edge Discontinuity Probl
 ```mermaid
 flowchart LR
     subgraph Cell1["Geohash Cell: 9v6mm2"]
-        A["Drop-off A<br/>(Lat: 30.284, Lng: -97.740)"]
+        A["Drop-off A<br/>(Lat: 17.412, Lng: 78.448)"]
     end
     
     subgraph Boundary["15 Meters Distance"]
@@ -353,7 +353,7 @@ flowchart LR
     end
 
     subgraph Cell2["Geohash Cell: 9v6mp8"]
-        B["Drop-off B<br/>(Lat: 30.284, Lng: -97.739)"]
+        B["Drop-off B<br/>(Lat: 17.412, Lng: 78.449)"]
     end
 
     Cell1 -.- Boundary -.- Cell2
@@ -375,7 +375,7 @@ To fix this bug, every radius query must evaluate **all 8 neighboring cells** in
 ### Structural Flaws of Geohash
 Even with the 8-neighbor patch, geohash has two major limitations:
 1. **Polar Distortion:** Because meridians converge at the poles, rectangular geohash grid cells shrink and distort as you move away from the equator.
-2. **Fixed Grid Size:** Geohash cells are uniform everywhere. A rural desert cell covers the exact same area as a cell in dense downtown Manhattan, ignoring data density differences.
+2. **Fixed Grid Size:** Geohash cells are uniform everywhere. A rural cell covers the exact same area as a cell in dense downtown Mumbai, ignoring data density differences.
 
 ---
 
@@ -394,22 +394,22 @@ A **Quadtree** addresses geohash’s fixed-grid limitation by recursively splitt
 
 ```mermaid
 flowchart TD
-    Root["Root Bounding Box<br/>(Texas)"] --> Q1["NW: Panhandle<br/>(Low Density - No Split)"]
-    Root --> Q2["NE: Dallas-Fort Worth<br/>(High Density - Split)"]
-    Root --> Q3["SW: West Texas<br/>(Low Density - No Split)"]
-    Root --> Q4["SE: Houston / Austin<br/>(High Density - Split)"]
+    Root["Root Bounding Box<br/>(Telangana)"] --> Q1["NW: Adilabad<br/>(Low Density - No Split)"]
+    Root --> Q2["NE: Warangal-Karimnagar<br/>(High Density - Split)"]
+    Root --> Q3["SW: Nagarkurnool<br/>(Low Density - No Split)"]
+    Root --> Q4["SE: Khammam / Hyderabad<br/>(High Density - Split)"]
 
-    Q2 --> Q2_1["DFW Sub-Cell 1"]
-    Q2 --> Q2_2["DFW Sub-Cell 2"]
-    Q4 --> Q4_1["Austin Sub-Cell 1"]
-    Q4 --> Q4_2["Houston Sub-Cell 1"]
+    Q2 --> Q2_1["Warangal Sub-Cell 1"]
+    Q2 --> Q2_2["Warangal Sub-Cell 2"]
+    Q4 --> Q4_1["Hyderabad Sub-Cell 1"]
+    Q4 --> Q4_2["Khammam Sub-Cell 1"]
 
     style Root fill:#01579b,stroke:#00324d,color:#ffffff
     style Q2 fill:#f9a825,stroke:#8d6e00,color:#000000
     style Q4 fill:#f9a825,stroke:#8d6e00,color:#000000
 ```
 
-- **Result:** Downtown Austin gets divided into hundreds of tiny sub-cells, while rural West Texas remains one large cell.
+- **Result:** Downtown Hyderabad gets divided into hundreds of tiny sub-cells, while rural Nagarkurnool remains one large cell.
 - **Flaw:** Quadtrees operate on flat 2D planes. They do not account for Earth's spherical curvature, making them unsuitable for global scale.
 
 ---
@@ -511,8 +511,8 @@ flowchart TD
 ### The Trade-off: Fixed Weights vs. Dynamic Traffic
 Contraction Hierarchies achieve millisecond query speeds because shortcut edges are computed offline assuming **static edge weights** (speed limits).
 
-If an accident on I-35 drops traffic speed from 65 mph to 10 mph:
-- The precomputed shortcuts built through I-35 become invalid.
+If an accident on NH44 drops traffic speed from 65 mph to 10 mph:
+- The precomputed shortcuts built through NH44 become invalid.
 - Re-running the full offline contraction process across the entire national graph takes hours.
 
 #### Production Mitigations:
@@ -534,12 +534,12 @@ ParcelPath's driver mobile apps stream GPS pings every 5 seconds containing `(la
 However, mobile GPS sensors have a real-world accuracy margin of **±20 meters**.
 
 #### Step-by-Step Failure of Naive "Nearest Edge" Snapping
-Imagine a driver traveling at 65 mph on Highway I-35, which runs directly alongside a slow 25 mph frontage road:
+Imagine a driver traveling at 65 mph on Highway NH44, which runs directly alongside a slow 25 mph frontage road:
 
 ```mermaid
 flowchart LR
     subgraph Driver["Actual Car Position"]
-        Car["Driver on Highway I-35<br/>(Speed: 65 mph, Heading: 180° South)"]
+        Car["Driver on Highway NH44<br/>(Speed: 65 mph, Heading: 180° South)"]
     end
 
     subgraph GPS["Noisy GPS Ping"]
@@ -653,11 +653,11 @@ stateDiagram-v2
 
 ### Scenario A: The Teleporting Driver (Hardware Glitch)
 A driver's smartphone GPS chip experiences a hardware glitch:
-- **Ping 1 (Time 10:00:00):** Austin (Lat: 30.267, Lng: -97.743)
-- **Ping 2 (Time 10:00:05):** Houston (Lat: 29.760, Lng: -95.369)
-- **Implied Traversal:** 180 km in 5 seconds = **129,600 km/h**.
+- **Ping 1 (Time 10:00:00):** Hyderabad (Lat: 17.385, Lng: 78.487)
+- **Ping 2 (Time 10:00:05):** Khammam (Lat: 17.247, Lng: 80.151)
+- **Implied Traversal:** 200 km in 5 seconds = **144,000 km/h**.
 
-If fed directly into map matching, this bad ping corrupts Houston edge metrics.
+If fed directly into map matching, this bad ping corrupts Khammam edge metrics.
 
 ---
 
@@ -989,7 +989,7 @@ mindmap
 > **Answer:** At low query volume, paying per API call to a provider like Google Maps or Mapbox is the correct business choice. Building a custom engine requires significant multi-year engineering investment. You only build in-house when query volume makes third-party API costs prohibitive, or when proprietary routing logic (e.g., custom delivery fleet constraints, specialized vehicle routing, internal marketplace optimization) requires direct control over graph weights.
 
 ### Q2: "Doesn't graph segmentation turn one big bottleneck into thousands of small ones?"
-> **Answer:** Segmentation makes graph processing tractable by scoping operations to isolated subgraphs. However, high-density areas (like downtown Manhattan at 5 PM) can still experience load spikes. We solve this by replicating hot segment graphs across multiple routing worker nodes and using dynamic non-uniform segment sizing (smaller segments in dense urban cores, larger segments in rural regions) to distribute computational load evenly.
+> **Answer:** Segmentation makes graph processing tractable by scoping operations to isolated subgraphs. However, high-density areas (like downtown Mumbai at 5 PM) can still experience load spikes. We solve this by replicating hot segment graphs across multiple routing worker nodes and using dynamic non-uniform segment sizing (smaller segments in dense urban cores, larger segments in rural regions) to distribute computational load evenly.
 
 ### Q3: "Why switch from Geohash to Google S2 before hitting high query volumes?"
 > **Answer:** Geohash’s primary flaw—polar distortion—is a structural mathematical property. While distortion is negligible near the equator, it degrades accuracy at higher latitudes. Migrating a core geospatial indexing scheme late in a system's lifecycle requires rewriting primary database keys, index queries, and caching layers. Adopting Google S2 early guarantees consistent cell areas globally and native 1D range scan compatibility in databases like Spanner or Bigtable.
@@ -1059,7 +1059,7 @@ mindmap
 Test your knowledge by answering these core questions without looking at the text:
 
 1. *What is the three-step architectural principle that governs Google Maps?*
-2. *Why does expanding Dijkstra from Austin to Texas increase latency from 70ms to 3.4 seconds?*
+2. *Why does expanding Dijkstra from Hyderabad to all of Telangana increase latency from 70ms to 3.4 seconds?*
 3. *What specific calculation does an "exit point" allow a routing engine to bypass during a live request?*
 4. *How does forward geocoding differ from reverse geocoding and map matching?*
 5. *Why do two points 15 meters apart across a street get completely different Geohash prefixes?*
