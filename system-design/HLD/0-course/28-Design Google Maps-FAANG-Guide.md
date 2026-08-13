@@ -97,10 +97,10 @@ flowchart TD
     K --> L["7. Validate Against Non-Functional Requirements & SLOs"]
     L --> M["8. Wrap Up with Future Extensions & Production Safeguards"]
 
-    style A fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
-    style E fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-    style K fill:#ffe0b2,stroke:#f57c00,stroke-width:2px
-    style M fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style A fill:#01579b,stroke:#00324d,color:#ffffff,stroke-width:2px
+    style E fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
+    style K fill:#e65100,stroke:#7a2e00,color:#ffffff,stroke-width:2px
+    style M fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 **Cheat-sheet**
@@ -138,9 +138,9 @@ flowchart LR
     
     SensorFusion --> ResolvedCoord["Resolved Device Lat/Lng"]
 
-    style GPS fill:#c8e6c9,stroke:#388e3c
-    style WiFi fill:#fff9c4,stroke:#fbc02d
-    style Cellular fill:#ffcdd2,stroke:#d32f2f
+    style GPS fill:#2e7d32,stroke:#1b5e20,color:#ffffff
+    style WiFi fill:#f9a825,stroke:#8d6e00,color:#000000
+    style Cellular fill:#c62828,stroke:#6e0000,color:#ffffff
 ```
 
 **Clarifying questions to ask out loud:**
@@ -324,9 +324,9 @@ flowchart TD
     V1 -->|"Scale Breaks"| V2
     V2 -->|"Traffic Congestion Breaks ETAs"| V3
 
-    style V1 fill:#ffebee,stroke:#c62828
-    style V2 fill:#fff9c4,stroke:#fbc02d
-    style V3 fill:#c8e6c9,stroke:#388e3c
+    style V1 fill:#b71c1c,stroke:#6e0000,color:#ffffff
+    style V2 fill:#f9a825,stroke:#8d6e00,color:#000000
+    style V3 fill:#2e7d32,stroke:#1b5e20,color:#ffffff
 ```
 
 | Stage | What's new | What breaks if you stop here |
@@ -378,10 +378,10 @@ flowchart TB
     ThirdParty["3rd-Party Road Data"] --> GraphBuilder["Graph Builder"]
     GraphBuilder --> GraphDB
 
-    style Client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
-    style GraphEngine fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style MapMatcher fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-    style LiveTrafficCache fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style Client fill:#01579b,stroke:#00324d,color:#ffffff,stroke-width:2px
+    style GraphEngine fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style MapMatcher fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
+    style LiveTrafficCache fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 ### Component Responsibilities
@@ -496,9 +496,9 @@ flowchart LR
     Subdiv --> Hilbert["4. Map 2D Cells to 1D via<br/>Hilbert Space-Filling Curve"]
     Hilbert --> IntegerKey["5. Store as 64-Bit Integer<br/>(Bigtable / Spanner Row Key)"]
 
-    style Sphere fill:#e1f5fe,stroke:#0288d1
-    style Hilbert fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style IntegerKey fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style Sphere fill:#01579b,stroke:#00324d,color:#ffffff
+    style Hilbert fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style IntegerKey fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 - **Why the Hilbert Curve is Essential:** A Hilbert curve folds 2D space into a continuous 1D line such that points close in 2D space remain **numerically adjacent in 1D memory**.
@@ -517,10 +517,10 @@ flowchart TD
     A -->|"Arbitrary polygons / geofences"| E["R-Tree"]
     A -->|"Need variable resolution by density"| F["Quadtree"]
 
-    style C fill:#fff9c4,stroke:#fbc02d
-    style D fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
-    style E fill:#e1bee7,stroke:#8e24aa
-    style F fill:#bbdefb,stroke:#1976d2
+    style C fill:#f9a825,stroke:#8d6e00,color:#000000
+    style D fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
+    style E fill:#7b1fa2,stroke:#4a0072,color:#ffffff
+    style F fill:#1565c0,stroke:#0d3d73,color:#ffffff
 ```
 
 **Cheat-sheet**
@@ -605,12 +605,12 @@ flowchart LR
     ExitA1 -.-|"Precomputed Exit Distance"| ExitB1
     ExitA2 -.-|"Precomputed Exit Distance"| ExitB2
 
-    style SegA fill:#f0f4c3,stroke:#9e9d24,stroke-width:2px
-    style SegB fill:#e1bee7,stroke:#8e24aa,stroke-width:2px
-    style ExitA1 fill:#ff8a65,stroke:#d84315
-    style ExitA2 fill:#ff8a65,stroke:#d84315
-    style ExitB1 fill:#ff8a65,stroke:#d84315
-    style ExitB2 fill:#ff8a65,stroke:#d84315
+    style SegA fill:#827717,stroke:#4a4400,color:#ffffff,stroke-width:2px
+    style SegB fill:#7b1fa2,stroke:#4a0072,color:#ffffff,stroke-width:2px
+    style ExitA1 fill:#bf360c,stroke:#5c1400,color:#ffffff
+    style ExitA2 fill:#bf360c,stroke:#5c1400,color:#ffffff
+    style ExitB1 fill:#bf360c,stroke:#5c1400,color:#ffffff
+    style ExitB2 fill:#bf360c,stroke:#5c1400,color:#ffffff
 ```
 
 #### The Three-Step Cross-Segment Stitching Workflow:
@@ -846,8 +846,8 @@ flowchart TD
     TileServer --> DownloadProtobuf
     DownloadProtobuf --> RenderGPU
 
-    style RenderGPU fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
-    style CDNEdge fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
+    style RenderGPU fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
+    style CDNEdge fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
 ```
 
 **Cheat-sheet**
@@ -968,8 +968,8 @@ flowchart LR
     EdgeWeights --> GNN["Graph Neural Network (GNN)<br/>Spatiotemporal Model"]
     GNN --> PredictiveETA["Accurate Predictive Arrival Time"]
 
-    style GNN fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style PredictiveETA fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style GNN fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style PredictiveETA fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 - **Graph Neural Network (GNN) Evolution (Google & DeepMind):** Treats connected road subgraphs as GNN inputs. Rather than scoring edges independently, the GNN predicts how congestion on one edge **spillover propagates** to neighboring edges 15 minutes into the future.
@@ -1008,9 +1008,9 @@ flowchart TD
     AngleCheck -->|"+45° to +135°"| Right["Instruction: 'Turn Right onto 5th Ave'"]
     AngleCheck -->|"> +135°"| UTurn["Instruction: 'Make a U-Turn'"]
 
-    style Straight fill:#e1f5fe,stroke:#0288d1
-    style Right fill:#fff9c4,stroke:#fbc02d
-    style UTurn fill:#ffcdd2,stroke:#d32f2f
+    style Straight fill:#01579b,stroke:#00324d,color:#ffffff
+    style Right fill:#f9a825,stroke:#8d6e00,color:#000000
+    style UTurn fill:#c62828,stroke:#6e0000,color:#ffffff
 ```
 
 ---
@@ -1077,10 +1077,10 @@ flowchart TD
     F3["GPS Telemetry Traffic Poisoning<br/>(Ghost jam attacks / broken GPS)"] -->|Mitigation| M3["Apply speed plausibility cap (>300 km/h);<br/>Require corroboration from 5+ independent devices"]
     F4["CDN Edge Cache Miss Storm<br/>(Cold cache post-map update)"] -->|Mitigation| M4["Pre-warm CDN edge caches for high-density urban tiles<br/>before pushing map release"]
 
-    style F1 fill:#ffebee,stroke:#c62828
-    style M1 fill:#c8e6c9,stroke:#388e3c
-    style F3 fill:#ffebee,stroke:#c62828
-    style M3 fill:#c8e6c9,stroke:#388e3c
+    style F1 fill:#b71c1c,stroke:#6e0000,color:#ffffff
+    style M1 fill:#2e7d32,stroke:#1b5e20,color:#ffffff
+    style F3 fill:#b71c1c,stroke:#6e0000,color:#ffffff
+    style M3 fill:#2e7d32,stroke:#1b5e20,color:#ffffff
 ```
 
 The four failure modes above are the ones worth drawing; the rest of the checklist:

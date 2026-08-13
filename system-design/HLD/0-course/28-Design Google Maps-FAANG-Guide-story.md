@@ -83,11 +83,11 @@ flowchart LR
     C --> D["Explore Outward in<br/>All Directions Across Texas"]
     D --> E["3.4 Seconds Later:<br/>Answer Computed<br/>(Only needed 20 km of road)"]
 
-    style A fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
-    style B fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-    style C fill:#ffe0b2,stroke:#f57c00,stroke-width:2px
-    style D fill:#ffcdd2,stroke:#d32f2f,stroke-width:2px
-    style E fill:#f8bbd0,stroke:#c2185b,stroke-width:2px
+    style A fill:#01579b,stroke:#00324d,color:#ffffff,stroke-width:2px
+    style B fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
+    style C fill:#e65100,stroke:#7a2e00,color:#ffffff,stroke-width:2px
+    style D fill:#c62828,stroke:#6e0000,color:#ffffff,stroke-width:2px
+    style E fill:#ad1457,stroke:#5c0030,color:#ffffff,stroke-width:2px
 ```
 
 ### Why Did This Latency Spike Happen?
@@ -151,12 +151,12 @@ flowchart LR
     E1 -.-|"Precomputed Exit-to-Exit Distance"| E3
     E2 -.-|"Precomputed Exit-to-Exit Distance"| E4
 
-    style SegA fill:#f0f4c3,stroke:#9e9d24,stroke-width:2px
-    style SegB fill:#e1bee7,stroke:#8e24aa,stroke-width:2px
-    style E1 fill:#ff8a65,stroke:#d84315,stroke-width:2px
-    style E2 fill:#ff8a65,stroke:#d84315,stroke-width:2px
-    style E3 fill:#ff8a65,stroke:#d84315,stroke-width:2px
-    style E4 fill:#ff8a65,stroke:#d84315,stroke-width:2px
+    style SegA fill:#827717,stroke:#4a4400,color:#ffffff,stroke-width:2px
+    style SegB fill:#7b1fa2,stroke:#4a0072,color:#ffffff,stroke-width:2px
+    style E1 fill:#bf360c,stroke:#5c1400,color:#ffffff,stroke-width:2px
+    style E2 fill:#bf360c,stroke:#5c1400,color:#ffffff,stroke-width:2px
+    style E3 fill:#bf360c,stroke:#5c1400,color:#ffffff,stroke-width:2px
+    style E4 fill:#bf360c,stroke:#5c1400,color:#ffffff,stroke-width:2px
 ```
 
 ---
@@ -358,9 +358,9 @@ flowchart LR
 
     Cell1 -.- Boundary -.- Cell2
 
-    style Cell1 fill:#ffe0b2,stroke:#f57c00,stroke-width:2px
-    style Cell2 fill:#bbdefb,stroke:#1976d2,stroke-width:2px
-    style Boundary fill:#ffebee,stroke:#c62828,stroke-dasharray: 5 5
+    style Cell1 fill:#e65100,stroke:#7a2e00,color:#ffffff,stroke-width:2px
+    style Cell2 fill:#1565c0,stroke:#0d3d73,color:#ffffff,stroke-width:2px
+    style Boundary fill:#b71c1c,stroke:#6e0000,color:#ffffff,stroke-dasharray: 5 5
 ```
 
 If a driver in cell `9v6mm2` queries for available deliveries using exact prefix matching (`WHERE geohash LIKE '9v6mm2%'`), the database **completely misses Drop-off B**, even though it is only 15 meters away!
@@ -404,9 +404,9 @@ flowchart TD
     Q4 --> Q4_1["Austin Sub-Cell 1"]
     Q4 --> Q4_2["Houston Sub-Cell 1"]
 
-    style Root fill:#e1f5fe,stroke:#0288d1
-    style Q2 fill:#fff9c4,stroke:#fbc02d
-    style Q4 fill:#fff9c4,stroke:#fbc02d
+    style Root fill:#01579b,stroke:#00324d,color:#ffffff
+    style Q2 fill:#f9a825,stroke:#8d6e00,color:#000000
+    style Q4 fill:#f9a825,stroke:#8d6e00,color:#000000
 ```
 
 - **Result:** Downtown Austin gets divided into hundreds of tiny sub-cells, while rural West Texas remains one large cell.
@@ -429,8 +429,8 @@ flowchart LR
     C --> D["Map 2D Grid Cells to 1D via<br/>Hilbert Space-Filling Curve"]
     D --> E["Store as 64-bit Integers in<br/>Spanner / Bigtable Key-Value Store"]
 
-    style A fill:#e1f5fe,stroke:#0288d1
-    style E fill:#d1c4e9,stroke:#512da8,stroke-width:2px
+    style A fill:#01579b,stroke:#00324d,color:#ffffff
+    style E fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
 ```
 
 #### Why the Hilbert Curve is Crucial for Databases
@@ -502,8 +502,8 @@ flowchart TD
     A -->|"Static Nationwide Route"| C["Contraction Hierarchies (CH)<br/>(Millisecond speed via precomputed shortcuts)"]
     A -->|"Dynamic Traffic Corridor"| D["ALT Algorithm (A*, Landmarks, Triangle Inequality)<br/>(More resilient to changing live weights)"]
 
-    style C fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style D fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
+    style C fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style D fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
 ```
 
 ---
@@ -555,8 +555,8 @@ flowchart LR
     Ping -->|"Naive Nearest Distance"| E2
     Ping -.->|"Correct HMM Selection"| E1
 
-    style E2 fill:#ffcdd2,stroke:#d32f2f,stroke-width:2px
-    style E1 fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style E2 fill:#c62828,stroke:#6e0000,color:#ffffff,stroke-width:2px
+    style E1 fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 1. The raw GPS ping lands 12 meters from the frontage road and 18 meters from the highway due to GPS drift.
@@ -672,8 +672,8 @@ flowchart TD
     D -->|"No (Single Device / Ghost Jam)"| E["Assign Low Confidence Weight;<br/>Do Not Update Edge"]
     D -->|"Yes (Genuine Congestion)"| F["Update Live Graph Edge Weight"]
 
-    style C fill:#ffcdd2,stroke:#d32f2f,stroke-width:2px
-    style F fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style C fill:#c62828,stroke:#6e0000,color:#ffffff,stroke-width:2px
+    style F fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 ---
@@ -751,8 +751,8 @@ flowchart LR
     GNN --> TrafficProp["Predict Traffic Congestion<br/>Propagation Across Neighboring Edges"]
     TrafficProp --> AccurateETA["Ultra-Accurate Predictive ETA"]
 
-    style GNN fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style AccurateETA fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style GNN fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style AccurateETA fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 - The road network is modeled as a connected graph inside a GNN.
@@ -863,9 +863,9 @@ flowchart LR
     StyleSheet --> GPU
     GPU --> RenderedMap
 
-    style VectorData fill:#e1f5fe,stroke:#0288d1
-    style GPU fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style RenderedMap fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
+    style VectorData fill:#01579b,stroke:#00324d,color:#ffffff
+    style GPU fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style RenderedMap fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
 ```
 
 #### Advantages of Vector Tiles over Raster Tiles:
@@ -935,11 +935,11 @@ flowchart TD
     ETACalc --> Navigation["10. WebSocket Navigation<br/>(Debounced Reroute Detector)"]
     Navigation --> RenderMap["11. Vector Tile Map Engine<br/>(CDN + Client GPU Rendering)"]
 
-    style User fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
-    style CH fill:#d1c4e9,stroke:#512da8,stroke-width:2px
-    style HMM fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-    style LiveGraph fill:#c8e6c9,stroke:#388e3c,stroke-width:2px
-    style RenderMap fill:#ffe0b2,stroke:#f57c00,stroke-width:2px
+    style User fill:#01579b,stroke:#00324d,color:#ffffff,stroke-width:2px
+    style CH fill:#4527a0,stroke:#1a0060,color:#ffffff,stroke-width:2px
+    style HMM fill:#f9a825,stroke:#8d6e00,color:#000000,stroke-width:2px
+    style LiveGraph fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px
+    style RenderMap fill:#e65100,stroke:#7a2e00,color:#ffffff,stroke-width:2px
 ```
 
 ---
