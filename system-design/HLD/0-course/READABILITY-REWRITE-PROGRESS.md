@@ -33,7 +33,7 @@ in one sitting.
 - [x] 37 — 37-Typeahead-Suggestion-FAANG-Guide-story.md
 - [x] 38 — 38-Design-a-Collaborative-Document-Editing-Service-Google-Docs-FAANG-Guide-story.md
 - [x] 39 — 39-Spectacular-Failures-FAANG-Guide-story.md
-- [ ] 40 — 40-Design-a-Deployment-System-FAANG-Guide-story.md
+- [x] 40 — 40-Design-a-Deployment-System-FAANG-Guide-story.md
 - [ ] 41 — 41-Design-a-Payment-System-FAANG-Guide-story.md
 - [ ] 42 — 42-Design-a-ChatGPT-System-FAANG-Guide-story.md
 - [ ] 43 — 43-Design-a-Data-Infrastructure-System-FAANG-Guide-story.md
