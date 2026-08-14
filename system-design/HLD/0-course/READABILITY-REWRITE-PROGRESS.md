@@ -42,7 +42,7 @@ in one sitting.
 - [x] 46 — 46-Design-an-IP-Allowlist-Blocklist-Service-FAANG-Guide-story.md
 - [x] 47 — 47-Sanctions-Watchlist-Screening-System-FAANG-Guide-story.md
 - [x] 48 — 48-Legal-Takedown-Propagation-System-FAANG-Guide-story.md
-- [ ] 49 — 49-Toll-Vehicle-Insurance-Validity-Check-FAANG-Guide-story.md
+- [x] 49 — 49-Toll-Vehicle-Insurance-Validity-Check-FAANG-Guide-story.md
 - [ ] 50 — 50-National-ID-KYC-Verification-System-FAANG-Guide-story.md
 - [ ] 51 — 51-Multi-Source-Sanctioned-Country-Payment-Blocking-FAANG-Guide-story.md
 - [ ] 52 — 52-Design-Airbnb-Search-Ranking-FAANG-Guide-story.md
