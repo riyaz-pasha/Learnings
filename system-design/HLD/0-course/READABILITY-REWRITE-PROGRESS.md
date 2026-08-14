@@ -40,7 +40,7 @@ in one sitting.
 - [x] 44 — 44-Design-a-LLM-Customer-Support-Bot-FAANG-Guide-story.md
 - [x] 45 — 45-Design-an-AI-Code-Assistant-FAANG-Guide-story.md
 - [x] 46 — 46-Design-an-IP-Allowlist-Blocklist-Service-FAANG-Guide-story.md
-- [ ] 47 — 47-Sanctions-Watchlist-Screening-System-FAANG-Guide-story.md
+- [x] 47 — 47-Sanctions-Watchlist-Screening-System-FAANG-Guide-story.md
 - [ ] 48 — 48-Legal-Takedown-Propagation-System-FAANG-Guide-story.md
 - [ ] 49 — 49-Toll-Vehicle-Insurance-Validity-Check-FAANG-Guide-story.md
 - [ ] 50 — 50-National-ID-KYC-Verification-System-FAANG-Guide-story.md
