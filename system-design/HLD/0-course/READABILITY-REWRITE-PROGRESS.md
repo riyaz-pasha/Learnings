@@ -30,7 +30,7 @@ in one sitting.
 - [x] 34 — 34-Design a URL Shortening Service - TinyURL-FAANG-Guide-story.md
 - [x] 35 — 35-Web-Crawler-FAANG-Guide-story.md
 - [x] 36 — 36-WhatsApp-FAANG-Guide-story.md
-- [ ] 37 — 37-Typeahead-Suggestion-FAANG-Guide-story.md
+- [x] 37 — 37-Typeahead-Suggestion-FAANG-Guide-story.md
 - [ ] 38 — 38-Design-a-Collaborative-Document-Editing-Service-Google-Docs-FAANG-Guide-story.md
 - [ ] 39 — 39-Spectacular-Failures-FAANG-Guide-story.md
 - [ ] 40 — 40-Design-a-Deployment-System-FAANG-Guide-story.md
