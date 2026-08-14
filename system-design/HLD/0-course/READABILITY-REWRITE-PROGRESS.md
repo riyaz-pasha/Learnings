@@ -25,7 +25,7 @@ in one sitting.
 
 ## Rollout (31 → 78)
 - [x] 31 — 31-Design Twitter-FAANG-Guide-story.md
-- [ ] 32 — 32-Design Newsfeed System-FAANG-Guide-story.md
+- [x] 32 — 32-Design Newsfeed System-FAANG-Guide-story.md
 - [ ] 33 — 33-Design-Instagram-FAANG-Guide-story.md
 - [ ] 34 — 34-Design a URL Shortening Service - TinyURL-FAANG-Guide-story.md
 - [ ] 35 — 35-Web-Crawler-FAANG-Guide-story.md
