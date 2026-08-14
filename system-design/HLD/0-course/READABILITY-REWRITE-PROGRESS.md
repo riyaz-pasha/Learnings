@@ -53,7 +53,7 @@ in one sitting.
 - [x] 57 — 57-Design-a-Distributed-Tracing-System-FAANG-Guide-story.md
 - [x] 58 — 58-Design-Google-Photos-FAANG-Guide-story.md
 - [x] 59 — 59-Design-a-Recommendation-Engine-Netflix-YouTube-FAANG-Guide-story.md
-- [ ] 60 — 60-Design-a-Flash-Sale-System-FAANG-Guide-story.md
+- [x] 60 — 60-Design-a-Flash-Sale-System-FAANG-Guide-story.md
 - [ ] 61 — 61-Design-a-Global-Distributed-Lock-Service-FAANG-Guide-story.md
 - [ ] 62 — 62-Design-Ubers-Driver-Dispatch-System-FAANG-Guide-story.md
 - [ ] 63 — 63-Design-an-Ad-Click-Aggregation-System-FAANG-Guide-story.md
