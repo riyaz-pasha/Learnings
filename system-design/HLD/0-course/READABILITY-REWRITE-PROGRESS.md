@@ -38,7 +38,7 @@ in one sitting.
 - [x] 42 — 42-Design-a-ChatGPT-System-FAANG-Guide-story.md
 - [x] 43 — 43-Design-a-Data-Infrastructure-System-FAANG-Guide-story.md
 - [x] 44 — 44-Design-a-LLM-Customer-Support-Bot-FAANG-Guide-story.md
-- [ ] 45 — 45-Design-an-AI-Code-Assistant-FAANG-Guide-story.md
+- [x] 45 — 45-Design-an-AI-Code-Assistant-FAANG-Guide-story.md
 - [ ] 46 — 46-Design-an-IP-Allowlist-Blocklist-Service-FAANG-Guide-story.md
 - [ ] 47 — 47-Sanctions-Watchlist-Screening-System-FAANG-Guide-story.md
 - [ ] 48 — 48-Legal-Takedown-Propagation-System-FAANG-Guide-story.md
