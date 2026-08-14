@@ -50,7 +50,7 @@ in one sitting.
 - [x] 54 — 54-Design-an-AR-Virtual-Furniture-Placement-System-FAANG-Guide-story.md
 - [x] 55 — 55-Design-a-Real-Time-Collaborative-Canvas-Figma-FAANG-Guide-story.md
 - [x] 56 — 56-Design-a-Fraud-Detection-System-FAANG-Guide-story.md
-- [ ] 57 — 57-Design-a-Distributed-Tracing-System-FAANG-Guide-story.md
+- [x] 57 — 57-Design-a-Distributed-Tracing-System-FAANG-Guide-story.md
 - [ ] 58 — 58-Design-Google-Photos-FAANG-Guide-story.md
 - [ ] 59 — 59-Design-a-Recommendation-Engine-Netflix-YouTube-FAANG-Guide-story.md
 - [ ] 60 — 60-Design-a-Flash-Sale-System-FAANG-Guide-story.md
