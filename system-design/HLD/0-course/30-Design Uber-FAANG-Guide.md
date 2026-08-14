@@ -2,17 +2,19 @@
 
 > **Enhancement notes:** This pass added things a FAANG interviewer would probe for that weren't explicit yet: a `cancelRide` API, a concrete search-radius-expansion flowchart for "no driver found nearby," a surge-multiplier computation flowchart (the mechanics were described in prose but never diagrammed), and a trip-to-payment state linkage showing that `Completed` isn't really the last state once you account for async capture. It also added two failure-mode rows (rider no-show at pickup, rider disconnect mid-trip — only the driver-side case existed before) and lightly rewrote two dense paragraphs (Section 7.5 Stage 1, Section 11.3 DeepETA) into shorter sentences without changing their content or numbers. New subsections and diagrams are tagged `🆕`. Everything else — the mental model, capacity math, existing diagrams, mnemonics, and golden rules — is untouched because it already worked.
 
+---
+
 ## 1. Mental model
 
 Uber is **three coupled real-time systems wearing one app icon**:
 
-1. **A live geo-index** — where is everyone, right now (updates every 2–4s, at the scale of millions of moving points).
-2. **A matching/auction engine** — pair scarce supply (drivers) with bursty demand (riders) in milliseconds, optimizing for the whole marketplace, not one rider.
+1. **A live geo-index** — where is everyone, right now. Updates every 2–4s, at the scale of millions of moving points.
+2. **A matching/auction engine** — pairs scarce supply (drivers) with bursty demand (riders) in milliseconds. It optimizes for the whole marketplace, not one rider.
 3. **A ledger with a fraud layer** — money must move exactly once, and someone will try to cheat it.
 
-Everything else (maps, ETA, notifications, surge) is glue around these three. If you keep this triad in your head, you can reconstruct 90% of the design from scratch under pressure.
+Everything else — maps, ETA, notifications, surge — is glue around these three. Keep this triad in your head and you can reconstruct 90% of the design from scratch under pressure.
 
-Analogy: think of it as **air-traffic control (geo-index) + a stock exchange matching engine (dispatch) + a bank (payments)**, all sharing one mobile app.
+**Analogy:** think of it as **air-traffic control (geo-index) + a stock exchange matching engine (dispatch) + a bank (payments)** — all sharing one mobile app.
 
 ---
 
@@ -22,13 +24,13 @@ Talk through Uber in this order out loud. This is the checklist — rehearse it 
 
 ```mermaid
 flowchart TD
-    A["1. Clarify requirements<br/>functional + non-functional<br/>scope: ride-hailing core, not full Uber Eats/Freight"] --> B["2. Capacity estimate<br/>QPS, storage, bandwidth, servers<br/>call out the PEAK vs AVERAGE gap"]
+    A["1. Clarify requirements<br/>Functional + non-functional<br/>Scope: ride-hailing core,<br/>not full Uber Eats/Freight"] --> B["2. Capacity estimate<br/>QPS, storage, bandwidth, servers<br/>Call out PEAK vs AVERAGE gap"]
     B --> C["3. API design<br/>updateDriverLocation, findNearbyDrivers,<br/>requestRide, showETA, confirmPickup,<br/>showTripUpdates, endTrip"]
-    C --> D["4. High-level design<br/>draw boxes: location manager, geo-index,<br/>dispatch, trip manager, ETA service,<br/>payment service, DBs, cache, LB"]
-    D --> E["5. Deep dive (pick 2, interviewer picks rest)<br/>- geo-indexing (geohash/quadtree/H3)<br/>- dispatch/matching algorithm<br/>- ETA & routing<br/>- payments & fraud"]
-    E --> F["6. Trade-offs & failure modes<br/>consistency vs availability per component,<br/>race conditions, hot shards, driver churn"]
-    F --> G["7. Wrap-up<br/>recap non-functional requirements met,<br/>name 1-2 things you'd improve given more time"]
-    G -.loop back if interviewer redirects.-> A
+    C --> D["4. High-level design<br/>Draw boxes: location manager, geo-index,<br/>dispatch, trip manager, ETA service,<br/>payment service, DBs, cache, LB"]
+    D --> E["5. Deep dive<br/>Pick 2, interviewer picks the rest<br/>- Geo-indexing (geohash/quadtree/H3)<br/>- Dispatch/matching algorithm<br/>- ETA and routing<br/>- Payments and fraud"]
+    E --> F["6. Trade-offs and failure modes<br/>Consistency vs availability per component,<br/>race conditions, hot shards, driver churn"]
+    F --> G["7. Wrap-up<br/>Recap non-functional requirements met,<br/>name 1-2 things you'd improve given more time"]
+    G -.Loop back if interviewer redirects.-> A
 ```
 
 **Cheat-sheet for this section**
@@ -50,21 +52,24 @@ You're being asked "Design Uber" (or a variant) when you hear:
 - "Design **fleet tracking / nearby X** with live location updates every few seconds."
 - Any prompt mentioning **surge pricing, driver-rider matching, live ETA, or in-app payment with fraud**.
 
-Distinguish from adjacent problems:
-- **Yelp/proximity search** = static points, read-heavy, no matching, no payments → subset of Uber's geo-index problem, not the whole thing.
-- **Google Maps** = routing/tiles/traffic at planetary scale, no marketplace/matching — Uber's ETA service *depends on* a Maps-like routing engine but doesn't rebuild it in an interview.
-- **WhatsApp/Twitter** = messaging fan-out, not geo-matching — don't reach for consistent hashing on user ID here, reach for geo-partitioning.
+### Distinguish from adjacent problems
+
+| Problem | Why it's different |
+|---|---|
+| **Yelp / proximity search** | Static points, read-heavy, no matching, no payments. A subset of Uber's geo-index problem, not the whole thing. |
+| **Google Maps** | Routing/tiles/traffic at planetary scale, no marketplace or matching. Uber's ETA service *depends on* a Maps-like routing engine, but you don't rebuild that engine in this interview. |
+| **WhatsApp / Twitter** | Messaging fan-out, not geo-matching. Don't reach for consistent hashing on user ID here — reach for geo-partitioning instead. |
 
 ---
 
 ## 4. Requirements clarification
 
-### Functional requirements
+### 4.1 Functional requirements
 
 | # | Requirement | Notes to say out loud |
 |---|---|---|
 | 1 | Update driver location | Continuous, every ~4s, from every online driver |
-| 2 | Find nearby drivers | Rider opens app → see available cars near them |
+| 2 | Find nearby drivers | Rider opens app → sees available cars near them |
 | 3 | Request a ride | Rider picks destination + vehicle type → system finds a driver |
 | 4 | Match & notify driver | Nearest/best driver gets a request, can accept/reject |
 | 5 | Show driver ETA | Both pre-trip (pickup ETA) and in-trip (destination ETA) |
@@ -72,28 +77,32 @@ Distinguish from adjacent problems:
 | 7 | Show live trip updates | Both parties see position + time remaining |
 | 8 | End trip & charge | Driver ends trip → fare computed → payment captured |
 | 9 | Manage payments | Auth → capture → payout to driver, refunds |
-| 10 | Cancellations | Either party can cancel pre-pickup; a late cancellation or rider no-show after the driver arrives can carry a fee — a common interviewer follow-up |
+| 10 | Cancellations | Either party can cancel pre-pickup. A late cancellation or rider no-show after the driver arrives can carry a fee — a common interviewer follow-up. |
 
 **Explicitly out of scope unless asked:** ride pooling/UberPool matching, surge pricing UI, driver onboarding/KYC, ratings, in-app chat, multi-stop trips. Say this out loud — it shows scoping discipline.
 
-### Non-functional requirements
+### 4.2 Non-functional requirements
 
 | Requirement | Why it matters here | Design lever |
 |---|---|---|
-| **Availability** > Consistency for location/matching | A stale driver pin is fine; a frozen app is not | AP components: driver location, nearby search |
-| **Strong consistency** for trip state & payments | Two riders must not be matched to one driver; money must not double-charge | CP components: trip manager, ledger |
-| Low latency | Matching must feel instant (<2s), location pings can't queue | In-memory hash table, WebSockets, async writes |
+| **Availability** > Consistency, for location/matching | A stale driver pin is fine. A frozen app is not. | AP components: driver location, nearby search |
+| **Strong consistency**, for trip state & payments | Two riders must never be matched to one driver. Money must never double-charge. | CP components: trip manager, ledger |
+| Low latency | Matching must feel instant (<2s). Location pings can't queue. | In-memory hash table, WebSockets, async writes |
 | High write throughput | Millions of location pings/sec | Horizontally sharded, no cross-shard joins |
 | Horizontal scalability | Rider/driver growth is unbounded and regional | Geo-sharded services, stateless app tier |
 | Fault tolerance | One data center outage shouldn't strand riders | Multi-region, replica failover |
 | Fraud resistance | Money system is an attack surface from day one | Risk engine + anomaly detection (RADAR) |
 
-**Key interview move — CAP per component, not per system.** Uber is *not* one consistency model. Say explicitly: "Driver GPS pings and nearby-driver search are AP (eventual consistency, favor availability); trip state and payment ledger are CP (favor consistency, use synchronous replication / transactions)." This single sentence signals seniority.
+**Key interview move — CAP per component, not per system.** Uber is *not* one consistency model. Say this explicitly:
+
+> "Driver GPS pings and nearby-driver search are AP — eventual consistency, favor availability. Trip state and payment ledger are CP — favor consistency, use synchronous replication and transactions."
+
+That one sentence signals seniority.
 
 **Cheat-sheet for this section**
 - Always ask: what's the scale (DAU, trips/day, regions)? Ping interval? Payment scope (auth only vs full ledger)?
 - Split CAP per subsystem — location vs money.
-- Call out consistency requirement explicitly for double-booking prevention (this is the classic gotcha: "what if two drivers accept the same ride?").
+- Call out the consistency requirement explicitly for double-booking prevention. This is the classic gotcha: "what if two drivers accept the same ride?"
 - Fraud detection as a *non-functional* requirement is easy to forget — mention it before the interviewer has to ask.
 - State latency targets numerically: match within ~2s, location propagation within ~1 ping cycle (4s).
 
@@ -101,7 +110,7 @@ Distinguish from adjacent problems:
 
 ## 5. Capacity estimation (worked example)
 
-Assume (numbers an interviewer will accept, round for speed):
+Assume these numbers — an interviewer will accept them, they're round for speed:
 
 ```
 Registered riders        : 500,000,000  (500M)
@@ -115,20 +124,29 @@ Location ping interval     : every 4s per active driver
 
 ### 5.1 QPS — the number that actually drives architecture
 
-```
-Trip-request QPS (avg) = 20,000,000 trips / 86,400 s ≈ 232 QPS
-Peak factor (rush hour)= 3–5x average in ride-hailing (vs 2x typical web traffic)
-Trip-request QPS (peak)≈ 232 × 4 ≈ 930 QPS
+Let's walk through each calculation step by step.
 
-Location-ping QPS (avg)= 3,000,000 active drivers / 4 s ≈ 750,000 writes/sec  ← THE big number
-  (this dwarfs ride-request QPS by ~800x — say this out loud, it's the headline stat)
+**Trip-request QPS:**
+1. There are 20,000,000 trips a day, and a day has 86,400 seconds.
+2. Average = `20,000,000 ÷ 86,400 ≈ 232 QPS`.
+3. Ride-hailing peaks 3–5x above average during rush hour (higher than the typical web's 2x, because of commute-hour spikes).
+4. Peak = `232 × 4 ≈ 930 QPS`.
 
-Nearby-driver-search QPS: assume each of 20M DAU riders opens/refreshes the map
-  ~10 times/session on average → 200,000,000 reads/day ≈ 2,315 QPS avg, ~10x peak ≈ 23,000 QPS
-  (this is why nearby-search MUST be cache-backed, never hit source-of-truth DB)
-```
+**Location-ping QPS — the big number:**
+1. There are 3,000,000 active drivers, each pinging every 4 seconds.
+2. Average = `3,000,000 ÷ 4 ≈ 750,000 writes/sec`.
+3. This dwarfs ride-request QPS by ~800x. Say this out loud — it's the headline stat.
 
-**Takeaway to say in the room:** "The bottleneck isn't ride requests — it's the 750K/sec firehose of location pings. Any component in that path must be O(1) per write, in-memory, and horizontally shardable. This kills naive 'write to SQL on every ping' designs immediately."
+**Nearby-driver-search QPS:**
+1. Assume each of the 20M daily active riders opens/refreshes the map ~10 times per session.
+2. That's `20,000,000 × 10 = 200,000,000 reads/day`.
+3. Average = `200,000,000 ÷ 86,400 ≈ 2,315 QPS`.
+4. At ~10x peak, that's `≈ 23,000 QPS`.
+5. This is why nearby-search MUST be cache-backed — it should never hit the source-of-truth DB.
+
+**Takeaway to say in the room:**
+
+> "The bottleneck isn't ride requests — it's the 750K/sec firehose of location pings. Any component in that path must be O(1) per write, in-memory, and horizontally shardable. This kills naive 'write to SQL on every ping' designs immediately."
 
 ```mermaid
 pie title Relative QPS share across services (peak)
@@ -138,7 +156,7 @@ pie title Relative QPS share across services (peak)
     "Push notifications" : 3700
 ```
 
-One glance at this pie chart makes Golden Rule #3 ("the busiest number wins the architecture") visceral — location pings aren't just bigger, they're a different order of magnitude from everything else combined.
+One glance at this pie chart makes Golden Rule #3 ("the busiest number wins the architecture") visceral. Location pings aren't just bigger — they're a different order of magnitude from everything else combined.
 
 ### 5.2 Storage — the source usually stops here, don't
 
@@ -147,51 +165,58 @@ Rider metadata:  500M riders × 1,000 B         = 500 GB (one-time) + 500 MB/day
 Driver metadata: 5M drivers × 1,000 B          = 5 GB (one-time)   + 100 MB/day new
 Driver LAST-KNOWN location: 5M × 36 B          = 180 MB (constantly overwritten, not accumulated)
 Trip records: 20M trips/day × 100 B            = 2 GB/day
+```
 
-## Gap the source material skips: location HISTORY (breadcrumb trail)
-Needed for: trip replay, fare disputes, fraud investigation (RADAR), ETA model training.
-Per trip: 900s / 4s ping ≈ 225 pings × 36 B ≈ 8.1 KB/trip
-Daily breadcrumb volume: 20,000,000 trips × 8.1 KB ≈ 162 GB/day  ← dominates storage, not the "2 GB" trip table
+**Gap the source material skips: location HISTORY (breadcrumb trail).** This is needed for trip replay, fare disputes, fraud investigation (RADAR), and ETA model training.
 
+Let's size it step by step:
+
+1. Each trip lasts 900 seconds, with a ping every 4 seconds → `900 ÷ 4 ≈ 225 pings per trip`.
+2. Each ping is ~36 bytes → `225 × 36 B ≈ 8.1 KB per trip`.
+3. There are 20,000,000 trips a day → `20,000,000 × 8.1 KB ≈ 162 GB/day`.
+
+**This 162 GB/day dominates storage** — not the "2 GB" trip table most naive answers stop at.
+
+```
 Total real daily write volume ≈ 162 GB (breadcrumbs) + 2 GB (trips) + 0.6 GB (new users) ≈ ~165 GB/day
 Annual (raw, single copy): 165 GB × 365 ≈ 60 TB/year
 With Cassandra replication factor 3: 60 TB × 3 ≈ 180 TB/year (steady state, before compaction/TTL)
 ```
 
-Apply a **TTL** on raw breadcrumbs (e.g., 90 days hot, then cold-archive to blob storage) — don't keep 180 TB/year forever in your hot cluster. This is the trade-off to name explicitly.
+Apply a **TTL** on raw breadcrumbs — e.g., keep 90 days hot, then cold-archive to blob storage. Don't keep 180 TB/year forever in your hot cluster. Name this trade-off explicitly.
 
 ### 5.3 Node/shard count
 
-```
-Assume 2 TB usable capacity per Cassandra node (leaving headroom for compaction):
-Nodes for 1 year hot retention ≈ 180 TB / 2 TB ≈ 90 nodes (round up → ~100–120 with headroom)
+Working from the 180 TB/year number above:
 
-Geo-sharding: partition by region/city rather than raw geohash/H3 cell count —
-operational locality (data residency, regional outages) matters more than perfectly even key distribution.
-~10–20 metro "super-regions" each independently shardable and failover-able.
-```
+1. Assume 2 TB usable capacity per Cassandra node (leaving headroom for compaction).
+2. Nodes for 1 year of hot retention: `180 TB ÷ 2 TB ≈ 90 nodes`.
+3. Round up for headroom: `~100–120 nodes`.
+
+**On sharding strategy:** geo-shard by region/city, rather than by raw geohash/H3 cell count. Operational locality — data residency, regional outages — matters more than perfectly even key distribution. Aim for ~10–20 metro "super-regions," each independently shardable and failover-able.
 
 ### 5.4 Bandwidth
 
 ```
 Location-ping bandwidth: 750,000 updates/sec × (driverID 3B + lat/long 16B) = 14.25 MB/s × 8 ≈ 114 Mbps ingress
 Trip-request bandwidth: 232/s × 100B × 8 ≈ 185 kbps (negligible next to location pings)
-Egress (trip updates + nearby-driver lists pushed to apps) is same order of magnitude or larger —
-budget roughly 2x ingress for full duplex real-time UI ≈ ~230–300 Mbps aggregate at global scale.
 ```
+
+Egress — trip updates and nearby-driver lists pushed to apps — is the same order of magnitude or larger. Budget roughly 2x ingress for full duplex real-time UI: **~230–300 Mbps aggregate at global scale.**
 
 ### 5.5 In-memory cache sizing (a number worth having ready)
 
-```
-Live location of every active driver, held entirely in RAM (Redis hash table):
-3,000,000 drivers × ~100 B/entry (id + lat/lon + ts + overhead) ≈ 300 MB
-Even with H3-index overhead and 5M total (not just active) drivers: < 1–2 GB total.
-```
-**Say this explicitly** — it's a great "aha": the entire world's live driver fleet position fits comfortably in the RAM of a couple of Redis nodes. The hard part isn't the data size, it's the *write rate* (750K/sec).
+Sizing the live-location table, one step at a time:
+
+1. Each entry (id + lat/lon + timestamp + overhead) is ~100 bytes.
+2. `3,000,000 active drivers × 100 B ≈ 300 MB`.
+3. Even including all 5M total (not just active) drivers, plus H3-index overhead: **< 1–2 GB total.**
+
+**Say this explicitly — it's a great "aha":** the entire world's live driver fleet position fits comfortably in the RAM of a couple of Redis nodes. The hard part isn't the data size — it's the *write rate* (750K/sec).
 
 ### 5.6 Servers — go beyond the textbook formula
 
-The naive formula `DAU / RPS-per-server` (20M / 8,000 ≈ 2,500 servers) is a fine sanity check but conflates wildly different services. Break it down per service instead — this is the trade-off/critique to voice:
+The naive formula `DAU / RPS-per-server` (`20M / 8,000 ≈ 2,500 servers`) is a fine sanity check, but it conflates wildly different services. Break it down per service instead — this is the trade-off/critique to voice:
 
 | Service | Peak QPS | RPS/server (est.) | Servers (w/ 2x redundancy) |
 |---|---|---|---|
@@ -202,37 +227,39 @@ The naive formula `DAU / RPS-per-server` (20M / 8,000 ≈ 2,500 servers) is a fi
 
 **Cheat-sheet for this section**
 - Lead with QPS, not storage — QPS (750K/sec location writes) is what shapes the architecture.
-- Always separate **average** and **peak** (3–5x for ride-hailing due to commute-hour spikes, weather, events).
-- Storage: the "last known location" table is tiny (180 MB); the **breadcrumb/history trail** is the real storage driver (~162 GB/day) — naming this gap shows depth beyond the course material.
+- Always separate **average** and **peak** (3–5x for ride-hailing, due to commute-hour spikes, weather, events).
+- Storage: the "last known location" table is tiny (180 MB); the **breadcrumb/history trail** is the real storage driver (~162 GB/day). Naming this gap shows depth beyond the course material.
 - Name a retention/TTL policy — don't let hot storage grow unbounded.
 - Give a per-service server breakdown, not one blanket number — shows you understand heterogeneous load.
 - One memorable number: the whole live driver fleet's positions fit in a couple GB of RAM.
 
 ### 5.7 Redone example — what if the interviewer changes the inputs?
 
-Interviewers routinely swap one assumption mid-conversation to see if your model actually holds together, not just memorized. Suppose the interviewer stops you and says: *"Let's scope this to a single mid-size country, not global — 60M registered riders, 4M DAU, 1.5M daily active drivers, and let's tighten the ping interval to 2s for better in-city matching."*
+Interviewers routinely swap one assumption mid-conversation, to see if your model actually holds together — not just whether you memorized it.
 
-Redo the math live, using the exact same formulas with new numbers plugged in:
+**The new scenario:** the interviewer stops you and says: *"Let's scope this to a single mid-size country, not global — 60M registered riders, 4M DAU, 1.5M daily active drivers, and let's tighten the ping interval to 2s for better in-city matching."*
 
-```
-Daily trips (assume ~1 trip/DAU): 4,000,000
-Trip-request QPS (avg) = 4,000,000 / 86,400 ≈ 46 QPS
-Trip-request QPS (peak) ≈ 46 × 4 ≈ 185 QPS
+Redo the math live, using the exact same formulas with the new numbers plugged in.
 
-Location-ping QPS (avg) = 1,500,000 drivers / 2s ≈ 750,000 writes/sec
-  ← notice this lands on the SAME 750K/sec as the original 3M-driver / 4s GLOBAL estimate.
-  Halving the driver count but also halving the ping interval is a wash — say this out loud,
-  it proves you understand the formula, not just the memorized answer.
+**Trip requests:**
+1. Assume ~1 trip per DAU → 4,000,000 daily trips.
+2. Average QPS: `4,000,000 ÷ 86,400 ≈ 46 QPS`.
+3. Peak QPS: `46 × 4 ≈ 185 QPS`.
 
-Breadcrumb storage/day = 4,000,000 trips × (900s / 2s pings) × 36 B/ping
-  = 4,000,000 × 450 pings × 36 B ≈ 64.8 GB/day
-  (pings/trip doubled from ~225 to ~450 because cadence doubled, so per-trip bytes doubled too: ~16.2 KB/trip)
-Annual raw ≈ 64.8 GB × 365 ≈ 23.6 TB/year; × 3 replication ≈ ~71 TB/year
-Nodes needed (2 TB/node) ≈ 71 TB / 2 TB ≈ 36 nodes — far fewer than the ~100-120 for the global estimate,
-  which makes sense: it's one country's history, not the whole world's.
-```
+**Location pings:**
+1. `1,500,000 drivers ÷ 2s ≈ 750,000 writes/sec`.
+2. **Notice this lands on the exact same 750K/sec** as the original 3M-driver / 4s global estimate.
+3. Halving the driver count while also halving the ping interval is a wash. Say this out loud — it proves you understand the formula, not just the memorized answer.
 
-**The move that matters:** don't panic when the interviewer changes a number — re-derive from the same formulas live, out loud. That halving drivers while doubling ping frequency nets an *identical* QPS is exactly the kind of on-the-fly sensitivity insight that separates "understood the model" from "memorized the answer."
+**Breadcrumb storage:**
+1. Pings per trip doubled from ~225 to ~450, because the ping cadence doubled: `900s ÷ 2s = 450 pings`.
+2. Per-trip bytes also doubled: `450 × 36 B ≈ 16.2 KB/trip`.
+3. Daily storage: `4,000,000 trips × 16.2 KB ≈ 64.8 GB/day`.
+4. Annual raw: `64.8 GB × 365 ≈ 23.6 TB/year`.
+5. With 3x replication: `23.6 TB × 3 ≈ ~71 TB/year`.
+6. Nodes needed (at 2 TB/node): `71 TB ÷ 2 TB ≈ 36 nodes` — far fewer than the ~100–120 for the global estimate. That makes sense: it's one country's history, not the whole world's.
+
+**The move that matters:** don't panic when the interviewer changes a number. Re-derive from the same formulas, live, out loud. That halving drivers while doubling ping frequency nets an *identical* QPS is exactly the kind of on-the-fly sensitivity insight that separates "understood the model" from "memorized the answer."
 
 ---
 
@@ -271,7 +298,7 @@ Nodes needed (2 TB/node) ≈ 71 TB / 2 TB ≈ 36 nodes — far fewer than the ~1
 | Confirm pickup | `confirmPickup(driverID, riderID, timestamp)` | Marks trip start |
 | Show trip updates | `showTripUpdates(tripID, riderID, driverID, driverLat, driverLong, timeElapsed, timeRemaining)` | Live trip telemetry |
 | End the trip | `endTrip(tripID, riderID, driverID, timeElapsed, lat, long)` | Triggers fare calc + payment |
-| 🆕 Cancel a ride | `cancelRide(tripID, initiatorID, initiatorType, reason)` | Either party can call it; free before a driver is assigned, may incur a fee once the driver has arrived (no-show) — see Section 17 |
+| 🆕 Cancel a ride | `cancelRide(tripID, initiatorID, initiatorType, reason)` | Either party can call it. Free before a driver is assigned; may incur a fee once the driver has arrived (no-show) — see Section 17. |
 
 ### 7.2 Data model / schema
 
@@ -295,7 +322,13 @@ erDiagram
 | **Payment/Ledger entry** | MySQL (ledger needs ACID) | entryID (PK), tripID, riderID, driverID, amount, type (debit/credit), idempotencyKey, status (authorized/captured/failed/refunded), createdAt | Double-entry: every trip produces a *matched* debit(rider) + credit(driver) pair, never a lone row |
 | **Payment method** | Payment Profile Service, tokenized | paymentMethodID, riderID, PSP token (never a raw card number) | PCI scope reduction — the app/DB never touches a real card number, only a PSP-issued token |
 
-**Worked example — ledger row volume:** 20M trips/day × 2 rows/trip (matched debit+credit) × ~200 B/row ≈ 8 GB/day of pure ledger writes — small next to the 162 GB/day breadcrumb trail, but this is the data that must survive audits and regulatory retention for *years*, unlike breadcrumbs which get a 90-day TTL. Naming this contrast (small-but-permanent vs. huge-but-disposable) is a good depth signal.
+**Worked example — ledger row volume:**
+1. There are 20M trips/day.
+2. Each trip produces 2 rows (a matched debit + credit).
+3. Each row is ~200 bytes.
+4. `20,000,000 × 2 × 200 B ≈ 8 GB/day` of pure ledger writes.
+
+That's small next to the 162 GB/day breadcrumb trail — but this is the data that must survive audits and regulatory retention for *years*, unlike breadcrumbs, which get a 90-day TTL. Naming this contrast — small-but-permanent vs. huge-but-disposable — is a good depth signal.
 
 **Why this three-way split, in one sentence:** hot/ephemeral/high-write data (live location) lives in RAM; append-only historical data (breadcrumbs, completed trips) lives in a horizontally-scalable wide-column store; anything needing relational integrity and ACID (in-flight trip state, money) lives in a traditional RDBMS. This is the data-model mirror of the "CAP per component" idea from Section 4.
 
@@ -404,9 +437,9 @@ sequenceDiagram
 
 ### 7.5 Architecture evolution — from a naive monolith to the final design
 
-Walking an interviewer through *how* you'd arrive at the Section 7.3 architecture — rather than presenting it fully-formed — is often the single most memorable part of the interview. Show what breaks at each stage and why that specific pain forces the next change.
+Walking an interviewer through *how* you'd arrive at the Section 7.3 architecture — rather than presenting it fully-formed — is often the single most memorable part of the interview. At each stage, show what breaks, and why that specific pain forces the next change.
 
-**Stage 1 — naive single-region monolith (what most candidates instinctively draw first):**
+#### Stage 1 — naive single-region monolith (what most candidates instinctively draw first)
 
 ```mermaid
 flowchart LR
@@ -416,9 +449,14 @@ flowchart LR
     API -- "sync charge call" --> PSP["PSP"]
 ```
 
-*What breaks:* 3M active drivers polling every 5s means **600,000 requests/sec just to ask "anything new?"** Most of those calls come back "nothing changed" — wasted work, and still not far off the eventual 750K/sec push-based load, just far less useful per request. Worse, every location update writes into the same relational table as riders, trips, and payments. That churn causes row-level lock contention and index bloat on `driver_location`, which slows down unrelated trip and payment queries too. It's also one DB in one region, so a single outage strands every rider globally. And payment capture blocks on the PSP inside the same request as trip-end, so the user waits 200ms-2s at the worst possible moment — right when they're trying to get out of the car.
+**What breaks, one problem at a time:**
 
-**Stage 2 — push-based location + geo-index + async payment:**
+- **The polling waste.** 3M active drivers, each polling every 5s, means **600,000 requests/sec just to ask "anything new?"** Most of those calls come back "nothing changed" — wasted work. It's still not far off the eventual 750K/sec push-based load, just far less useful per request.
+- **The shared table.** Every location update writes into the same relational table as riders, trips, and payments. That churn causes row-level lock contention and index bloat on `driver_location`, which slows down unrelated trip and payment queries too.
+- **The single region.** One DB in one region means a single outage strands every rider globally.
+- **The blocking payment call.** Payment capture blocks on the PSP inside the same request as trip-end. The user waits 200ms–2s at the worst possible moment — right when they're trying to get out of the car.
+
+#### Stage 2 — push-based location + geo-index + async payment
 
 ```mermaid
 flowchart LR
@@ -432,10 +470,16 @@ flowchart LR
     Kafka --> PaySvc["Payment Service"] --> PSP["PSP"]
 ```
 
-*What improved:* WebSockets replace polling (750K/sec pushed writes instead of 600K/sec mostly-wasted polls, but now every push actually carries new information); Redis absorbs the write-hot location path so the quadtree only rebalances on a periodic flush, not per-ping; async Kafka-driven capture gets the PSP call off the trip-completion critical path.
-*What still breaks:* everything is still **one region** — a rider in Singapore is served by a datacenter in the US, adding 150-250ms to every call — and dispatch is still a single service doing greedy nearest-driver matching with no fraud/risk layer and no geo-sharding, so one metro's traffic spike (a stadium letting out) can degrade the whole global location tier.
+**What improved:**
+- WebSockets replace polling: 750K/sec pushed writes instead of 600K/sec mostly-wasted polls — but now every push actually carries new information.
+- Redis absorbs the write-hot location path, so the quadtree only rebalances on a periodic flush, not per-ping.
+- Async Kafka-driven capture gets the PSP call off the trip-completion critical path.
 
-**Stage 3 — geo-sharded, multi-service final design:**
+**What still breaks:**
+- Everything is still **one region** — a rider in Singapore is served by a datacenter in the US, adding 150–250ms to every call.
+- Dispatch is still a single service doing greedy nearest-driver matching, with no fraud/risk layer and no geo-sharding. So one metro's traffic spike — a stadium letting out — can degrade the whole global location tier.
+
+#### Stage 3 — geo-sharded, multi-service final design
 
 ```mermaid
 flowchart LR
@@ -459,9 +503,19 @@ flowchart LR
     Kafka --> PSP
 ```
 
-*What this buys:* Ringpop-style consistent-hashing + gossip assigns drivers to region shards, so a Tokyo ping never crosses an ocean; H3 replaces the quadtree for uniform-neighbor dispatch and doubles as the surge-pricing index; batched bipartite matching replaces greedy nearest-driver for whole-marketplace efficiency; RADAR sits on the same Kafka stream as payments for real-time fraud signals. This is the architecture detailed in full in Section 7.3 — everything in it answers a specific pain point from Stage 1 or 2, not an arbitrary design choice.
+**What this buys:**
+- Ringpop-style consistent-hashing + gossip assigns drivers to region shards, so a Tokyo ping never crosses an ocean.
+- H3 replaces the quadtree for uniform-neighbor dispatch, and doubles as the surge-pricing index.
+- Batched bipartite matching replaces greedy nearest-driver, for whole-marketplace efficiency.
+- RADAR sits on the same Kafka stream as payments, for real-time fraud signals.
 
-**The narrative to say out loud:** "I'd start simple — single DB, polling — then show you it falls over at 750K/sec and 100+ms cross-region latency, and evolve it in two concrete steps to the geo-sharded, event-driven design." This story is more convincing than presenting the final architecture cold, because it proves the complexity is *earned*, not memorized.
+This is the architecture detailed in full in Section 7.3 — everything in it answers a specific pain point from Stage 1 or 2, not an arbitrary design choice.
+
+**The narrative to say out loud:**
+
+> "I'd start simple — single DB, polling — then show you it falls over at 750K/sec and 100+ms cross-region latency, and evolve it in two concrete steps to the geo-sharded, event-driven design."
+
+This story is more convincing than presenting the final architecture cold, because it proves the complexity is *earned*, not memorized.
 
 **Cheat-sheet for this section**
 - Use this evolution as your opening gambit in the HLD section if the interviewer seems to want depth on *process*, not just the end state.
@@ -488,7 +542,7 @@ flowchart LR
         direction TB
         Q1["Recursive 4-way split of a region"]
         Q2["Adaptive: dense areas get deeper trees"]
-        Q3["Rebuild/rebalance cost on point movement<br/>(bad fit for fast-moving drivers, hence hash-table buffer)"]
+        Q3["Rebuild/rebalance cost on point movement<br/>(bad fit for fast-moving drivers,<br/>hence hash-table buffer)"]
     end
     subgraph H3["H3 (Uber, open-sourced)"]
         direction TB
@@ -508,11 +562,11 @@ flowchart LR
 | Real-world user | Elasticsearch geo queries, MongoDB geo | Yelp, early Uber | Uber (open-sourced 2018), many geospatial analytics stacks |
 | Known weakness | Edge/boundary discontinuity ("two nearby points, very different hash") | Costly rebalancing under high write rate | More complex math (indexing library needed), less human-readable |
 
-**Why Uber specifically prefers H3 over quadtree/geohash for dispatch:** ride-matching needs "give me everything within a radius" queries with *uniform* distance semantics — with a square grid, a diagonal neighbor is ~1.4x farther than an edge neighbor, which silently biases "nearest driver" ranking. Hexagons make all 6 neighbors equidistant, so a k-ring expansion (ring 1, ring 2, ...) is a true, undistorted radius search.
+**Why Uber specifically prefers H3 over quadtree/geohash for dispatch:** ride-matching needs "give me everything within a radius" queries with *uniform* distance semantics. With a square grid, a diagonal neighbor is ~1.4x farther than an edge neighbor — which silently biases "nearest driver" ranking. Hexagons make all 6 neighbors equidistant, so a k-ring expansion (ring 1, ring 2, ...) is a true, undistorted radius search.
 
-**Precision reference tables**
+### 8.2 Precision reference tables
 
-Geohash (base32 string length → approx cell size):
+**Geohash** (base32 string length → approx cell size):
 
 | Length | Cell size (approx) |
 |---|---|
@@ -522,7 +576,7 @@ Geohash (base32 string length → approx cell size):
 | 7 | 153 m × 153 m |
 | 8 | 38.2 m × 19 m |
 
-H3 (resolution → approx hex edge length):
+**H3** (resolution → approx hex edge length):
 
 | Resolution | Edge length (approx) | Typical use |
 |---|---|---|
@@ -543,35 +597,35 @@ H3 (resolution → approx hex edge length):
 
 ## 9. Deep dive: location tracking & geo-sharding
 
-**The core tension:** the spatial index (quadtree/H3) needs to answer "who's near me" fast, but rebuilding/rebalancing it on every 4-second ping from millions of drivers is too expensive.
+**The core tension:** the spatial index (quadtree/H3) needs to answer "who's near me" fast. But rebuilding/rebalancing it on every 4-second ping from millions of drivers is too expensive.
 
-**Solution — decouple write path from read/index path:**
+**Solution — decouple the write path from the read/index path:**
 
 ```mermaid
 sequenceDiagram
-    participant D as Driver App
+    participant Driver as Driver App
     participant LM as Location Manager (WebSocket)
-    participant R as Redis Hash Table<br/>(driverID -> lat,long,ts)
-    participant Q as Geo-Index (Quadtree/H3)
+    participant Redis as Redis Hash Table<br/>(driverID -> lat,long,ts)
+    participant Idx as Geo-Index (Quadtree/H3)
     participant Rider as Rider App
 
-    loop every 4s
-        D->>LM: location ping
-        LM->>R: SET driverID -> (lat, long, ts)   [O(1), always fresh]
+    loop Every 4 seconds
+        Driver->>LM: Location ping
+        LM->>Redis: SET driverID -> (lat, long, ts) [O(1), always fresh]
     end
-    loop every 10-15s
-        R->>Q: batch flush latest positions
-        Q->>Q: rebalance affected cells only
+    loop Every 10-15 seconds
+        Redis->>Idx: Batch flush latest positions
+        Idx->>Idx: Rebalance affected cells only
     end
-    Rider->>Q: findNearbyDrivers(lat, long)
-    Q-->>Rider: candidate cell contents (up to ~15s stale)
-    Note over Rider,Q: freshest position for a SPECIFIC known driver<br/>(e.g. during an active trip) is read straight from Redis, not the index
+    Rider->>Idx: findNearbyDrivers(lat, long)
+    Idx-->>Rider: Candidate cell contents (up to ~15s stale)
+    Note over Rider,Idx: Freshest position for a SPECIFIC known driver (e.g. an active trip)<br/>is read straight from Redis, not the index
 ```
 
 - **Freshness split:** "where is driver X right now" (active trip tracking) reads Redis directly — always fresh. "Who's near me" (discovery) reads the spatial index — up to ~15s stale, which is an acceptable trade-off since a driver 15s away hasn't moved far.
-- **Geo-sharding:** partition Redis and the geo-index by coarse region (H3 res 2–4, or simply "metro area") so a Tokyo location ping never touches a São Paulo shard. This bounds shard size, bounds blast radius of a shard failure, and satisfies data-residency requirements.
-- **Consistent hashing / gossip for shard ownership:** production systems (Uber uses a library called Ringpop internally) use consistent hashing + a gossip protocol (SWIM) to assign driver IDs to owning nodes and rebalance smoothly when nodes join/leave — avoids a central coordinator being a bottleneck or SPOF.
-- **Adaptive ping interval:** real systems don't use a flat 4s for everyone — drivers in dense urban cores or mid-dispatch ping faster (~1–2s) for matching accuracy; idle drivers in sparse areas can back off to 10s+ to save battery/bandwidth.
+- **Geo-sharding:** partition Redis and the geo-index by coarse region (H3 res 2–4, or simply "metro area"), so a Tokyo location ping never touches a São Paulo shard. This bounds shard size, bounds the blast radius of a shard failure, and satisfies data-residency requirements.
+- **Consistent hashing / gossip for shard ownership:** production systems (Uber uses a library called Ringpop internally) use consistent hashing plus a gossip protocol (SWIM) to assign driver IDs to owning nodes, and to rebalance smoothly when nodes join/leave. This avoids a central coordinator becoming a bottleneck or single point of failure.
+- **Adaptive ping interval:** real systems don't use a flat 4s for everyone. Drivers in dense urban cores or mid-dispatch ping faster (~1–2s) for matching accuracy; idle drivers in sparse areas can back off to 10s+ to save battery/bandwidth.
 
 **Cheat-sheet for this section**
 - The killer insight: separate the "always fresh, O(1)" hot path (hash table) from the "periodically rebuilt, spatially queryable" index — don't index on every write.
@@ -586,18 +640,18 @@ Not every client-server interaction needs the same transport. Pick the channel p
 
 ```mermaid
 flowchart TD
-    A{"What needs to be delivered?"} --> B{"Is the app in the<br/>foreground with an<br/>active trip/dispatch?"}
-    B -- yes --> C["Persistent WebSocket<br/>(driver location, trip telemetry,<br/>dispatch offers — sub-second, bidirectional)"]
-    B -- no --> D{"Does it need to wake<br/>a backgrounded/killed app?"}
-    D -- yes --> E["OS push notification<br/>(APNs/FCM) — 'driver arrived',<br/>'trip cancelled', ride receipts"]
-    D -- no --> F{"Is it a one-off,<br/>infrequent status check?"}
-    F -- yes --> G["Short poll or plain REST<br/>(e.g. rider checking fare estimate once)"]
-    F -- no --> C
+    A{"What needs to<br/>be delivered?"} --> B{"Is the app in the<br/>foreground with an<br/>active trip/dispatch?"}
+    B -- Yes --> C["Persistent WebSocket<br/>(driver location, trip telemetry,<br/>dispatch offers - sub-second, bidirectional)"]
+    B -- No --> D{"Does it need to wake<br/>a backgrounded/killed app?"}
+    D -- Yes --> E["OS push notification<br/>(APNs/FCM) - 'driver arrived',<br/>'trip cancelled', ride receipts"]
+    D -- No --> F{"Is it a one-off,<br/>infrequent status check?"}
+    F -- Yes --> G["Short poll or plain REST<br/>(e.g. rider checking fare estimate once)"]
+    F -- No --> C
 ```
 
-- **WebSocket** wins for anything continuous and bidirectional while the app is open: location pings, dispatch offers, live trip telemetry. This is why Section 5.6's server-sizing table budgets ~5K-50K concurrent connections per location-ingestion server.
+- **WebSocket** wins for anything continuous and bidirectional while the app is open: location pings, dispatch offers, live trip telemetry. This is why Section 5.6's server-sizing table budgets ~5K–50K concurrent connections per location-ingestion server.
 - **OS push (APNs/FCM)** is required, not optional, for anything that must reach a backgrounded or fully-killed app — a WebSocket only exists while the app process is alive. "Driver arrived," "trip cancelled by the other party," and the post-trip receipt all go through push, with the open WebSocket (if any) as a redundant/faster confirmation.
-- **Polling/REST** is fine for genuinely one-off, low-frequency reads with no urgency (e.g., "show my ride history").
+- **Polling/REST** is fine for genuinely one-off, low-frequency reads with no urgency — e.g., "show my ride history."
 
 **Push delivery is fire-and-forget over an unreliable third party (APNs/FCM) — plan for retries and a fallback:**
 
@@ -609,19 +663,27 @@ sequenceDiagram
     participant Phone as Rider's Phone
 
     TM->>PN: notify(riderID, "driver arrived")
-    PN->>APNs: send push
-    alt delivered
-        APNs-->>Phone: push shown
+    PN->>APNs: Send push
+    alt Delivered
+        APNs-->>Phone: Push shown
     else APNs times out / device offline
-        APNs-->>PN: delivery failure/unknown
-        PN->>PN: retry with backoff (bounded attempts)
-        alt still critical after retries exhausted
-            PN->>Phone: fall back to SMS (safety/critical notices only)
+        APNs-->>PN: Delivery failure/unknown
+        PN->>PN: Retry with backoff (bounded attempts)
+        alt Still critical after retries exhausted
+            PN->>Phone: Fall back to SMS (safety/critical notices only)
         end
     end
 ```
 
-**Worked example — notification fan-out load:** 20M daily trips × ~4 notification-worthy events/trip (matched, driver arrived, trip started, trip completed/receipt) ≈ 80M pushes/day ≈ 926 pushes/sec average, spiking to ~3,700/sec at a 4x peak factor — two orders of magnitude below the 750K/sec location firehose, which is why the push service is never the bottleneck and can run a far smaller, simpler fleet than the location-ingestion tier.
+**Worked example — notification fan-out load.** Let's walk through it:
+
+1. There are 20M daily trips.
+2. Each trip generates ~4 notification-worthy events (matched, driver arrived, trip started, trip completed/receipt).
+3. `20,000,000 × 4 = 80,000,000 pushes/day`.
+4. Average: `80,000,000 ÷ 86,400 ≈ 926 pushes/sec`.
+5. At a 4x peak factor: `≈ 3,700 pushes/sec`.
+
+That's **two orders of magnitude below** the 750K/sec location firehose — which is why the push service is never the bottleneck and can run a far smaller, simpler fleet than the location-ingestion tier.
 
 **Cheat-sheet for this section**
 - Give the decision tree, not a single blanket answer, when asked "WebSocket or polling?" — the real answer is "it depends which of these three needs you're serving."
@@ -636,20 +698,17 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    rect rgb(230,240,255)
-    Note over Rider,Driver: PUSH model (used above) — server picks a driver and pushes the offer
+    Note over Rider,Driver: PUSH model (used above): server picks a driver and pushes the offer
     Rider->>Server: requestRide
-    Server->>Driver: here's a ride, accept/reject?
-    Driver-->>Server: accept
-    end
-    rect rgb(255,240,230)
-    Note over Rider,Driver: PULL model — drivers see a feed and claim rides (common in freight/food delivery)
+    Server->>Driver: Here's a ride, accept/reject?
+    Driver-->>Server: Accept
+
+    Note over Rider,Driver: PULL model: drivers see a feed and claim rides (common in freight/food delivery)
     Rider->>Server: requestRide
-    Server->>Feed: publish open ride to nearby drivers' feeds
-    Driver->>Feed: browse & claim
+    Server->>Feed: Publish open ride to nearby drivers' feeds
+    Driver->>Feed: Browse and claim
     Driver->>Server: claim(rideID)
-    Server-->>Driver: confirmed (first claim wins, others get "already taken")
-    end
+    Server-->>Driver: Confirmed (first claim wins, others get "already taken")
 ```
 
 | | Push | Pull |
@@ -660,22 +719,22 @@ sequenceDiagram
 | Best for | Rider-facing on-demand rides (Uber/Lyft core) | Freight, food delivery, gig marketplaces with driver choice |
 | Failure mode | Sequential rejects add latency | "Nobody claims it" — starvation for undesirable jobs |
 
-Uber's core rideshare product is push-based; food delivery (feed-style claiming) leans more pull-like in parts of the flow.
+Uber's core rideshare product is push-based. Food delivery (feed-style claiming) leans more pull-like in parts of the flow.
 
 ### 10.2 Matching algorithms — beyond "nearest driver"
 
-**Naive:** nearest available driver by straight-line or road distance. Simple, but greedy-locally-optimal — bad for the marketplace globally (e.g., always taking the closest driver can starve a slightly-farther driver and create local supply deserts).
+**Naive approach:** pick the nearest available driver by straight-line or road distance. Simple, but greedy-locally-optimal — bad for the marketplace globally. For example: always taking the closest driver can starve a slightly-farther driver, creating local supply deserts.
 
-**Uber's real approach — batched bipartite matching (their dispatch optimization, "DISCO"-style):**
+**Uber's real approach — batched bipartite matching** (their dispatch optimization, "DISCO"-style):
 
 ```mermaid
 flowchart TD
-    A["Collect ride requests + available drivers<br/>in a small time window (100ms - few sec)"] --> B["Build bipartite graph<br/>riders (left) x candidate drivers (right)<br/>edge weight = predicted ETA / cost"]
+    A["Collect ride requests + available drivers<br/>in a small time window (100ms - few sec)"] --> B["Build bipartite graph:<br/>riders (left) x candidate drivers (right)<br/>edge weight = predicted ETA / cost"]
     B --> C["Solve assignment problem<br/>(Hungarian algorithm / min-cost matching)<br/>minimize aggregate wait time, not just one rider's"]
     C --> D["Dispatch confirmed matches"]
     D --> E{"Driver rejects?"}
-    E -- yes --> A
-    E -- no --> F["Trip starts"]
+    E -- Yes --> A
+    E -- No --> F["Trip starts"]
 ```
 
 | Approach | Optimizes for | Cost | Latency |
@@ -684,14 +743,17 @@ flowchart TD
 | Batched bipartite matching | Whole-marketplace efficiency (aggregate ETA, fewer long-hauls) | Higher (assignment problem), needs a batching window | Small added delay (fits in match SLA) |
 | Auction/bid-based | Price discovery | Complex, rarely used for core rideshare | Variable |
 
-**Trade-off to name:** batching trades a few hundred milliseconds of added latency for materially better fleet efficiency (fewer wasted deadhead miles, more balanced pickup times across a whole zone) — worth it at Uber's scale, probably not worth the complexity for a 10-driver campus shuttle app.
+**Trade-off to name:** batching trades a few hundred milliseconds of added latency for materially better fleet efficiency — fewer wasted deadhead miles, more balanced pickup times across a whole zone. Worth it at Uber's scale; probably not worth the complexity for a 10-driver campus shuttle app.
 
 **Mnemonic — dispatch selection factors ("D.R.I.V.E."):**
-- **D**istance / ETA to pickup
-- **R**ating & reliability (acceptance rate, cancellation history)
-- **I**dle time (fairness — don't always pick the same driver)
-- **V**ehicle type match (economy/XL/pool)
-- **E**n-route status (prefer drivers already heading that direction over one who'd need a U-turn)
+
+| Letter | Factor |
+|---|---|
+| D | **D**istance / ETA to pickup |
+| R | **R**ating & reliability (acceptance rate, cancellation history) |
+| I | **I**dle time (fairness — don't always pick the same driver) |
+| V | **V**ehicle type match (economy/XL/pool) |
+| E | **E**n-route status (prefer drivers already heading that direction over one who'd need a U-turn) |
 
 ### 🆕 10.3 Search-radius expansion when no driver is found
 
@@ -700,13 +762,22 @@ Sometimes the geo-index query in Section 10.2 comes back empty, or every candida
 ```mermaid
 flowchart TD
     A["Query geo-index at radius r = 1 km<br/>(k-ring 1 in H3 terms)"] --> B{"Candidate driver<br/>found and accepts<br/>within ~15s?"}
-    B -- yes --> C["Dispatch normally<br/>(Section 10.2 batched matching)"]
-    B -- no --> D{"r < r_max (e.g. 5 km)?"}
-    D -- yes --> E["Widen radius (~2-3x per step:<br/>1 km -> 3 km -> 5 km)<br/>and requery"] --> A
-    D -- no --> F["No supply nearby:<br/>show rider an honest wait estimate,<br/>or a surge-adjusted price to pull in supply"]
+    B -- Yes --> C["Dispatch normally<br/>(Section 10.2 batched matching)"]
+    B -- No --> D{"r < r_max (e.g. 5 km)?"}
+    D -- Yes --> E["Widen radius (~2-3x per step:<br/>1 km -> 3 km -> 5 km)<br/>and requery"] --> A
+    D -- No --> F["No supply nearby:<br/>show rider an honest wait estimate,<br/>or a surge-adjusted price to pull in supply"]
 ```
 
-**Illustrative numbers, not a documented Uber constant** — the pattern is what matters, not the exact figures: start at a 1 km radius, retry each ring for up to ~15s, widen roughly 2-3x per step, and give up widening past ~5 km after ~30-45s of total elapsed search. Past that cap, be honest with the rider instead of hanging silently — either a queue estimate or a surge-priced offer that might pull an idle driver in from farther away.
+**Illustrative numbers, not a documented Uber constant** — the pattern is what matters, not the exact figures:
+
+| Step | Radius | Dwell time |
+|---|---|---|
+| 1 | 1 km | ~15s |
+| 2 | 3 km | ~15s |
+| 3 | 5 km (cap) | ~15s |
+| Total elapsed before giving up widening | — | ~30–45s |
+
+Past the 5 km cap, be honest with the rider instead of hanging silently — either a queue estimate or a surge-priced offer that might pull an idle driver in from farther away.
 
 **Recall hook — "1-3-5-15":** radius steps 1 km → 3 km → 5 km, ~15s dwell per ring before expanding.
 
@@ -738,22 +809,24 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A["Road network as graph<br/>nodes=intersections, edges=road segments<br/>(one-ways, turn restrictions, speed limits as edge attrs)"] --> B["Partition graph into cells"]
+    A["Road network as graph<br/>Nodes = intersections, edges = road segments<br/>(one-ways, turn restrictions,<br/>speed limits as edge attrs)"] --> B["Partition graph into cells"]
     B --> C1["Cell 1: precompute<br/>contraction hierarchy"]
     B --> C2["Cell 2: precompute<br/>contraction hierarchy"]
     B --> C3["Cell N: precompute<br/>contraction hierarchy"]
     C1 & C2 & C3 --> D["Stitch boundary paths"]
     D --> E["Shortest path in ~ms<br/>(parallel precompute hides graph size)"]
-    E --> F["Apply live traffic as edge weights<br/>-> travel-time estimate"]
+    E --> F["Apply live traffic as edge weights<br/>to get travel-time estimate"]
 ```
 
 ### 11.3 DeepETA — the ML correction layer
 
-Routing engines are good at *distance/path* but systematically mis-estimate *time* (traffic surprises, unmodeled local effects). Uber's real approach (DeepETA, described in their engineering blog):
+Routing engines are good at *distance/path*, but they systematically mis-estimate *time* — traffic surprises, unmodeled local effects. Here's Uber's real approach (DeepETA, described in their engineering blog), step by step:
 
-1. Routing engine produces a baseline ETA from the best path + live traffic weights.
-2. A post-processing ML model (transformer-style, quantile regression) sits on top of that baseline. It takes features like origin, destination, time of day/week, weather, live traffic, and this exact segment's historical error — then predicts a **residual correction**: how far off the routing engine's raw estimate is likely to be, and in which direction.
-3. This hybrid (deterministic routing + learned residual) beats either pure-graph-algorithm ETA or pure-ML ETA alone, and is far cheaper to retrain/redeploy than a full end-to-end model.
+1. The routing engine produces a baseline ETA from the best path plus live traffic weights.
+2. A post-processing ML model — transformer-style, quantile regression — sits on top of that baseline. It takes features like origin, destination, time of day/week, weather, live traffic, and this exact segment's historical error.
+3. It then predicts a **residual correction**: how far off the routing engine's raw estimate is likely to be, and in which direction.
+
+This hybrid — deterministic routing plus a learned residual — beats either pure-graph-algorithm ETA or pure-ML ETA alone. It's also far cheaper to retrain/redeploy than a full end-to-end model.
 
 **Cheat-sheet for this section**
 - Always split the problem into path-finding vs. time-estimation — interviewers listen for this decomposition.
@@ -768,44 +841,55 @@ Routing engines are good at *distance/path* but systematically mis-estimate *tim
 
 Not explicitly asked for by the source material, but a very common interview follow-up ("how would you handle a stadium letting out 50,000 people with no drivers around?").
 
-**Mechanics:**
-1. Discretize the map into fixed cells (H3 resolution 8/9 is a natural fit — uniform-size zones).
-2. Continuously compute a **supply/demand ratio** per cell (open ride requests vs. available drivers), refreshed every 1–5 minutes.
-3. When demand >> supply in a cell, apply a **multiplier** to the base fare in that cell — this does two things simultaneously: (a) dampens demand (some riders wait it out), (b) incentivizes idle drivers nearby to reposition into the surge cell.
-4. Multiplier decays smoothly as the ratio normalizes — avoid discontinuous jumps (rider trust problem) by smoothing/capping the rate of change.
+### 12.1 Mechanics — walked through step by step
 
-**Trade-offs:**
-- Cell size too small → noisy, flickering surge boundaries (rider sees 2.1x on one side of the street, 1.0x on the other). Too large → fails to target the actual hot spot.
-- Update frequency too fast → price whiplash erodes trust; too slow → doesn't clear the market during a fast-moving event (concert letting out).
-- Surge is fundamentally a **read from the same live geo-index used for dispatch** — it's not a separate data pipeline, it's a different aggregation over the same driver-position stream.
+1. Discretize the map into fixed cells — H3 resolution 8/9 is a natural fit, since it gives uniform-size zones.
+2. Continuously compute a **supply/demand ratio** per cell — open ride requests vs. available drivers — refreshed every 1–5 minutes.
+3. When demand >> supply in a cell, apply a **multiplier** to the base fare in that cell. This does two things at once:
+   - dampens demand (some riders wait it out), and
+   - incentivizes idle drivers nearby to reposition into the surge cell.
+4. Let the multiplier decay smoothly as the ratio normalizes. Avoid discontinuous jumps — a sudden price swing is a rider-trust problem — by smoothing/capping the rate of change.
 
-### 🆕 12.1 How the multiplier actually gets computed
+### 12.2 Trade-offs
 
-The prose above says "apply a multiplier" — here's the mechanism an interviewer will ask you to spell out:
+- **Cell size too small** → noisy, flickering surge boundaries (rider sees 2.1x on one side of the street, 1.0x on the other). **Cell size too large** → fails to target the actual hot spot.
+- **Update frequency too fast** → price whiplash erodes trust. **Too slow** → doesn't clear the market during a fast-moving event (a concert letting out).
+- Surge is fundamentally a **read from the same live geo-index used for dispatch**. It's not a separate data pipeline — it's a different aggregation over the same driver-position stream.
+
+### 🆕 12.3 How the multiplier actually gets computed
+
+The mechanics above say "apply a multiplier" — here's the concrete pipeline an interviewer will ask you to spell out.
 
 ```mermaid
 flowchart TD
     A["Every refresh window (1-5 min),<br/>per H3 cell"] --> B["Count open ride requests R<br/>and available drivers D in the cell"]
     B --> C["ratio = R / max(D, 1)"]
     C --> D{"Which band does<br/>ratio fall in?"}
-    D -- "ratio <= 1.2" --> E["target multiplier = 1.0x<br/>(no surge)"]
-    D -- "1.2 < ratio <= 2" --> F["target multiplier ~1.3x-1.5x"]
-    D -- "2 < ratio <= 4" --> G["target multiplier ~1.5x-2.5x"]
-    D -- "ratio > 4" --> H["target multiplier ~2.5x-3x+,<br/>capped by policy"]
+    D -- "ratio <= 1.2" --> E["Target multiplier = 1.0x<br/>(no surge)"]
+    D -- "1.2 < ratio <= 2" --> F["Target multiplier ~1.3x-1.5x"]
+    D -- "2 < ratio <= 4" --> G["Target multiplier ~1.5x-2.5x"]
+    D -- "ratio > 4" --> H["Target multiplier ~2.5x-3x+,<br/>capped by policy"]
     E & F & G & H --> I["Smooth: clamp the change from<br/>the previous multiplier to +/- 0.1-0.2x<br/>per refresh window"]
     I --> J["Publish: shown as rider price multiplier<br/>+ used as a driver repositioning signal"]
 ```
 
-**Illustrative bands, not a published Uber formula** — the ratio thresholds and multiplier values are for demonstrating the mechanism, not exact production constants.
+**Illustrative bands, not a published Uber formula** — the ratio thresholds and multiplier values are for demonstrating the mechanism, not exact production constants:
 
-**Recall hook — "if X then Y":** if ratio ≈ 1 (supply meets demand), no surge. If ratio doubles, the multiplier moves up a band — but never linearly and never by more than the smoothing cap in one refresh, because an instant 3x jump is a trust problem even when the math says it's justified.
+| Ratio (requests / drivers) | Target multiplier |
+|---|---|
+| ≤ 1.2 | 1.0x — no surge |
+| 1.2 – 2 | ~1.3x – 1.5x |
+| 2 – 4 | ~1.5x – 2.5x |
+| > 4 | ~2.5x – 3x+, capped by policy |
+
+**Recall hook — "if X then Y":** if the ratio is ≈1 (supply meets demand), there's no surge. If the ratio doubles, the multiplier moves up a band — but never linearly, and never by more than the smoothing cap in one refresh, because an instant 3x jump is a trust problem even when the math says it's justified.
 
 **Cheat-sheet for this section**
 - Ground surge in the geo-index you already built — don't invent a parallel system.
 - Name the H3-resolution choice explicitly as the surge-zone granularity lever.
 - Trade-off pair to state: cell size (targeting precision) vs. update frequency (price stability).
 - Mention the dual purpose: surge both suppresses demand and attracts supply — interviewers like hearing the two-sided effect.
-- If asked "how exactly is the number computed," don't stop at "supply and demand" — walk through the ratio → band → smoothing-cap pipeline in 12.1.
+- If asked "how exactly is the number computed," don't stop at "supply and demand" — walk through the ratio → band → smoothing-cap pipeline in 12.3.
 
 ---
 
@@ -823,22 +907,19 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-    rect rgb(230,240,255)
     Note over App,PSP: Synchronous capture
     App->>PSP: charge(amount) [blocking]
     PSP-->>App: success/fail
-    App-->>User: trip complete (after waiting on PSP)
-    end
-    rect rgb(255,240,230)
+    App-->>App: "Trip complete" (only shown after waiting on PSP)
+
     Note over App,PSP: Asynchronous capture (Uber)
-    App-->>User: trip complete (instant)
+    App-->>App: "Trip complete" (instant)
     App->>Kafka: publish "trip finished" event
     Kafka->>OrderProcessor: consume
     OrderProcessor->>PSP: charge(amount)
     PSP-->>OrderProcessor: result
     OrderProcessor->>Kafka: publish result
     Kafka->>OrderWriter: persist final ledger entry
-    end
 ```
 
 ### 13.2 End-to-end payment workflow (pre-trip auth → post-trip capture)
@@ -857,9 +938,9 @@ sequenceDiagram
     API->>Risk: assess risk(riderID)
     Risk->>UPS: fetch rider history/rating/balance
     UPS-->>Risk: profile data
-    alt risk too high
+    alt Risk too high
         Risk-->>API: reject request
-    else risk acceptable
+    else Risk acceptable
         Risk->>PPS: create authorization token
         PPS->>PAS: forward token
         PAS->>PSP: authorize(token)
@@ -873,17 +954,20 @@ sequenceDiagram
 
 ### 13.3 Kafka's role — why streaming, not direct calls
 
-- **Decoupling**: order-creator, order-processor, and order-writer are independent services that don't need to know about each other's uptime.
-- **Durability**: an event sits safely in Kafka if a downstream consumer is temporarily down — no lost charges.
-- **Async processing**: PSP calls (200ms–2s, external, sometimes flaky) never block the user-facing trip-completion path.
-- **Double-entry bookkeeping**: every money movement is recorded as a matched debit/credit pair in the order store — this is what makes reconciliation and audits tractable, and is the correct mental model for *any* payment ledger design question, not just Uber's.
+- **Decoupling:** order-creator, order-processor, and order-writer are independent services that don't need to know about each other's uptime.
+- **Durability:** an event sits safely in Kafka if a downstream consumer is temporarily down — no lost charges.
+- **Async processing:** PSP calls (200ms–2s, external, sometimes flaky) never block the user-facing trip-completion path.
+- **Double-entry bookkeeping:** every money movement is recorded as a matched debit/credit pair in the order store. This is what makes reconciliation and audits tractable — and it's the correct mental model for *any* payment ledger design question, not just Uber's.
 
-**What to prevent (state this list from memory in an interview):**
-- Lack of payment (trip completed, never charged)
-- Duplicate payment (charged twice — solved via idempotency keys on the charge request)
-- Incorrect payment amount (fare calculation bug)
-- Incorrect currency conversion
-- Dangling authorization (auth'd but never captured or voided — must have a TTL + reconciliation sweep)
+**What to prevent** (state this list from memory in an interview):
+
+| Failure to prevent | How |
+|---|---|
+| Lack of payment (trip completed, never charged) | Reconciliation sweep on dangling completed-but-unpaid trips |
+| Duplicate payment (charged twice) | Idempotency keys on the charge request |
+| Incorrect payment amount | Fare calculation validation |
+| Incorrect currency conversion | Locked exchange rate at time of charge |
+| Dangling authorization (auth'd but never captured or voided) | TTL + reconciliation sweep |
 
 **Cheat-sheet for this section**
 - Lead with "money must be exactly-once" — then explain idempotency keys + Kafka as the mechanism, not just "we use a queue."
@@ -898,33 +982,40 @@ sequenceDiagram
 
 **Why it's hard:** most fraud resembles a zero-day exploit — patterns you haven't seen before. Pure rule-based systems miss novel fraud; pure ML is a black box that's hard to make accountable.
 
-**Fraud categories — mnemonic "G.P.S. F.A.K.E." (ways bad actors abuse the trip):**
-- **G**PS manipulation (spoofing location / fake-GPS apps)
-- **P**adding trip time/distance deliberately (long-hauling)
-- **S**tolen/false identity (fake driver or rider accounts)
-- **F**ees fabricated (bogus cleaning fees, damage claims)
-- **A**ccept-then-abandon (confirms trip, never intends to complete it, forces rider cancellation)
-- **K**it/vehicle mismatch (driving an unapproved vehicle)
-- **E**ntry falsification (false info at account signup)
+### 14.1 Fraud categories — mnemonic "G.P.S. F.A.K.E."
 
-**RADAR architecture:**
+Ways bad actors abuse the trip:
+
+| Letter | Category |
+|---|---|
+| G | **G**PS manipulation (spoofing location / fake-GPS apps) |
+| P | **P**adding trip time/distance deliberately (long-hauling) |
+| S | **S**tolen/false identity (fake driver or rider accounts) |
+| F | **F**ees fabricated (bogus cleaning fees, damage claims) |
+| A | **A**ccept-then-abandon (confirms trip, never intends to complete it, forces rider cancellation) |
+| K | **K**it/vehicle mismatch (driving an unapproved vehicle) |
+| E | **E**ntry falsification (false info at account signup) |
+
+### 14.2 RADAR architecture
 
 ```mermaid
 flowchart TD
     A["Activity time-series stream<br/>(trip events, payment events, GPS traces)"] --> B["RADAR: anomaly detection<br/>identifies fraud pattern onset"]
     B --> C["Auto-generate a mitigation rule"]
     C --> D["Fraud analyst reviews rule"]
-    D -->|approve| E["Rule deployed to protection system<br/>(blocks/flags future matches)"]
-    D -->|reject| F["Feedback to detection model<br/>(reduce false positives)"]
+    D -->|Approve| E["Rule deployed to protection system<br/>(blocks/flags future matches)"]
+    D -->|Reject| F["Feedback to detection model<br/>(reduce false positives)"]
     E --> G["Continuous feedback loop<br/>improves future rule generation"]
     F --> G
+    G --> A
 ```
 
 **Two time dimensions RADAR examines:**
-1. **Trip time** — real-time monitoring during the ride (rider/driver GPS coherence, speed vs. real traffic conditions, route deviation).
-2. **Settlement time** — post-trip, payment processing/reconciliation window (can be days to weeks) where chargebacks and disputes surface.
 
-**Trade-off:** human-in-the-loop review is what makes the system accountable and auditable, but it caps throughput — you can't have an analyst review every one of millions of daily trips. The design compromise is **AI proposes, human approves the *rule*** (not every instance) — one approved rule then auto-applies at scale. This amortizes human review cost across many future fraud attempts.
+1. **Trip time** — real-time monitoring during the ride (rider/driver GPS coherence, speed vs. real traffic conditions, route deviation).
+2. **Settlement time** — post-trip, payment processing/reconciliation window (can be days to weeks), where chargebacks and disputes surface.
+
+**Trade-off:** human-in-the-loop review is what makes the system accountable and auditable, but it caps throughput — you can't have an analyst review every one of millions of daily trips. The design compromise is **AI proposes, human approves the *rule*** (not every instance). One approved rule then auto-applies at scale. This amortizes human review cost across many future fraud attempts.
 
 **Cheat-sheet for this section**
 - Fraud detection is a first-class non-functional requirement for any payments-adjacent design — raise it before being asked.
@@ -933,7 +1024,7 @@ flowchart TD
 - Two time windows matter: real-time (during trip) and settlement time (days/weeks later) — don't only talk about real-time fraud.
 - Acknowledge the ethical/fairness tension explicitly (automated decisions need audit trails) — this is a mature, senior-level point.
 
-### 14.1 Security, rate-limiting & abuse prevention (beyond payment fraud)
+### 14.3 Security, rate-limiting & abuse prevention (beyond payment fraud)
 
 Payment fraud (RADAR, above) is one slice of a bigger abuse surface. A few concrete controls worth naming unprompted:
 
@@ -943,7 +1034,7 @@ Payment fraud (RADAR, above) is one slice of a bigger abuse surface. A few concr
 | Fake ride-request spam / bot accounts | Rate limit `requestRide` per rider account; device attestation + CAPTCHA at signup; new-account trip limits until a trust score builds |
 | Replayed/spoofed location pings | Signed, timestamped pings with a short validity window + nonce — a captured ping can't be replayed later to fake a location |
 | Credential stuffing / account takeover | Standard auth hardening: rate-limited login, MFA for high-risk actions (changing payout bank account), anomaly-based step-up auth |
-| Service-to-service trust | mTLS between internal services (location manager, dispatch, payment) so a compromised edge service can't directly impersonate the payment service |
+| Service-to-service trust | mTLS between internal services (location manager, dispatch, payment), so a compromised edge service can't directly impersonate the payment service |
 | Driver/vehicle identity fraud | Out-of-band KYC/background check at onboarding (non-technical control, but worth naming — it's the first line of defense, before any of the above) |
 
 **Cheat-sheet for this section**
@@ -959,13 +1050,13 @@ Payment fraud (RADAR, above) is one slice of a bigger abuse surface. A few concr
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Requested: rider calls requestRide
-    Requested --> Matching: dispatch searches candidates
-    Matching --> Requested: no driver found / all rejected (retry)
-    Matching --> DriverAssigned: driver accepts
-    DriverAssigned --> Cancelled: rider or driver cancels pre-pickup
-    DriverAssigned --> EnRouteToPickup: driver starts navigating to rider
-    EnRouteToPickup --> Arrived: driver reaches pickup location
+    [*] --> Requested: Rider calls requestRide
+    Requested --> Matching: Dispatch searches candidates
+    Matching --> Requested: No driver found / all rejected (retry)
+    Matching --> DriverAssigned: Driver accepts
+    DriverAssigned --> Cancelled: Rider or driver cancels pre-pickup
+    DriverAssigned --> EnRouteToPickup: Driver starts navigating to rider
+    EnRouteToPickup --> Arrived: Driver reaches pickup location
     Arrived --> InProgress: confirmPickup called
     InProgress --> Completed: endTrip called
     Completed --> [*]
@@ -977,31 +1068,33 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> Offline
-    Offline --> Available: driver goes online
-    Available --> Dispatched: matched to a ride request
-    Dispatched --> Available: rider/driver cancels before pickup
+    Offline --> Available: Driver goes online
+    Available --> Dispatched: Matched to a ride request
+    Dispatched --> Available: Rider/driver cancels before pickup
     Dispatched --> OnTrip: confirmPickup succeeds
     OnTrip --> Available: endTrip succeeds
-    Available --> Offline: driver goes offline
-    Dispatched --> Offline: driver force-quits app (timeout triggers reassignment)
+    Available --> Offline: Driver goes offline
+    Dispatched --> Offline: Driver force-quits app (timeout triggers reassignment)
 ```
 
 ### 🆕 15.3 Trip → payment linkage — why `Completed` isn't really the last state
 
-Section 15.1 treats `Completed` as terminal for the *trip* lifecycle, and that's the right scope for a trip state machine. But Section 13 showed that capture happens asynchronously afterward — in money terms, the trip isn't fully "done" until the ledger says so. Worth drawing this bridge explicitly if the interviewer pushes on "so when does the rider actually get charged":
+Section 15.1 treats `Completed` as terminal for the *trip* lifecycle, and that's the right scope for a trip state machine. But Section 13 showed that capture happens asynchronously afterward. In money terms, the trip isn't fully "done" until the ledger says so.
+
+This is worth drawing explicitly if the interviewer pushes on "so when does the rider actually get charged":
 
 ```mermaid
 stateDiagram-v2
     [*] --> Completed: endTrip called (Section 15.1)
-    Completed --> Paid: async capture succeeds<br/>(Kafka pipeline, Section 13.1)
+    Completed --> Paid: Async capture succeeds<br/>(Kafka pipeline, Section 13.1)
     Completed --> PaymentRetrying: PSP timeout/failure,<br/>retry with backoff
-    PaymentRetrying --> Paid: retry succeeds
-    PaymentRetrying --> PaymentEscalated: retries exhausted -><br/>reconciliation job / manual review
+    PaymentRetrying --> Paid: Retry succeeds
+    PaymentRetrying --> PaymentEscalated: Retries exhausted -><br/>reconciliation job / manual review
     Paid --> [*]
     PaymentEscalated --> [*]
 ```
 
-This is also why trip rows migrate MySQL → Cassandra on completion (Section 7.2) while the *ledger* entry stays in the ACID store until it's actually settled: the trip record and the money settle on two related but distinct timelines, and only one of them (money) needs years of durable, auditable history.
+This is also why trip rows migrate MySQL → Cassandra on completion (Section 7.2), while the *ledger* entry stays in the ACID store until it's actually settled. The trip record and the money settle on two related but distinct timelines, and only one of them (money) needs years of durable, auditable history.
 
 **Cheat-sheet for this section**
 - Drawing these two state machines unprompted answers "what happens if X cancels at step Y" before it's even asked.
@@ -1048,7 +1141,7 @@ This is also why trip rows migrate MySQL → Cassandra on completion (Section 7.
 | Network partition between regions (e.g., Americas shard can't reach the EU shard or a shared global service) | Cross-region features (global trip search, corporate multi-market billing) degrade; in-region ride-hailing keeps working | Geo-sharding means each region is self-sufficient for its own riders/drivers by design — a partition should only ever affect cross-region edge cases, never in-region core dispatch. This is the direct reward for geo-sharding — name it explicitly |
 | Thundering herd on event end (stadium/concert) | Sudden massive demand spike, no supply nearby | Surge pricing to reposition supply + demand-side smoothing (queueing/ETA warning shown before confirming request) |
 
-### Race-condition deep dive: double-dispatch
+### 17.1 Race-condition deep dive: double-dispatch
 
 ```mermaid
 sequenceDiagram
@@ -1062,13 +1155,13 @@ sequenceDiagram
     and
         D2->>TM: CAS driverState Available->Dispatched (for ride B)
     end
-    TM-->>D1: success (state was Available)
-    TM-->>D2: failure (state already Dispatched)
-    D1->>Driver: offer ride A
-    D2->>D2: pick next candidate driver for ride B
+    TM-->>D1: Success (state was Available)
+    TM-->>D2: Failure (state already Dispatched)
+    D1->>Driver: Offer ride A
+    D2->>D2: Pick next candidate driver for ride B
 ```
 
-### Failure deep dive: cross-region network partition
+### 17.2 Failure deep dive: cross-region network partition
 
 ```mermaid
 sequenceDiagram
@@ -1078,9 +1171,9 @@ sequenceDiagram
     participant US as Americas Region Shard
 
     RiderEU->>EU: requestRide (pickup in EU)
-    EU->>EU: match locally (own Redis, own H3 index, own Trip Manager)
+    EU->>EU: Match locally (own Redis, own H3 index, own Trip Manager)
     Note over EU,US: Network partition: EU <-x-> US / Global
-    EU-->>RiderEU: matched (fully served in-region, unaffected)
+    EU-->>RiderEU: Matched (fully served in-region, unaffected)
     Note over Global,US: Only cross-region features degrade:<br/>global trip history search, corporate cross-market billing, etc.
 ```
 
@@ -1100,7 +1193,7 @@ sequenceDiagram
 |---|---|---|
 | **H3** | Uber's open-sourced hexagonal hierarchical geospatial indexing system (2018) | Dispatch search radius, surge-pricing zones, demand heatmaps |
 | **DISCO-style dispatch optimization** | Marketplace-level bipartite matching over a request/driver batching window rather than greedy nearest-match | Ride matching engine |
-| **DeepETA** | Uber's ML model (described in their 2022 engineering blog) that predicts a residual correction on top of a routing engine's baseline ETA using deep learning / quantile regression | ETA service |
+| **DeepETA** | Uber's ML model (described in their 2022 engineering blog) that predicts a residual correction on top of a routing engine's baseline ETA, using deep learning / quantile regression | ETA service |
 | **RADAR** | Human-assisted AI fraud detection & mitigation platform | Payment/fraud pipeline |
 | **Apache Kafka** | Backbone stream-processing platform for the payments pipeline (order creator → processor → writer) | Payment service |
 | **Cassandra** | Wide-column NoSQL store for high-volume, high-write historical data (trip records, location breadcrumbs) | Storage tier |
@@ -1134,46 +1227,57 @@ sequenceDiagram
 
 ## 20. Master cheat sheet
 
-**Formulas**
+### Formulas
+
 ```
-Location-ping QPS   = active_drivers / ping_interval_seconds
-Ride-request QPS    = daily_trips / 86,400
-Peak QPS             = avg_QPS × 3-5   (ride-hailing peak factor, higher than typical web's 2x)
-Storage/day (history) = daily_trips × (trip_duration_sec / ping_interval_sec) × bytes_per_ping
-Replicated storage    = raw_storage × replication_factor (typically 3)
-Node count            = total_storage_needed / usable_capacity_per_node
-Servers (per service) = peak_QPS_for_that_service / RPS_per_server × redundancy_factor
-Naive polling QPS      = active_clients / poll_interval_seconds   (compare this against push QPS — Section 7.5)
+Location-ping QPS      = active_drivers / ping_interval_seconds
+Ride-request QPS       = daily_trips / 86,400
+Peak QPS                = avg_QPS × 3-5   (ride-hailing peak factor, higher than typical web's 2x)
+Storage/day (history)   = daily_trips × (trip_duration_sec / ping_interval_sec) × bytes_per_ping
+Replicated storage      = raw_storage × replication_factor (typically 3)
+Node count              = total_storage_needed / usable_capacity_per_node
+Servers (per service)   = peak_QPS_for_that_service / RPS_per_server × redundancy_factor
+Naive polling QPS       = active_clients / poll_interval_seconds   (compare this against push QPS — Section 7.5)
 ```
 
-**Numbers**
-- 750,000 location writes/sec (3M drivers / 4s) — the dominant QPS.
-- 232 avg / ~930-1,200 peak ride-requests/sec (20M trips/day).
-- ~162 GB/day of location breadcrumb history (the storage number the naive answer misses).
-- Entire live driver fleet fits in <2 GB of RAM.
-- Geohash length 7 ≈ 153m cell; H3 res 8 ≈ 461m hex edge, res 9 ≈ 174m.
-- Dispatch timeout: 10–15s before reassignment.
-- Batching window for matching optimization: 100ms–few seconds.
-- Cross-region latency 50–150ms — why you geo-shard instead of going global-consistent.
-- ~926 avg / ~3,700 peak push notifications/sec (20M trips × ~4 events/trip) — two orders of magnitude below the location firehose.
-- Naive single-DB polling design: ~600,000 wasted poll requests/sec at 5s intervals — the number that motivates moving to WebSocket push (Section 7.5, Stage 1→2).
-- A scoped-down redo (60M riders, 1.5M drivers, 2s ping) still lands on the same 750K/sec — proves the formula, not the raw driver count, is what matters (Section 5.7).
-- 🆕 Illustrative radius expansion on no-match: 1km → 3km → 5km cap, ~15s dwell per ring (Section 10.3) — not a documented Uber constant, a pattern to reason from.
-- 🆕 Illustrative surge bands: ratio ≤1.2 → 1.0x; ≤2 → ~1.3-1.5x; ≤4 → ~1.5-2.5x; beyond → ~2.5-3x+ capped, change throttled to ±0.1-0.2x per refresh window (Section 12.1).
+### Numbers
 
-**Mnemonics**
-- **D.R.I.V.E.** — dispatch ranking factors: Distance/ETA, Rating, Idle-time fairness, Vehicle match, En-route status.
-- **G.P.S. F.A.K.E.** — fraud categories: GPS spoofing, Padding trip, Stolen identity, Fake fees, Accept-then-abandon, Kit/vehicle mismatch, Entry falsification.
-- 🆕 **1-3-5-15** — matching radius expansion: 1km → 3km → 5km cap, ~15s per ring (Section 10.3).
+| Number | What it is |
+|---|---|
+| 750,000 location writes/sec | 3M drivers ÷ 4s — the dominant QPS |
+| ~232 avg / ~930–1,200 peak ride-requests/sec | From 20M trips/day |
+| ~162 GB/day | Location breadcrumb history — the storage number the naive answer misses |
+| < 2 GB of RAM | The entire live driver fleet fits in this |
+| Geohash length 7 ≈ 153m cell | H3 res 8 ≈ 461m hex edge, res 9 ≈ 174m |
+| 10–15s | Dispatch timeout before reassignment |
+| 100ms–few seconds | Batching window for matching optimization |
+| 50–150ms | Cross-region latency — why you geo-shard instead of going global-consistent |
+| ~926 avg / ~3,700 peak pushes/sec | 20M trips × ~4 events/trip — two orders of magnitude below the location firehose |
+| ~600,000 wasted poll requests/sec | Naive single-DB polling design at 5s intervals — motivates moving to WebSocket push (Section 7.5, Stage 1→2) |
+| Same 750K/sec | A scoped-down redo (60M riders, 1.5M drivers, 2s ping) still lands here — proves the formula, not the raw driver count, is what matters (Section 5.7) |
+| 🆕 1km → 3km → 5km cap, ~15s dwell per ring | Illustrative radius expansion on no-match (Section 10.3) — not a documented Uber constant, a pattern to reason from |
+| 🆕 ratio ≤1.2 → 1.0x; ≤2 → ~1.3-1.5x; ≤4 → ~1.5-2.5x; beyond → ~2.5-3x+ capped | Illustrative surge bands, change throttled to ±0.1-0.2x per refresh window (Section 12.3) |
 
-**Disambiguation quick answers**
-- Geohash vs Quadtree vs H3 → string-prefix grid vs density-adaptive tree vs uniform-neighbor hex grid; Uber picks H3 for undistorted radius search.
-- Push vs Pull dispatch → server-assigns-one-candidate vs drivers-browse-and-claim; Uber core rideshare is push.
-- Sync vs Async payment capture → block on PSP now vs instant UX + Kafka-driven background charge; Uber is async.
-- WebSocket vs OS push vs polling → app-open/continuous vs app-backgrounded/must-wake vs one-off/no-urgency (Section 9.1).
-- RAM (live location) vs wide-column (history) vs RDBMS (trip state + ledger) → ephemeral-hot vs append-only-huge vs ACID-required (Section 7.2).
+### Mnemonics
 
-**Golden one-liners for wrap-up**
+| Mnemonic | What it decodes |
+|---|---|
+| **D.R.I.V.E.** | Dispatch ranking factors: Distance/ETA, Rating, Idle-time fairness, Vehicle match, En-route status |
+| **G.P.S. F.A.K.E.** | Fraud categories: GPS spoofing, Padding trip, Stolen identity, Fake fees, Accept-then-abandon, Kit/vehicle mismatch, Entry falsification |
+| 🆕 **1-3-5-15** | Matching radius expansion: 1km → 3km → 5km cap, ~15s per ring (Section 10.3) |
+
+### Disambiguation quick answers
+
+| Question | Answer |
+|---|---|
+| Geohash vs Quadtree vs H3? | String-prefix grid vs density-adaptive tree vs uniform-neighbor hex grid. Uber picks H3 for undistorted radius search. |
+| Push vs Pull dispatch? | Server-assigns-one-candidate vs drivers-browse-and-claim. Uber's core rideshare is push. |
+| Sync vs Async payment capture? | Block on PSP now vs instant UX + Kafka-driven background charge. Uber is async. |
+| WebSocket vs OS push vs polling? | App-open/continuous vs app-backgrounded/must-wake vs one-off/no-urgency (Section 9.1). |
+| RAM vs wide-column vs RDBMS? | Live location (ephemeral-hot) vs history (append-only-huge) vs trip state + ledger (ACID-required) (Section 7.2). |
+
+### Golden one-liners for wrap-up
+
 - "Location is AP with a 15-second staleness budget; trip state and money are CP with zero tolerance for double-booking or double-charging."
 - "The architecture is shaped by 750K writes/sec, not by the marquee ride-request feature."
 - "Every match is a compare-and-swap on driver state; every charge is an idempotent event through Kafka."
