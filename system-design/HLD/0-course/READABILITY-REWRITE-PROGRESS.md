@@ -58,7 +58,7 @@ in one sitting.
 - [x] 62 — 62-Design-Ubers-Driver-Dispatch-System-FAANG-Guide-story.md
 - [x] 63 — 63-Design-an-Ad-Click-Aggregation-System-FAANG-Guide-story.md
 - [x] 64 — 64-Design-an-API-Gateway-FAANG-Guide-story.md
-- [ ] 65 — 65-Design-a-Feature-Store-for-ML-FAANG-Guide-story.md
+- [x] 65 — 65-Design-a-Feature-Store-for-ML-FAANG-Guide-story.md
 - [ ] 66 — 66-Design-a-Code-Execution-Engine-LeetCode-Replit-FAANG-Guide-story.md
 - [ ] 67 — 67-Design-a-Live-Auction-System-FAANG-Guide-story.md
 - [ ] 68 — 68-Design-a-Concurrent-Stream-Device-Limiter-FAANG-Guide-story.md
