@@ -35,7 +35,7 @@ in one sitting.
 - [x] 39 — 39-Spectacular-Failures-FAANG-Guide-story.md
 - [x] 40 — 40-Design-a-Deployment-System-FAANG-Guide-story.md
 - [x] 41 — 41-Design-a-Payment-System-FAANG-Guide-story.md
-- [ ] 42 — 42-Design-a-ChatGPT-System-FAANG-Guide-story.md
+- [x] 42 — 42-Design-a-ChatGPT-System-FAANG-Guide-story.md
 - [ ] 43 — 43-Design-a-Data-Infrastructure-System-FAANG-Guide-story.md
 - [ ] 44 — 44-Design-a-LLM-Customer-Support-Bot-FAANG-Guide-story.md
 - [ ] 45 — 45-Design-an-AI-Code-Assistant-FAANG-Guide-story.md
