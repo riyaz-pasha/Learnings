@@ -46,7 +46,7 @@ in one sitting.
 - [x] 50 — 50-National-ID-KYC-Verification-System-FAANG-Guide-story.md
 - [x] 51 — 51-Multi-Source-Sanctioned-Country-Payment-Blocking-FAANG-Guide-story.md
 - [x] 52 — 52-Design-Airbnb-Search-Ranking-FAANG-Guide-story.md
-- [ ] 53 — 53-Design-Uber-Surge-Pricing-Engine-FAANG-Guide-story.md
+- [x] 53 — 53-Design-Uber-Surge-Pricing-Engine-FAANG-Guide-story.md
 - [ ] 54 — 54-Design-an-AR-Virtual-Furniture-Placement-System-FAANG-Guide-story.md
 - [ ] 55 — 55-Design-a-Real-Time-Collaborative-Canvas-Figma-FAANG-Guide-story.md
 - [ ] 56 — 56-Design-a-Fraud-Detection-System-FAANG-Guide-story.md
