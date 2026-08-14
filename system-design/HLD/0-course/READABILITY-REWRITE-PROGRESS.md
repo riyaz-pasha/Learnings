@@ -48,7 +48,7 @@ in one sitting.
 - [x] 52 — 52-Design-Airbnb-Search-Ranking-FAANG-Guide-story.md
 - [x] 53 — 53-Design-Uber-Surge-Pricing-Engine-FAANG-Guide-story.md
 - [x] 54 — 54-Design-an-AR-Virtual-Furniture-Placement-System-FAANG-Guide-story.md
-- [ ] 55 — 55-Design-a-Real-Time-Collaborative-Canvas-Figma-FAANG-Guide-story.md
+- [x] 55 — 55-Design-a-Real-Time-Collaborative-Canvas-Figma-FAANG-Guide-story.md
 - [ ] 56 — 56-Design-a-Fraud-Detection-System-FAANG-Guide-story.md
 - [ ] 57 — 57-Design-a-Distributed-Tracing-System-FAANG-Guide-story.md
 - [ ] 58 — 58-Design-Google-Photos-FAANG-Guide-story.md
