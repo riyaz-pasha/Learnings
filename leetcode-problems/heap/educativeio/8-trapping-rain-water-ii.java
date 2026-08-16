@@ -895,3 +895,127 @@ class TrappingRainWater2D {
                 passedCount, testCases.size());
     }
 }
+
+class Solution {
+
+    /**
+     * A cell in the grid.
+     * 
+     * height here is NOT always original height.
+     * It becomes:
+     *    max(originalHeight, waterLevel)
+     * 
+     * Think of it as "effective boundary height"
+     */
+    record Cell(int row, int col, int height) {}
+
+    public int trapRainWater(int[][] heightMap) {
+
+        int m = heightMap.length;
+        int n = heightMap[0].length;
+
+        // If grid is too small, no enclosed area → no water
+        if (m < 3 || n < 3) return 0;
+
+        // Track visited cells (like BFS)
+        boolean[][] visited = new boolean[m][n];
+
+        /**
+         * Min Heap → always expand from the lowest boundary
+         * 
+         * WHY?
+         * Because water escapes from the lowest wall first
+         */
+        PriorityQueue<Cell> minHeap =
+                new PriorityQueue<>(Comparator.comparingInt(Cell::height));
+
+        /**
+         * STEP 1: Add all boundary cells
+         * 
+         * WHY boundary?
+         * Because water cannot escape beyond boundary.
+         * These define the outer "container walls"
+         */
+        for (int i = 0; i < m; i++) {
+            minHeap.offer(new Cell(i, 0, heightMap[i][0]));
+            minHeap.offer(new Cell(i, n - 1, heightMap[i][n - 1]));
+            visited[i][0] = true;
+            visited[i][n - 1] = true;
+        }
+
+        for (int j = 0; j < n; j++) {
+            minHeap.offer(new Cell(0, j, heightMap[0][j]));
+            minHeap.offer(new Cell(m - 1, j, heightMap[m - 1][j]));
+            visited[0][j] = true;
+            visited[m - 1][j] = true;
+        }
+
+        int water = 0;
+
+        // Directions → explore 4 neighbors (like BFS)
+        int[][] directions = {{1,0},{-1,0},{0,1},{0,-1}};
+
+        /**
+         * STEP 2: Process cells in increasing height order
+         */
+        while (!minHeap.isEmpty()) {
+
+            Cell current = minHeap.poll(); // smallest boundary
+
+            /**
+             * TRACE THINKING:
+             * 
+             * This "current" cell represents the LOWEST WALL
+             * surrounding some region.
+             * 
+             * So any neighbor lower than this → will trap water
+             */
+
+            for (int[] d : directions) {
+
+                int nr = current.row + d[0];
+                int nc = current.col + d[1];
+
+                // Skip invalid or already processed
+                if (nr < 0 || nc < 0 || nr >= m || nc >= n || visited[nr][nc]) {
+                    continue;
+                }
+
+                visited[nr][nc] = true;
+
+                int neighborHeight = heightMap[nr][nc];
+
+                /**
+                 * CORE LOGIC:
+                 * 
+                 * If neighbor is LOWER than boundary → water trapped
+                 * 
+                 * water = boundary height - neighbor height
+                 */
+                if (neighborHeight < current.height) {
+                    water += current.height - neighborHeight;
+                }
+
+                /**
+                 * CRITICAL STEP:
+                 * 
+                 * Push neighbor with UPDATED HEIGHT
+                 * 
+                 * WHY Math.max(...) ?
+                 * 
+                 * Because once water fills, the effective height becomes:
+                 *    max(neighborHeight, current boundary)
+                 * 
+                 * This ensures future expansions use correct water level
+                 */
+                minHeap.offer(new Cell(
+                        nr,
+                        nc,
+                        Math.max(neighborHeight, current.height)
+                ));
+            }
+        }
+
+        return water;
+    }
+}
