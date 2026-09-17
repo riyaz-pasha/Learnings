@@ -6469,3 +6469,868 @@ Next we'll move into **request headers in much more depth**: `Accept`, `Content-
 
 ---
 
+# Lesson 9 — Request Headers in Depth
+
+We've already seen headers like:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+User-Agent: curl/8.0
+Accept: */*
+```
+
+Now let's answer a deeper question:
+
+> **Why do we need headers at all?**
+
+The HTTP request already has a method, target, and possibly a body. Why add another mechanism?
+
+---
+
+# 1. Headers are metadata about the message
+
+Think about this request:
+
+```http
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+The body contains the actual data:
+
+```json
+{"name":"Riyaz"}
+```
+
+But the server needs additional information:
+
+```text
+What format is this?
+How many bytes are there?
+Who is sending this?
+What response format does the client want?
+Is the client authenticated?
+```
+
+That's what headers communicate.
+
+So a useful mental model is:
+
+```text
+HTTP message
+│
+├── Control information
+│      ├── method
+│      ├── target
+│      └── status
+│
+├── Metadata
+│      └── headers
+│
+└── Data
+       └── body
+```
+
+---
+
+# 2. Header syntax
+
+The basic syntax is:
+
+```http
+Header-Name: value
+```
+
+For example:
+
+```http
+Host: example.com
+Accept: application/json
+Content-Type: application/json
+```
+
+Header names are case-insensitive.
+
+These refer to the same header:
+
+```text
+Content-Type
+content-type
+CONTENT-TYPE
+CoNtEnT-TyPe
+```
+
+But conventionally we write:
+
+```text
+Content-Type
+```
+
+---
+
+# 3. `Host`
+
+You've already encountered this one.
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+It identifies the host being addressed by the HTTP request.
+
+This becomes particularly important when many websites share the same server/IP.
+
+For example:
+
+```text
+                    Server
+                 203.0.113.10
+                  /         \
+                 /           \
+        example.com       api.example.com
+```
+
+The TCP connection could reach:
+
+```text
+203.0.113.10:443
+```
+
+while HTTP tells the server:
+
+```http
+Host: api.example.com
+```
+
+The server can therefore route the request to the appropriate virtual host.
+
+---
+
+# 4. `User-Agent`
+
+Try:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You'll probably see something like:
+
+```http
+User-Agent: curl/8.x.x
+```
+
+This tells the server information about the client software.
+
+A browser might send something much more complicated:
+
+```http
+User-Agent: Mozilla/5.0 ...
+```
+
+The server can use this information for things like:
+
+* logging
+* analytics
+* compatibility behavior
+* debugging
+
+But:
+
+> **Never treat User-Agent as trustworthy authentication.**
+
+A client can easily change it:
+
+```bash
+curl -H "User-Agent: MyFakeBrowser" http://localhost:8080/
+```
+
+---
+
+# 5. `Accept`
+
+This is one of the most important headers.
+
+Suppose the client says:
+
+```http
+Accept: application/json
+```
+
+It's communicating:
+
+> I can accept a JSON representation.
+
+For example:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+The server might return:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"id":123,"name":"Riyaz"}
+```
+
+Notice the relationship:
+
+```text
+Request:
+Accept: application/json
+       ↓
+"What response format can I accept?"
+
+Response:
+Content-Type: application/json
+       ↓
+"What format am I actually sending?"
+```
+
+---
+
+# 6. `Accept` vs `Content-Type`
+
+This distinction is worth memorizing.
+
+### `Accept`
+
+Describes the **desired/acceptable representation of the response**.
+
+```http
+Accept: application/json
+```
+
+Think:
+
+> "Please give me JSON if possible."
+
+### `Content-Type`
+
+Describes the **actual representation of the message body**.
+
+Request:
+
+```http
+Content-Type: application/json
+```
+
+means:
+
+> "The body I'm sending is JSON."
+
+Response:
+
+```http
+Content-Type: application/json
+```
+
+means:
+
+> "The body I'm returning is JSON."
+
+So:
+
+```text
+REQUEST
+------------------------
+Accept       → response
+Content-Type → request body
+
+
+RESPONSE
+------------------------
+Content-Type → response body
+```
+
+---
+
+# 7. Let's see this with curl
+
+Run:
+
+```bash
+curl -v \
+  -H "Accept: application/json" \
+  http://localhost:8080/
+```
+
+Your server can inspect:
+
+```python
+print("Accept:", self.headers.get("Accept"))
+```
+
+You should see something like:
+
+```text
+Accept: application/json
+```
+
+Now change it:
+
+```bash
+curl -v \
+  -H "Accept: text/plain" \
+  http://localhost:8080/
+```
+
+The server receives:
+
+```text
+Accept: text/plain
+```
+
+HTTP itself doesn't automatically convert your response.
+
+Your application has to decide what to do with this information.
+
+---
+
+# 8. `Content-Type`
+
+Now imagine:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+The server sees:
+
+```text
+Content-Type: application/json
+```
+
+and knows how the body is intended to be interpreted.
+
+Other examples:
+
+```text
+text/plain
+text/html
+application/json
+application/xml
+application/octet-stream
+multipart/form-data
+application/x-www-form-urlencoded
+```
+
+We'll study these properly when we get to request bodies.
+
+---
+
+# 9. `Content-Length`
+
+We've already discussed this, but now put it into the header mental model:
+
+```http
+Content-Length: 16
+```
+
+means:
+
+> The body contains 16 bytes.
+
+For example:
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+The server can use the length to know how many bytes to read.
+
+This is especially important when HTTP/1.1 connections remain open and multiple requests/responses may use the same connection.
+
+---
+
+# 10. `Authorization`
+
+Now we're getting into authentication.
+
+A common request looks like:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Authorization: Bearer eyJhbGciOi...
+```
+
+The header communicates credentials/authentication information.
+
+The common structure is:
+
+```text
+Authorization: <scheme> <credentials>
+```
+
+For example:
+
+```text
+Authorization: Bearer abc123
+```
+
+Here:
+
+```text
+Bearer
+   ↓
+authentication scheme
+
+abc123
+   ↓
+credential/token
+```
+
+We'll spend an entire section on authentication later.
+
+For now, remember:
+
+```text
+Authorization
+      ↓
+credentials associated with the request
+```
+
+---
+
+# 11. `Cookie`
+
+Browsers commonly send:
+
+```http
+Cookie: session_id=abc123
+```
+
+This lets the server associate the request with previously established client state.
+
+For example:
+
+```text
+Browser
+   │
+   │ Cookie: session_id=abc123
+   ▼
+Server
+   │
+   └── finds session abc123
+          ↓
+       User = Riyaz
+```
+
+Cookies become especially interesting when we study:
+
+* sessions
+* authentication
+* browser behavior
+* security
+
+---
+
+# 12. `Connection`
+
+With HTTP/1.1, you'll sometimes encounter:
+
+```http
+Connection: keep-alive
+```
+
+This relates to the underlying TCP connection and whether it should remain usable for additional HTTP exchanges.
+
+For example:
+
+```text
+TCP connection
+│
+├── HTTP request 1
+├── HTTP response 1
+├── HTTP request 2
+├── HTTP response 2
+└── ...
+```
+
+Instead of:
+
+```text
+TCP connection 1
+└── HTTP request/response
+
+TCP connection 2
+└── HTTP request/response
+
+TCP connection 3
+└── ...
+```
+
+We'll study connection reuse in detail later.
+
+---
+
+# 13. `Cache-Control`
+
+A client can send:
+
+```http
+Cache-Control: no-cache
+```
+
+and a server can respond with:
+
+```http
+Cache-Control: max-age=3600
+```
+
+These headers participate in HTTP caching behavior.
+
+For example:
+
+```text
+Cache-Control: max-age=3600
+```
+
+can communicate that a response may be considered fresh for 3600 seconds under the applicable caching rules.
+
+Caching is much deeper than simply:
+
+> "Don't call the server again."
+
+We'll study it later.
+
+---
+
+# 14. `Referer`
+
+You may encounter:
+
+```http
+Referer: https://example.com/products
+```
+
+It can indicate the page/resource from which a request was initiated.
+
+For example:
+
+```text
+User viewing:
+/products
+
+      ↓ click
+
+/login
+
+Request:
+Referer: https://example.com/products
+```
+
+There are privacy/security considerations around this header, and browsers control/refine what gets sent based on referrer policy.
+
+One interesting detail:
+
+The HTTP header is historically spelled:
+
+```text
+Referer
+```
+
+not:
+
+```text
+Referrer
+```
+
+---
+
+# 15. Custom headers
+
+Applications can define their own headers.
+
+For example:
+
+```http
+X-Request-ID: abc-123
+```
+
+or modern application-specific names such as:
+
+```http
+Trace-Id: abc-123
+```
+
+These can be used for things like:
+
+```text
+request tracing
+correlation IDs
+internal metadata
+feature information
+```
+
+However, don't assume every header beginning with `X-` is automatically special.
+
+The `X-` convention was historically popular, but it isn't a requirement for custom HTTP fields.
+
+---
+
+# 16. Headers aren't necessarily trusted
+
+This is extremely important for backend engineering.
+
+Suppose a client sends:
+
+```http
+X-User-Id: 123
+```
+
+Can your server conclude:
+
+> "This request is from user 123"?
+
+**No.**
+
+The client controls its own request headers.
+
+Anyone can run:
+
+```bash
+curl \
+  -H "X-User-Id: 123" \
+  http://example.com/admin
+```
+
+Headers are just data supplied by the requester unless some trusted infrastructure guarantees otherwise.
+
+This is why:
+
+```text
+Authorization
+```
+
+must be validated rather than blindly trusted.
+
+Similarly:
+
+```text
+User-Agent
+X-Forwarded-For
+X-User-Id
+```
+
+should not automatically be treated as trustworthy identity information.
+
+---
+
+# 17. Let's inspect everything ourselves
+
+Run:
+
+```bash
+curl -v \
+  -H "Accept: application/json" \
+  -H "X-Student: Riyaz" \
+  -H "X-Request-ID: abc123" \
+  http://localhost:8080/users
+```
+
+Your server should receive something similar to:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+User-Agent: curl/...
+Accept: application/json
+X-Student: Riyaz
+X-Request-ID: abc123
+```
+
+Notice something fundamental:
+
+**HTTP doesn't have a fixed small list of headers that every request must contain.**
+
+There are standardized headers, optional headers, and application-defined fields.
+
+---
+
+# 18. Header order
+
+Here's another subtle point.
+
+You might see:
+
+```http
+Host: example.com
+Accept: application/json
+User-Agent: curl/...
+```
+
+or:
+
+```http
+User-Agent: curl/...
+Accept: application/json
+Host: example.com
+```
+
+The application should **not depend on header ordering**.
+
+Unlike the request line:
+
+```text
+METHOD SP REQUEST-TARGET SP HTTP-VERSION
+```
+
+which has a defined structure, headers are a collection of fields.
+
+So don't think:
+
+```text
+Host must be first
+Accept must be second
+Content-Type must be third
+```
+
+That's not how headers work.
+
+---
+
+# 19. Headers + body
+
+Let's put everything together:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer abc123
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+Break it down:
+
+```text
+Request line
+    ↓
+POST /users HTTP/1.1
+
+Headers
+    ↓
+Host
+Accept
+Content-Type
+Authorization
+Content-Length
+
+Blank line
+    ↓
+
+Body
+    ↓
+{"name":"Riyaz"}
+```
+
+This is the complete HTTP message structure you've been learning piece by piece.
+
+---
+
+# 🧠 The key mental model
+
+Think of HTTP headers as **metadata/control information surrounding the message**.
+
+```text
+                 HTTP REQUEST
+                       │
+        ┌──────────────┴──────────────┐
+        │                             │
+   Request line                    Headers
+        │                             │
+   "What operation?"        "Additional information"
+        │                             │
+        └──────────────┬──────────────┘
+                       │
+                     Body
+                       │
+                "Actual payload"
+```
+
+Examples:
+
+```text
+Host            → who is being addressed?
+Accept          → what response representation is acceptable?
+Content-Type    → what is the body format?
+Content-Length  → how many body bytes?
+Authorization   → authentication credentials
+Cookie          → client state
+Cache-Control   → caching directives
+User-Agent      → client software information
+```
+
+---
+
+## 🧪 Challenge
+
+Use `curl` to send this request:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+Content-Type: application/json
+X-Request-ID: abc123
+
+{"name":"Riyaz"}
+```
+
+You can do it with:
+
+```bash
+curl -v \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -H "X-Request-ID: abc123" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+Then look at **every header curl generated automatically** in addition to the ones you explicitly supplied.
+
+Pay special attention to:
+
+```text
+Content-Type
+Content-Length
+Host
+User-Agent
+Accept
+```
+
+Ask yourself:
+
+> **Which headers did I explicitly provide, and which ones did curl add because it knows how HTTP works?**
+
+Next we'll go deeper into **request bodies and `Content-Type`**, including the difference between JSON, form data, plain text, and binary data—and we'll manually construct POST requests with `nc` so you can see exactly how the body is transmitted.
+
+
+----
+
