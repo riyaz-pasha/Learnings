@@ -8322,3 +8322,906 @@ We'll learn **JSON and HTTP request/response bodies more deeply**, including **s
 
 ---
 
+# Lesson 11 — Bytes, Encoding, JSON, and `Content-Length`
+
+This lesson connects several things we've seen separately:
+
+```text
+HTTP
+ ↓
+bytes
+ ↓
+encoding
+ ↓
+JSON
+ ↓
+application object
+```
+
+The goal is to understand what is **actually travelling over the network**.
+
+---
+
+## 1. The most important fact: HTTP transports bytes
+
+At the lowest level, the HTTP body isn't:
+
+```text
+"Hello"
+```
+
+It is bytes.
+
+For example:
+
+```text
+Hello
+```
+
+in ASCII/UTF-8 becomes:
+
+```text
+72 101 108 108 111
+```
+
+or in hexadecimal:
+
+```text
+48 65 6c 6c 6f
+```
+
+So conceptually:
+
+```text
+Application data
+      ↓
+encode
+      ↓
+bytes
+      ↓
+HTTP
+      ↓
+network
+```
+
+At the receiving side:
+
+```text
+network
+   ↓
+HTTP
+   ↓
+bytes
+   ↓
+decode
+   ↓
+application data
+```
+
+---
+
+# 2. Strings aren't bytes
+
+In Python:
+
+```python
+text = "Hello"
+```
+
+is a string.
+
+You can convert it to bytes:
+
+```python
+text.encode("utf-8")
+```
+
+Result:
+
+```python
+b'Hello'
+```
+
+And convert it back:
+
+```python
+b"Hello".decode("utf-8")
+```
+
+Result:
+
+```text
+'Hello'
+```
+
+So:
+
+```text
+String
+  ↓ encode UTF-8
+Bytes
+  ↓ decode UTF-8
+String
+```
+
+---
+
+# 3. Why UTF-8 matters
+
+Try:
+
+```python
+text = "Hello 世界"
+```
+
+Now:
+
+```python
+len(text)
+```
+
+and:
+
+```python
+len(text.encode("utf-8"))
+```
+
+will give **different numbers**.
+
+Why?
+
+Because:
+
+```text
+Characters ≠ bytes
+```
+
+For example, ASCII characters typically occupy one UTF-8 byte:
+
+```text
+A → 1 byte
+B → 1 byte
+```
+
+while many Unicode characters require multiple bytes.
+
+For example:
+
+```python
+text = "世界"
+
+print(len(text))
+print(len(text.encode("utf-8")))
+```
+
+Conceptually:
+
+```text
+2 characters
+6 bytes
+```
+
+because each of these Chinese characters takes 3 bytes in UTF-8.
+
+---
+
+# 4. This explains `Content-Length`
+
+Suppose the body is:
+
+```text
+Hello
+```
+
+Then:
+
+```http
+Content-Length: 5
+```
+
+because there are 5 bytes.
+
+But consider:
+
+```text
+世界
+```
+
+There are:
+
+```text
+2 characters
+```
+
+but UTF-8 requires:
+
+```text
+6 bytes
+```
+
+So:
+
+```http
+Content-Length: 6
+```
+
+not:
+
+```http
+Content-Length: 2
+```
+
+This is why `Content-Length` is fundamentally a **byte count**.
+
+---
+
+# 5. Let's verify it ourselves
+
+Run:
+
+```bash
+python3
+```
+
+Then:
+
+```python
+text = "世界"
+
+print(len(text))
+print(len(text.encode("utf-8")))
+print(text.encode("utf-8"))
+```
+
+You'll see the difference.
+
+Now:
+
+```python
+text = "Hello 世界"
+
+print(len(text))
+print(len(text.encode("utf-8")))
+```
+
+Again:
+
+```text
+characters != bytes
+```
+
+---
+
+# 6. JSON is text, but travels as bytes
+
+Consider:
+
+```json
+{
+  "name": "Riyaz"
+}
+```
+
+JSON is a textual data format.
+
+Before it travels through HTTP, it ultimately becomes bytes.
+
+Conceptually:
+
+```text
+Python object
+      ↓
+JSON serialization
+      ↓
+JSON text
+      ↓
+UTF-8 encoding
+      ↓
+bytes
+      ↓
+HTTP body
+```
+
+---
+
+# 7. Serialization
+
+Suppose your application has:
+
+```python
+user = {
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+This is a Python object.
+
+We can serialize it:
+
+```python
+import json
+
+json_text = json.dumps(user)
+
+print(json_text)
+```
+
+Result:
+
+```json
+{"id": 123, "name": "Riyaz"}
+```
+
+Then:
+
+```python
+body = json_text.encode("utf-8")
+```
+
+Now we have bytes.
+
+So:
+
+```text
+Python dictionary
+       ↓
+json.dumps()
+       ↓
+JSON string
+       ↓
+.encode("utf-8")
+       ↓
+HTTP bytes
+```
+
+---
+
+# 8. Deserialization
+
+The reverse happens on the server.
+
+Suppose the server receives:
+
+```python
+body = b'{"id":123,"name":"Riyaz"}'
+```
+
+First:
+
+```python
+text = body.decode("utf-8")
+```
+
+Then:
+
+```python
+user = json.loads(text)
+```
+
+Now:
+
+```python
+user["name"]
+```
+
+gives:
+
+```text
+Riyaz
+```
+
+So:
+
+```text
+HTTP bytes
+     ↓
+.decode()
+     ↓
+JSON text
+     ↓
+json.loads()
+     ↓
+Python object
+```
+
+This is **deserialization**.
+
+---
+
+# 9. Serialization vs deserialization
+
+Keep this simple:
+
+```text
+Serialization
+-------------
+Object → JSON → bytes
+```
+
+```text
+Deserialization
+---------------
+bytes → JSON → Object
+```
+
+In a Java backend, this is what happens conceptually when a framework turns:
+
+```json
+{"name":"Riyaz","age":30}
+```
+
+into:
+
+```java
+CreateUserRequest
+```
+
+and later turns:
+
+```java
+User
+```
+
+back into:
+
+```json
+{"id":123,"name":"Riyaz"}
+```
+
+---
+
+# 10. What if JSON is malformed?
+
+Consider:
+
+```json
+{"name":
+```
+
+This isn't valid JSON.
+
+The bytes themselves can still be transmitted perfectly.
+
+The problem happens when the application tries:
+
+```python
+json.loads(...)
+```
+
+and the JSON parser fails.
+
+So there are different layers of failure:
+
+```text
+TCP/network
+   ↓
+HTTP parsing
+   ↓
+Content-Type interpretation
+   ↓
+JSON parsing
+   ↓
+application validation
+   ↓
+business logic
+```
+
+For example:
+
+```text
+Malformed HTTP
+      ↓
+400-ish HTTP-level problem
+
+Valid HTTP
+but malformed JSON
+      ↓
+application/parser error
+
+Valid JSON
+but invalid application data
+      ↓
+validation error
+
+Valid data
+but business rule violated
+      ↓
+application-level conflict/error
+```
+
+This layered model will become extremely useful later.
+
+---
+
+# 11. JSON syntax vs JSON semantics
+
+Consider:
+
+```json
+{"age": -100}
+```
+
+This is valid JSON.
+
+The JSON parser has no problem with it.
+
+But your application might say:
+
+```text
+age must be >= 0
+```
+
+That's not a JSON problem.
+
+It's an **application validation** problem.
+
+So:
+
+```text
+JSON validity
+      ≠
+application validity
+```
+
+This distinction is why status codes such as `400`, `409`, and `422` can have different roles depending on the API's design.
+
+---
+
+# 12. Let's inspect the actual bytes
+
+Modify our server temporarily:
+
+```python
+def do_POST(self):
+
+    content_length = int(
+        self.headers.get("Content-Length", 0)
+    )
+
+    body = self.rfile.read(content_length)
+
+    print("Raw bytes:", body)
+    print("Byte count:", len(body))
+
+    text = body.decode("utf-8")
+
+    print("Decoded text:", text)
+    print("Character count:", len(text))
+```
+
+Now send:
+
+```bash
+curl \
+  -X POST \
+  -H "Content-Type: text/plain; charset=utf-8" \
+  --data "Hello 世界" \
+  http://localhost:8080/test
+```
+
+You should see the distinction between:
+
+```text
+Raw bytes
+Byte count
+Decoded text
+Character count
+```
+
+This is a very useful experiment.
+
+---
+
+# 13. What does `charset=utf-8` mean?
+
+You may encounter:
+
+```http
+Content-Type: text/plain; charset=utf-8
+```
+
+The first part:
+
+```text
+text/plain
+```
+
+describes the media type.
+
+The parameter:
+
+```text
+charset=utf-8
+```
+
+provides character encoding information.
+
+Conceptually:
+
+```text
+Content-Type
+│
+├── media type
+│     └── text/plain
+│
+└── parameter
+      └── charset=utf-8
+```
+
+For JSON, you'll commonly see:
+
+```http
+Content-Type: application/json
+```
+
+Modern JSON is defined around Unicode/UTF-8 handling, so you generally don't need to add a `charset` parameter to `application/json`.
+
+---
+
+# 14. Why does `curl -d` seem magical?
+
+When you run:
+
+```bash
+curl \
+  -X POST \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+curl constructs the HTTP request for you.
+
+Conceptually something like:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Length: 16
+Content-Type: application/x-www-form-urlencoded
+
+{"name":"Riyaz"}
+```
+
+Notice something interesting:
+
+If you use `-d` without specifying a content type, curl commonly uses:
+
+```text
+application/x-www-form-urlencoded
+```
+
+even though your data happens to look like JSON.
+
+If you actually want JSON, explicitly say:
+
+```bash
+curl \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+That's why `Content-Type` matters.
+
+---
+
+# 15. `curl` calculates things for you
+
+When you use:
+
+```bash
+-d '{"name":"Riyaz"}'
+```
+
+curl can calculate:
+
+```text
+Content-Length
+```
+
+automatically.
+
+That's convenient.
+
+But when we used `nc`:
+
+```bash
+nc localhost 8080
+```
+
+we had to manually construct:
+
+```http
+Content-Length: 16
+```
+
+because `nc` doesn't understand HTTP semantics.
+
+This illustrates the difference beautifully:
+
+```text
+nc
+ ↓
+TCP connection
+ ↓
+YOU construct HTTP
+
+
+curl
+ ↓
+TCP connection
+ ↓
+curl constructs HTTP
+ ↓
+YOU provide higher-level intent
+```
+
+---
+
+# 16. This is exactly what frameworks do
+
+You can now see the layers behind something like:
+
+```java
+@PostMapping("/users")
+public User create(@RequestBody CreateUserRequest request) {
+    ...
+}
+```
+
+A framework roughly handles:
+
+```text
+TCP
+ ↓
+HTTP parsing
+ ↓
+request line
+ ↓
+headers
+ ↓
+Content-Length
+ ↓
+body bytes
+ ↓
+Content-Type
+ ↓
+JSON deserialization
+ ↓
+Java object
+ ↓
+your method
+```
+
+And on the way back:
+
+```text
+Java object
+ ↓
+JSON serialization
+ ↓
+UTF-8 bytes
+ ↓
+Content-Length
+ ↓
+HTTP response
+ ↓
+TCP
+```
+
+What looks like:
+
+```java
+return user;
+```
+
+can actually involve a substantial amount of HTTP machinery underneath.
+
+---
+
+# 🧠 The big mental model
+
+This is the model I want you to keep:
+
+```text
+CLIENT
+  │
+  │ Application object
+  │
+  ▼
+Serialize
+  │
+  ▼
+JSON
+  │
+  ▼
+UTF-8 encode
+  │
+  ▼
+BYTES
+  │
+  ▼
+HTTP BODY
+  │
+  ▼
+NETWORK
+  │
+  ▼
+HTTP BODY
+  │
+  ▼
+BYTES
+  │
+  ▼
+UTF-8 decode
+  │
+  ▼
+JSON
+  │
+  ▼
+Deserialize
+  │
+  ▼
+SERVER APPLICATION OBJECT
+```
+
+And:
+
+```text
+Content-Type
+     ↓
+"What representation are these bytes?"
+
+Content-Length
+     ↓
+"How many bytes belong to this body?"
+```
+
+---
+
+## 🧪 Final experiment
+
+Send Unicode:
+
+```bash
+curl \
+  -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"世界"}' \
+  http://localhost:8080/users
+```
+
+Then inspect your server's:
+
+```text
+Content-Length
+Raw bytes
+Decoded text
+Character count
+```
+
+You should now be able to explain **why `Content-Length` and the number of characters can be different**.
+
+---
+
+### Next → Path Parameters vs Query Parameters
+
+We'll start turning what we've learned into a real API:
+
+```text
+GET /users
+GET /users/123
+GET /users?active=true
+GET /users/123/orders
+```
+
+We'll answer a very practical backend question:
+
+> **When should data go into the path, and when should it go into the query string?**
+
+And we'll implement both manually in our Python HTTP server.
+
+---
