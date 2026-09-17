@@ -8,7 +8,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
 
-        self.wfile.write(b"Hello HTTP!")
+        self.wfile.write(b"Hello Riyaz!")
 
 
 server = HTTPServer(("localhost",8080),Handler)
