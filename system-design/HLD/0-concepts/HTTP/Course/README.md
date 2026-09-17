@@ -1004,3 +1004,631 @@ That's the point where HTTP starts to really click.
 
 ---
 
+# Lesson 2 — Build an HTTP Request Yourself
+
+Now we're going to remove `curl` from the picture.
+
+Until now:
+
+```text
+curl
+  ↓
+creates HTTP request
+  ↓
+server
+```
+
+You haven't actually *constructed* the HTTP request yourself.
+
+Let's do that.
+
+---
+
+## 1. Keep your server running
+
+Your `server.py` should still be running:
+
+```bash
+python3 server.py
+```
+
+If you stopped it:
+
+```bash
+cd http-course
+python3 server.py
+```
+
+---
+
+## 2. Use `nc`
+
+macOS comes with `nc` (netcat).
+
+Open another Terminal and run:
+
+```bash
+nc localhost 8080
+```
+
+You won't see much.
+
+That's expected.
+
+`nc` has simply opened a TCP connection to:
+
+```text
+localhost:8080
+```
+
+Now **you are talking directly to the server**.
+
+---
+
+# 3. Type the HTTP request manually
+
+Type exactly this:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+
+```
+
+There is an important detail here:
+
+### Press Enter after `Host: localhost:8080`
+
+Then press **Enter one more time**.
+
+So there are actually **two newlines after the Host header**.
+
+You should get something like:
+
+```text
+Hello HTTP!
+```
+
+You just sent an HTTP request **without curl**.
+
+That's a big milestone.
+
+---
+
+# 4. What did you actually send?
+
+You sent:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+
+```
+
+Let's break it down.
+
+```text
+GET / HTTP/1.1
+```
+
+This is the **request line**.
+
+Then:
+
+```text
+Host: localhost:8080
+```
+
+This is a **header**.
+
+Then:
+
+```text
+<empty line>
+```
+
+This tells the server:
+
+> "The headers are finished."
+
+So the structure is:
+
+```text
+┌─────────────────────────────┐
+│ GET / HTTP/1.1              │
+│                             │
+│ Host: localhost:8080        │
+│                             │
+│                             │ ← empty line
+│                             │
+│ [optional request body]     │
+└─────────────────────────────┘
+```
+
+---
+
+# 5. Why do we need the empty line?
+
+This is one of the most important concepts in HTTP/1.x.
+
+Suppose you have:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+Accept: text/plain
+User-Agent: my-client
+```
+
+How does the server know whether:
+
+```text
+User-Agent: my-client
+```
+
+is the last header?
+
+It doesn't know that another header isn't coming:
+
+```http
+Authorization: ...
+```
+
+or:
+
+```http
+Cookie: ...
+```
+
+So HTTP defines a delimiter.
+
+The blank line means:
+
+```text
+HEADERS ARE DONE.
+```
+
+Therefore:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+Accept: text/plain
+
+Hello
+```
+
+can be understood as:
+
+```text
+Request line
+      ↓
+GET / HTTP/1.1
+
+Headers
+      ↓
+Host: localhost:8080
+Accept: text/plain
+
+      ↓
+EMPTY LINE
+
+Body
+      ↓
+Hello
+```
+
+---
+
+# 6. Try adding another header
+
+Run:
+
+```bash
+nc localhost 8080
+```
+
+Then:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+User-Agent: MyBrowser
+Accept: text/plain
+
+```
+
+Your server should still respond.
+
+Notice that **you decided what the headers were**.
+
+`curl` didn't.
+
+---
+
+# 7. Let's inspect the request on the server
+
+Modify your Python server:
+
+```python
+def do_GET(self):
+
+    print("\n--- REQUEST ---")
+    print("Method:", self.command)
+    print("Path:", self.path)
+    print("Headers:")
+    print(self.headers)
+
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain")
+    self.end_headers()
+
+    self.wfile.write(b"Hello HTTP!")
+```
+
+Restart:
+
+```bash
+Ctrl+C
+python3 server.py
+```
+
+Now connect:
+
+```bash
+nc localhost 8080
+```
+
+Send:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+User-Agent: MyBrowser
+Accept: text/plain
+
+```
+
+Look at your **server terminal**.
+
+You should see something like:
+
+```text
+--- REQUEST ---
+Method: GET
+Path: /
+Headers:
+Host: localhost:8080
+User-Agent: MyBrowser
+Accept: text/plain
+```
+
+This is a great experiment because you can now see both sides:
+
+```text
+                 TCP connection
+                      │
+                      ▼
+┌────────────────────────────────────┐
+│              CLIENT                │
+│                                    │
+│ GET / HTTP/1.1                     │
+│ Host: localhost:8080               │
+│ User-Agent: MyBrowser              │
+│ Accept: text/plain                 │
+│                                    │
+└────────────────┬───────────────────┘
+                 │
+                 │ HTTP request
+                 ▼
+┌────────────────────────────────────┐
+│              SERVER                │
+│                                    │
+│ self.command → GET                 │
+│ self.path    → /                   │
+│ self.headers → headers             │
+│                                    │
+└────────────────────────────────────┘
+```
+
+---
+
+# 8. Now let's break the request
+
+Try this:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+
+```
+
+What changed?
+
+Only:
+
+```text
+/
+```
+
+became:
+
+```text
+/users
+```
+
+So the server receives:
+
+```text
+Method = GET
+Path   = /users
+```
+
+The HTTP protocol doesn't care what `/users` means.
+
+That's the **application's responsibility**.
+
+HTTP essentially says:
+
+> "Here's a request for this target."
+
+Your application decides:
+
+> "Ah, `/users` means return users."
+
+---
+
+# 9. Let's make the server respond differently
+
+Change your server:
+
+```python
+def do_GET(self):
+
+    if self.path == "/":
+        message = "Home page"
+
+    elif self.path == "/users":
+        message = "List of users"
+
+    else:
+        self.send_response(404)
+        self.end_headers()
+        self.wfile.write(b"Not Found")
+        return
+
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain")
+    self.end_headers()
+
+    self.wfile.write(message.encode())
+```
+
+Now:
+
+```bash
+nc localhost 8080
+```
+
+Send:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+
+```
+
+Response:
+
+```text
+List of users
+```
+
+And:
+
+```http
+GET /something HTTP/1.1
+Host: localhost:8080
+
+```
+
+Response:
+
+```text
+Not Found
+```
+
+---
+
+# 10. Here's an important separation
+
+At this point, distinguish **HTTP** from your **application**.
+
+HTTP defines things like:
+
+```text
+GET
+POST
+HTTP/1.1
+headers
+status codes
+request body
+response body
+```
+
+Your application defines:
+
+```text
+/users
+/orders
+/products
+/login
+/create-user
+```
+
+For example:
+
+```http
+GET /users HTTP/1.1
+```
+
+HTTP understands:
+
+```text
+GET
+/users
+```
+
+But HTTP doesn't know what a "user" is.
+
+That's your application's meaning.
+
+This distinction becomes extremely important when you start learning REST APIs and frameworks.
+
+---
+
+# 11. One more experiment
+
+Try removing the `Host` header.
+
+```bash
+nc localhost 8080
+```
+
+Send:
+
+```http
+GET / HTTP/1.1
+
+```
+
+Depending on the Python server implementation, you may get a `400 Bad Request`.
+
+Why?
+
+Because for HTTP/1.1, the `Host` header is required in normal requests.
+
+We'll explore **why `Host` exists** in a later lesson.
+
+---
+
+# 12. Your mental model after Lesson 2
+
+You should now think of an HTTP request as:
+
+```text
+┌───────────────────────────────┐
+│ Request Line                   │
+│ GET /users HTTP/1.1            │
+├───────────────────────────────┤
+│ Headers                        │
+│ Host: localhost:8080           │
+│ Accept: application/json       │
+│ User-Agent: MyClient           │
+├───────────────────────────────┤
+│ EMPTY LINE                     │
+├───────────────────────────────┤
+│ Body                           │
+│ ...                            │
+└───────────────────────────────┘
+```
+
+And the response:
+
+```text
+┌───────────────────────────────┐
+│ Status Line                    │
+│ HTTP/1.1 200 OK                │
+├───────────────────────────────┤
+│ Headers                        │
+│ Content-Type: text/plain       │
+│ Content-Length: 12             │
+├───────────────────────────────┤
+│ EMPTY LINE                     │
+├───────────────────────────────┤
+│ Body                           │
+│ Hello HTTP!                    │
+└───────────────────────────────┘
+```
+
+---
+
+# 🎯 Exercises
+
+Before moving on, try these manually with `nc`.
+
+### Exercise 1
+
+Send:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+```
+
+Add the blank line.
+
+Observe the response.
+
+### Exercise 2
+
+Change the path:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+
+```
+
+### Exercise 3
+
+Add two custom headers:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+X-Name: Riyaz
+X-Course: HTTP
+
+```
+
+Look at what appears in your server terminal.
+
+### Exercise 4 — deliberately break it
+
+Try:
+
+```http
+/users GET HTTP/1.1
+Host: localhost:8080
+
+```
+
+Observe what happens.
+
+Then try:
+
+```http
+GET / HTTP/1.1
+```
+
+without `Host`.
+
+These experiments are more valuable than memorizing the HTTP grammar.
+
+---
+
+### The key idea from this lesson
+
+You have now crossed an important line:
+
+**`curl` → convenient HTTP client**
+
+versus
+
+**`nc` → raw TCP connection where you manually type the HTTP message**
+
+Next we'll look at the **response in the same way**, including why `Content-Length` matters and how the client knows **where the response body ends**.
+
+
+---
