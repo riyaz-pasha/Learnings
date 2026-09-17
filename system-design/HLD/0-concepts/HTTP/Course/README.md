@@ -9809,3 +9809,714 @@ need special treatment.
 
 ---
 
+# Lesson 13 — URL Encoding in Real APIs
+
+We already saw URL encoding briefly. Now let's understand **why it exists**, how it works at the HTTP level, and where it matters in real APIs.
+
+---
+
+## 1. The problem: URLs have special characters
+
+Suppose you want to search for:
+
+```text
+John & Sons
+```
+
+You might naturally write:
+
+```text
+/users?name=John & Sons
+```
+
+But `&` has a special meaning in a query string:
+
+```text
+/users?name=John&company=Sons
+```
+
+Now the server may interpret that as **two parameters**:
+
+```text
+name = John
+company = Sons
+```
+
+But that's not what you meant.
+
+You meant:
+
+```text
+name = "John & Sons"
+```
+
+So we need a way to distinguish:
+
+> "This character is data."
+
+from:
+
+> "This character is part of URL syntax."
+
+That's what **percent-encoding** solves.
+
+---
+
+# 2. Percent-encoding
+
+The basic format is:
+
+```text
+%XX
+```
+
+where `XX` is a hexadecimal byte value.
+
+For example:
+
+```text
+space → %20
+&     → %26
+?     → %3F
+=     → %3D
+#     → %23
+%     → %25
++     → %2B
+/     → %2F
+```
+
+So:
+
+```text
+John & Sons
+```
+
+can become:
+
+```text
+John%20%26%20Sons
+```
+
+---
+
+# 3. Try it with curl
+
+Run:
+
+```bash
+curl "http://localhost:8080/users?name=John%20%26%20Sons"
+```
+
+Your server should see:
+
+```text
+Path: /users
+Query: name=John%20%26%20Sons
+```
+
+Then:
+
+```python
+parse_qs("name=John%20%26%20Sons")
+```
+
+produces approximately:
+
+```python
+{
+    "name": ["John & Sons"]
+}
+```
+
+Notice the two stages:
+
+```text
+HTTP request
+      ↓
+name=John%20%26%20Sons
+      ↓
+URL/query parsing
+      ↓
+name = "John & Sons"
+```
+
+The encoded representation travels over HTTP.
+
+Your application works with the decoded value.
+
+---
+
+# 4. Why can't we just send spaces?
+
+Consider:
+
+```http
+GET /users?name=John Doe HTTP/1.1
+Host: localhost:8080
+```
+
+The space has special significance in HTTP request syntax.
+
+Remember the request line:
+
+```text
+METHOD SP REQUEST-TARGET SP HTTP-VERSION
+```
+
+For example:
+
+```text
+GET /users HTTP/1.1
+```
+
+There are spaces separating:
+
+```text
+GET
+/users
+HTTP/1.1
+```
+
+A literal space inside the request target would make parsing ambiguous.
+
+So URL encoding allows us to represent the data safely:
+
+```text
+John%20Doe
+```
+
+---
+
+# 5. Query parameter example
+
+Suppose your API supports:
+
+```text
+GET /users?name=Riyaz
+```
+
+No encoding is necessary.
+
+But:
+
+```text
+GET /users?name=Riyaz Mohammed
+```
+
+should be encoded as:
+
+```text
+GET /users?name=Riyaz%20Mohammed
+```
+
+Similarly:
+
+```text
+GET /search?q=hello world
+```
+
+becomes:
+
+```text
+GET /search?q=hello%20world
+```
+
+---
+
+# 6. `&` is especially important
+
+Consider:
+
+```text
+/users?name=John&age=30
+```
+
+This means:
+
+```text
+name = John
+age  = 30
+```
+
+Now suppose the name itself contains `&`:
+
+```text
+John & Sons
+```
+
+We must encode the `&`:
+
+```text
+/users?name=John%20%26%20Sons
+```
+
+Now the parser knows:
+
+```text
+parameter name
+        ↓
+John%20%26%20Sons
+        ↓
+John & Sons
+```
+
+instead of interpreting `&` as a parameter separator.
+
+---
+
+# 7. `=` has the same idea
+
+Normally:
+
+```text
+/users?id=123
+```
+
+means:
+
+```text
+key = id
+value = 123
+```
+
+But suppose the actual value is:
+
+```text
+a=b
+```
+
+You need:
+
+```text
+/users?value=a%3Db
+```
+
+Otherwise:
+
+```text
+value=a=b
+```
+
+could become ambiguous depending on the parser/application.
+
+---
+
+# 8. What about `?`
+
+The `?` separates the path from the query:
+
+```text
+/users?name=Riyaz
+      ^
+```
+
+But suppose your search value itself contains `?`:
+
+```text
+what?
+```
+
+Encode it:
+
+```text
+/search?q=what%3F
+```
+
+Otherwise the character could be interpreted as URL syntax rather than data.
+
+---
+
+# 9. What about `#`?
+
+This one is particularly interesting.
+
+Consider:
+
+```text
+/users/123#profile
+```
+
+The `#profile` portion is a **fragment**.
+
+Browsers generally don't send the fragment to the HTTP server.
+
+So the server receives:
+
+```http
+GET /users/123 HTTP/1.1
+```
+
+not:
+
+```http
+GET /users/123#profile HTTP/1.1
+```
+
+But if `#` is actually part of your data, it needs to be encoded:
+
+```text
+/search?q=C%23
+```
+
+Here:
+
+```text
+C%23
+```
+
+decodes to:
+
+```text
+C#
+```
+
+This is why searching for C# can produce URLs such as:
+
+```text
+/search?q=C%23
+```
+
+---
+
+# 10. Python makes this easy
+
+Python provides:
+
+```python
+from urllib.parse import quote, unquote
+```
+
+Try:
+
+```python
+from urllib.parse import quote
+
+value = "John & Sons"
+
+encoded = quote(value)
+
+print(encoded)
+```
+
+Result:
+
+```text
+John%20%26%20Sons
+```
+
+Decode it:
+
+```python
+from urllib.parse import unquote
+
+print(unquote("John%20%26%20Sons"))
+```
+
+Result:
+
+```text
+John & Sons
+```
+
+So:
+
+```text
+quote()
+   ↓
+encode
+
+unquote()
+   ↓
+decode
+```
+
+---
+
+# 11. Query parameters have a convenient helper
+
+Instead of manually constructing:
+
+```text
+/users?name=John%20%26%20Sons&page=2
+```
+
+Python can construct it:
+
+```python
+from urllib.parse import urlencode
+
+params = {
+    "name": "John & Sons",
+    "page": 2
+}
+
+query = urlencode(params)
+
+print(query)
+```
+
+You'll get:
+
+```text
+name=John+%26+Sons&page=2
+```
+
+Notice something interesting:
+
+```text
+space → +
+```
+
+instead of:
+
+```text
+space → %20
+```
+
+That's because `urlencode()` uses the conventions of **form-style query encoding**.
+
+Both forms commonly represent a space in query/form contexts:
+
+```text
+John%20Doe
+John+Doe
+```
+
+But don't make the mistake of thinking:
+
+> `+` always means space everywhere in a URL.
+
+It doesn't.
+
+---
+
+# 12. Path encoding is slightly different
+
+Consider:
+
+```text
+/users/John%20Doe
+```
+
+After decoding:
+
+```text
+/users/John Doe
+```
+
+That's straightforward.
+
+But consider:
+
+```text
+/files/a%2Fb
+```
+
+`%2F` represents `/`.
+
+So the decoded value is:
+
+```text
+a/b
+```
+
+This creates an important routing issue.
+
+Compare:
+
+```text
+/files/a/b
+```
+
+with:
+
+```text
+/files/a%2Fb
+```
+
+Conceptually:
+
+```text
+/files/a/b
+       ↓
+two path segments
+
+a
+b
+```
+
+whereas:
+
+```text
+/files/a%2Fb
+       ↓
+one segment whose value is "a/b"
+```
+
+Whether a particular server/framework preserves that distinction during routing is implementation-dependent.
+
+This is one reason URL decoding and routing need to be handled carefully.
+
+---
+
+# 13. Encoding happens at the representation boundary
+
+A very useful mental model is:
+
+```text
+Application value
+      │
+      │ encode
+      ↓
+URL representation
+      │
+      │ HTTP
+      ↓
+Server
+      │
+      │ decode
+      ↓
+Application value
+```
+
+For example:
+
+```text
+Application:
+
+name = "John & Sons"
+
+       ↓ encode
+
+URL:
+
+/users?name=John%20%26%20Sons
+
+       ↓ HTTP
+
+Server
+
+       ↓ decode
+
+name = "John & Sons"
+```
+
+---
+
+# 14. Hands-on exercise
+
+Use your current server and run these:
+
+### Exercise 1
+
+```bash
+curl "http://localhost:8080/search?q=hello%20world"
+```
+
+What does Python's `parse_qs()` produce?
+
+---
+
+### Exercise 2
+
+```bash
+curl "http://localhost:8080/search?q=John%20%26%20Sons"
+```
+
+Expected query value:
+
+```text
+John & Sons
+```
+
+---
+
+### Exercise 3
+
+Try:
+
+```bash
+curl "http://localhost:8080/search?q=C%23"
+```
+
+Expected:
+
+```text
+C#
+```
+
+---
+
+### Exercise 4
+
+Compare:
+
+```bash
+curl "http://localhost:8080/search?q=hello+world"
+```
+
+and:
+
+```bash
+curl "http://localhost:8080/search?q=hello%20world"
+```
+
+With `parse_qs()`, both will normally decode to:
+
+```text
+hello world
+```
+
+because query parsing follows form-style `+` handling.
+
+---
+
+# The key thing to remember
+
+Don't memorize dozens of encoded characters.
+
+Understand the problem:
+
+```text
+URL syntax
+    +
+user data
+    ↓
+potential ambiguity
+    ↓
+percent-encoding
+```
+
+For example:
+
+```text
+&  → %26
+?  → %3F
+#  → %23
+=  → %3D
+%  → %25
+/  → %2F
+```
+
+And the big picture we've learned so far is now:
+
+```text
+HTTP request
+│
+├── Method
+│
+├── Request target
+│   ├── Path
+│   └── Query
+│
+├── Headers
+│
+├── Blank line
+│
+└── Body
+```
+
+Next we'll move into **REST-style API design with GET**, and connect everything we've learned so far into an actual API endpoint.
+
+
+---
