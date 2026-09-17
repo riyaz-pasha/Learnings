@@ -4790,3 +4790,711 @@ Once that's clear, the next lesson is **URL encoding** — why spaces, `&`, `?`,
 
 ---
 
+# Lesson 7 — URL Encoding
+
+Now we know that a URL can contain:
+
+```text
+scheme + host + port + path + query + fragment
+```
+
+But there is a problem.
+
+**What if the data itself contains characters that have special meaning in a URL?**
+
+For example:
+
+```text
+hello world
+```
+
+or:
+
+```text
+John & Sons
+```
+
+or:
+
+```text
+C++
+```
+
+This is where **URL encoding** comes in.
+
+---
+
+## 1. The problem
+
+Suppose we want to search for:
+
+```text
+hello world
+```
+
+A naïve URL might be:
+
+```text
+/users?search=hello world
+```
+
+But URLs have syntax rules, and a literal space isn't valid in the URL's normal form.
+
+So we encode the space:
+
+```text
+/users?search=hello%20world
+```
+
+Here:
+
+```text
+%20
+```
+
+means the byte representing a space.
+
+So:
+
+```text
+hello world
+```
+
+becomes:
+
+```text
+hello%20world
+```
+
+This process is called **percent-encoding**.
+
+---
+
+# 2. Why `%`
+
+The general form is:
+
+```text
+%XX
+```
+
+where `XX` is the hexadecimal representation of a byte.
+
+Some common examples:
+
+| Character | Encoding |
+| --------- | -------- |
+| space     | `%20`    |
+| `&`       | `%26`    |
+| `?`       | `%3F`    |
+| `=`       | `%3D`    |
+| `#`       | `%23`    |
+| `%`       | `%25`    |
+| `/`       | `%2F`    |
+| `+`       | `%2B`    |
+
+For example:
+
+```text
+hello world
+```
+
+→
+
+```text
+hello%20world
+```
+
+And:
+
+```text
+John & Sons
+```
+
+→
+
+```text
+John%20%26%20Sons
+```
+
+---
+
+# 3. Why does `&` matter?
+
+Consider:
+
+```text
+/users?name=John&age=30
+```
+
+The `&` has special meaning.
+
+It separates query parameters:
+
+```text
+name = John
+age  = 30
+```
+
+But suppose the actual name is:
+
+```text
+John & Sons
+```
+
+If we send:
+
+```text
+/users?name=John & Sons
+```
+
+the `&` could be interpreted as the beginning of another parameter.
+
+Instead:
+
+```text
+/users?name=John%20%26%20Sons
+```
+
+Now the server can interpret the value as:
+
+```text
+name = "John & Sons"
+```
+
+---
+
+# 4. Let's experiment with curl
+
+Start your server:
+
+```bash
+python3 server.py
+```
+
+Try:
+
+```bash
+curl -v "http://localhost:8080/search?query=hello%20world"
+```
+
+Your server will receive:
+
+```text
+/search?query=hello%20world
+```
+
+The URL contains the encoded representation.
+
+---
+
+# 5. Python can decode it
+
+Python provides utilities for URL parsing.
+
+Try this separately:
+
+```bash
+python3
+```
+
+Then:
+
+```python
+from urllib.parse import unquote
+
+unquote("hello%20world")
+```
+
+Result:
+
+```text
+'hello world'
+```
+
+And:
+
+```python
+unquote("John%20%26%20Sons")
+```
+
+Result:
+
+```text
+'John & Sons'
+```
+
+So conceptually:
+
+```text
+Client
+  |
+  | encoded URL
+  v
+/search?name=John%20%26%20Sons
+  |
+  v
+Server
+  |
+  | decode
+  v
+John & Sons
+```
+
+---
+
+# 6. Query parameters have another important concept
+
+Let's say we have:
+
+```text
+/products?category=books&page=2
+```
+
+There are two layers:
+
+### URL syntax
+
+```text
+?       → starts query
+&       → separates parameters
+=       → separates key and value
+```
+
+### Application data
+
+```text
+category = books
+page     = 2
+```
+
+That's why encoding is important.
+
+If the value itself contains a special character, we encode it.
+
+---
+
+# 7. A very common example: search
+
+Suppose the user searches:
+
+```text
+java http tutorial
+```
+
+We could construct:
+
+```text
+/search?q=java%20http%20tutorial
+```
+
+The server decodes:
+
+```text
+java http tutorial
+```
+
+Another example:
+
+```text
+/search?q=machine%20learning%20%26%20AI
+```
+
+decodes to:
+
+```text
+machine learning & AI
+```
+
+---
+
+# 8. `+` vs `%20`
+
+You'll often see spaces represented as:
+
+```text
+%20
+```
+
+But sometimes you'll see:
+
+```text
++
+```
+
+For example:
+
+```text
+/search?q=hello+world
+```
+
+This is particularly common with **HTML form/query encoding** (`application/x-www-form-urlencoded`).
+
+Python demonstrates the distinction nicely:
+
+```python
+from urllib.parse import unquote, unquote_plus
+
+unquote("hello+world")
+```
+
+gives:
+
+```text
+'hello+world'
+```
+
+while:
+
+```python
+unquote_plus("hello+world")
+```
+
+gives:
+
+```text
+'hello world'
+```
+
+So don't blindly assume:
+
+```text
++
+```
+
+always means a space everywhere in URLs.
+
+Its interpretation depends on the encoding context.
+
+---
+
+# 9. The interesting case: `/`
+
+Consider:
+
+```text
+/users/123
+```
+
+The `/` separates path segments:
+
+```text
+users
+123
+```
+
+But suppose the actual ID contains `/`.
+
+For example, imagine an ID:
+
+```text
+abc/123
+```
+
+If we put it directly into the path:
+
+```text
+/users/abc/123
+```
+
+the server sees two path segments:
+
+```text
+users
+abc
+123
+```
+
+But perhaps we wanted **one ID**:
+
+```text
+"abc/123"
+```
+
+We can percent-encode the slash:
+
+```text
+/users/abc%2F123
+```
+
+Now the encoded slash represents data rather than the path separator.
+
+This distinction becomes important when designing APIs.
+
+---
+
+# 10. Path encoding vs query encoding
+
+This is a subtle but important point.
+
+Consider:
+
+```text
+/users/abc%2F123
+```
+
+versus:
+
+```text
+/users?name=abc%2F123
+```
+
+The same `%2F` sequence appears, but it occurs in different URL components.
+
+URL encoding isn't simply:
+
+> "Replace weird characters."
+
+It is about **representing data without accidentally changing the syntax of the URL component containing that data.**
+
+As you get deeper into web development, you'll encounter different encoding rules for:
+
+* path segments
+* query parameters
+* form data
+* fragments
+
+Don't memorize every rule yet. Understand the principle.
+
+---
+
+# 11. Let's parse URLs properly
+
+Python has a useful tool:
+
+```python
+from urllib.parse import urlparse
+```
+
+Try:
+
+```python
+url = "https://example.com:8080/users/123?active=true&page=2#profile"
+
+result = urlparse(url)
+
+print(result)
+```
+
+You'll get something conceptually like:
+
+```text
+scheme   = https
+netloc   = example.com:8080
+path     = /users/123
+query    = active=true&page=2
+fragment = profile
+```
+
+And:
+
+```python
+print(result.hostname)
+```
+
+gives:
+
+```text
+example.com
+```
+
+while:
+
+```python
+print(result.port)
+```
+
+gives:
+
+```text
+8080
+```
+
+---
+
+# 12. Parse query parameters
+
+Python also has:
+
+```python
+from urllib.parse import parse_qs
+```
+
+Try:
+
+```python
+parse_qs("active=true&page=2")
+```
+
+You'll get:
+
+```python
+{
+    "active": ["true"],
+    "page": ["2"]
+}
+```
+
+Notice something interesting:
+
+**values are lists.**
+
+That's because a query parameter can occur multiple times.
+
+For example:
+
+```text
+/products?tag=java&tag=http&tag=backend
+```
+
+can represent:
+
+```text
+tag = ["java", "http", "backend"]
+```
+
+This is one reason you shouldn't assume that every query parameter is always a single key/value pair.
+
+---
+
+# 13. A practical API example
+
+Imagine:
+
+```text
+GET /products?category=books&minPrice=100&maxPrice=500&page=2
+```
+
+We can conceptually parse it as:
+
+```text
+Path:
+    /products
+
+Query:
+    category = books
+    minPrice = 100
+    maxPrice = 500
+    page     = 2
+```
+
+The HTTP layer transports this request.
+
+Your application decides what those parameters mean.
+
+This distinction is worth remembering:
+
+```text
+HTTP
+ ↓
+transports request
+
+Application
+ ↓
+interprets path/query/body
+```
+
+---
+
+# 14. One important security lesson
+
+Never assume that encoded and decoded URLs are interchangeable strings.
+
+For example:
+
+```text
+/users/a%2Fb
+```
+
+and:
+
+```text
+/users/a/b
+```
+
+are **not necessarily the same request target**.
+
+The encoded version may represent one path segment containing `/`, while the decoded version contains two path segments.
+
+This matters for:
+
+* routing
+* authorization
+* caching
+* proxies
+* security checks
+
+We'll revisit this when we get to real-world HTTP behavior.
+
+---
+
+# 🧪 Exercise
+
+Try these:
+
+```bash
+curl "http://localhost:8080/search?q=hello%20world"
+```
+
+```bash
+curl "http://localhost:8080/search?q=John%20%26%20Sons"
+```
+
+```bash
+curl "http://localhost:8080/search?q=java%20%26%20spring&page=2"
+```
+
+Then inspect what your server receives.
+
+### Challenge
+
+Without using a browser, figure out what this query represents:
+
+```text
+/search?q=HTTP%20%26%20URLs&page=2
+```
+
+It should represent:
+
+```text
+q = ?
+page = ?
+```
+
+---
+
+## Mental model
+
+At this point, think of a URL like this:
+
+```text
+https://example.com:8080/users/123?active=true#profile
+│       │           │       │              │
+│       │           │       │              └─ fragment
+│       │           │       └──────────────── query
+│       │           └──────────────────────── path
+│       └──────────────────────────────────── host + port
+└──────────────────────────────────────────── scheme
+```
+
+And when data conflicts with URL syntax:
+
+```text
+raw data
+   ↓
+percent-encoding
+   ↓
+safe URL representation
+   ↓
+HTTP request
+   ↓
+decode
+   ↓
+original data
+```
+
+**Next: HTTP status codes** — we'll go beyond just `200` and `404` and understand why `201`, `204`, `301`, `302`, `400`, `401`, `403`, `409`, `422`, `429`, and `500` exist and when each is appropriate.
+
+
+---
+
