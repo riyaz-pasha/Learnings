@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 
 class Handler(BaseHTTPRequestHandler):
 
@@ -13,10 +14,23 @@ class Handler(BaseHTTPRequestHandler):
         print("=================")
 
         if self.path=="/":
-            message="Home Page"
+            response = {
+                "message": "Hello HTTP",
+                "course": "HTTP fundamentals"
+            }
+
+            body = json.dumps(response).encode()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+            self.wfile.write(body)
+            return
 
         elif self.path=="/users":
-            message="List of users"
+            body="List of users"
 
         else:
             self.send_response(404)
@@ -28,9 +42,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
 
         self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        # self.send_header("Content-Length", str(6))
+        # self.send_header("Content-Length", str(100))
         self.end_headers()
 
-        self.wfile.write(message.encode())
+        self.wfile.write(body.encode())
 
 
 server = HTTPServer(("localhost",8080),Handler)

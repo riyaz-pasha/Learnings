@@ -1632,3 +1632,709 @@ Next we'll look at the **response in the same way**, including why `Content-Leng
 
 
 ---
+
+# Lesson 3 — HTTP Response: How Does the Client Know Where the Body Ends?
+
+This lesson is important because we're going to answer a deceptively simple question:
+
+> **When the server sends a response, how does the client know where the response ends?**
+
+This leads us directly into **headers, `Content-Length`, and the HTTP message structure**.
+
+---
+
+## 1. Let's first look at a response
+
+Run:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You'll see something like:
+
+```http
+< HTTP/1.0 200 OK
+< Server: BaseHTTP/...
+< Date: ...
+< Content-Type: text/plain
+<
+Hello HTTP!
+```
+
+There are three major parts:
+
+```text
+HTTP/1.0 200 OK          ← Status line
+
+Content-Type: text/plain ← Headers
+
+                          ← Empty line
+
+Hello HTTP!              ← Body
+```
+
+The response structure is:
+
+```text
+┌──────────────────────────────┐
+│ Status Line                  │
+├──────────────────────────────┤
+│ Headers                      │
+├──────────────────────────────┤
+│ Empty Line                   │
+├──────────────────────────────┤
+│ Body                         │
+└──────────────────────────────┘
+```
+
+---
+
+# 2. Let's add Content-Length
+
+Change your server to:
+
+```python
+def do_GET(self):
+
+    body = b"Hello HTTP!"
+
+    self.send_response(200)
+
+    self.send_header("Content-Type", "text/plain")
+    self.send_header("Content-Length", str(len(body)))
+
+    self.end_headers()
+
+    self.wfile.write(body)
+```
+
+Restart the server.
+
+Now:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You should see:
+
+```http
+< HTTP/1.0 200 OK
+< Content-Type: text/plain
+< Content-Length: 11
+<
+Hello HTTP!
+```
+
+Let's count:
+
+```text
+Hello HTTP!
+```
+
+has 11 bytes.
+
+```text
+H e l l o   H T T P !
+1 2 3 4 5 6 7 8 9 10 11
+```
+
+So:
+
+```http
+Content-Length: 11
+```
+
+means:
+
+> The message body contains exactly 11 bytes.
+
+---
+
+# 3. Why does this matter?
+
+Imagine the server sends:
+
+```text
+Hello HTTP!
+```
+
+How does the client know whether this is:
+
+```text
+Hello HTTP!
+```
+
+or:
+
+```text
+Hello HTTP!More data...
+```
+
+or:
+
+```text
+Hello HTTP!
+Another response?
+```
+
+The client needs some way to determine:
+
+> **Where does the body end?**
+
+`Content-Length` is one way.
+
+```http
+Content-Length: 11
+```
+
+The client can now say:
+
+```text
+I need to read exactly 11 bytes.
+```
+
+---
+
+# 4. A very important distinction
+
+`Content-Length` does **not** mean:
+
+> "The entire HTTP response is 11 bytes."
+
+It means:
+
+> "The message body is 11 bytes."
+
+So:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Length: 11
+
+Hello HTTP!
+```
+
+The entire network message is larger than 11 bytes because the status line and headers are also present.
+
+---
+
+# 5. Let's make the body longer
+
+Change:
+
+```python
+body = b"Hello HTTP!"
+```
+
+to:
+
+```python
+body = b"Hello! Welcome to the HTTP course."
+```
+
+Then:
+
+```python
+self.send_header("Content-Length", str(len(body)))
+```
+
+automatically calculates the correct size.
+
+Run:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You'll see something like:
+
+```http
+< Content-Length: 35
+<
+Hello! Welcome to the HTTP course.
+```
+
+The important thing is:
+
+```text
+body length
+     ↓
+Content-Length
+```
+
+---
+
+# 6. What if Content-Length is wrong?
+
+This is a great experiment.
+
+Change:
+
+```python
+self.send_header("Content-Length", str(len(body)))
+```
+
+to:
+
+```python
+self.send_header("Content-Length", "5")
+```
+
+But continue sending:
+
+```python
+body = b"Hello HTTP!"
+```
+
+Now you've told the client:
+
+```text
+Body length = 5
+```
+
+but you're actually sending:
+
+```text
+11 bytes
+```
+
+Run:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You'll see behavior indicating that only the declared amount belongs to the response body, with the exact behavior depending on the client/server handling.
+
+The important lesson is:
+
+> **HTTP metadata must agree with the actual message.**
+
+---
+
+# 7. What if Content-Length is too large?
+
+Try:
+
+```python
+self.send_header("Content-Length", "100")
+```
+
+while only sending:
+
+```text
+Hello HTTP!
+```
+
+Now the client has a problem.
+
+The server effectively says:
+
+```text
+"I'm sending you 100 bytes."
+```
+
+but only sends 11.
+
+The client may wait for more data.
+
+This is one reason message framing is so important in HTTP.
+
+---
+
+# 8. But Content-Length isn't the only way
+
+This is where HTTP becomes more interesting.
+
+HTTP/1.x has multiple mechanisms for determining message boundaries.
+
+For example:
+
+### Content-Length
+
+```http
+Content-Length: 100
+```
+
+means:
+
+```text
+Read exactly 100 body bytes.
+```
+
+Another mechanism is:
+
+### Transfer-Encoding: chunked
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+
+5
+Hello
+6
+ World
+0
+
+```
+
+The body is transferred in chunks.
+
+We'll study this later.
+
+For now, remember:
+
+```text
+HTTP needs a way to determine
+where the message body ends.
+```
+
+---
+
+# 9. Let's look at the response using `nc`
+
+This time we want to see what the server actually sends.
+
+Run:
+
+```bash
+nc localhost 8080
+```
+
+Send:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+
+```
+
+You'll get something similar to:
+
+```http
+HTTP/1.0 200 OK
+Server: BaseHTTP/...
+Date: ...
+Content-Type: text/plain
+Content-Length: 11
+
+Hello HTTP!
+```
+
+Now notice something beautiful.
+
+The response is itself just structured data:
+
+```text
+STATUS LINE
+     ↓
+HTTP/1.0 200 OK
+
+HEADERS
+     ↓
+Content-Type: text/plain
+Content-Length: 11
+
+EMPTY LINE
+     ↓
+
+BODY
+     ↓
+Hello HTTP!
+```
+
+---
+
+# 10. Request and response are symmetrical
+
+This is a useful mental model.
+
+### Request
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+
+```
+
+### Response
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: ...
+
+{"id":1,"name":"Alice"}
+```
+
+Notice the pattern:
+
+```text
+REQUEST                      RESPONSE
+
+Request line                 Status line
+     ↓                            ↓
+GET /users HTTP/1.1          HTTP/1.1 200 OK
+
+Headers                      Headers
+     ↓                            ↓
+Host: ...                    Content-Type: ...
+
+Empty line                   Empty line
+     ↓                            ↓
+
+Body                         Body
+     ↓                            ↓
+(optional)                   (optional)
+```
+
+---
+
+# 11. One subtle but important thing
+
+You might now think:
+
+> "Every response has a body."
+
+No.
+
+Some HTTP responses don't have one.
+
+For example:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+means the response has no content body.
+
+Similarly, certain responses and requests have special rules around whether a body is allowed or expected.
+
+We'll learn these rules later.
+
+---
+
+# 12. Let's make our server return JSON
+
+Change the server:
+
+```python
+import json
+```
+
+Then:
+
+```python
+def do_GET(self):
+
+    response = {
+        "message": "Hello HTTP",
+        "course": "HTTP fundamentals"
+    }
+
+    body = json.dumps(response).encode()
+
+    self.send_response(200)
+    self.send_header("Content-Type", "application/json")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+
+    self.wfile.write(body)
+```
+
+Now:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+Response:
+
+```http
+HTTP/1.0 200 OK
+Content-Type: application/json
+Content-Length: ...
+
+{"message": "Hello HTTP", "course": "HTTP fundamentals"}
+```
+
+Notice:
+
+```http
+Content-Type: application/json
+```
+
+This header tells the client:
+
+> "Interpret the body as JSON."
+
+This leads to our next major topic.
+
+---
+
+# 13. `Content-Type` vs `Content-Length`
+
+These two headers answer completely different questions.
+
+### Content-Type
+
+```http
+Content-Type: application/json
+```
+
+answers:
+
+> **What kind of data is this?**
+
+Examples:
+
+```http
+Content-Type: application/json
+Content-Type: text/plain
+Content-Type: text/html
+Content-Type: image/jpeg
+```
+
+### Content-Length
+
+```http
+Content-Length: 42
+```
+
+answers:
+
+> **How many bytes are in the body?**
+
+So:
+
+```text
+Content-Type
+      ↓
+WHAT is the body?
+
+Content-Length
+      ↓
+HOW MUCH body is there?
+```
+
+Don't mix these two concepts.
+
+---
+
+# 14. Your exercises
+
+### Exercise 1
+
+Make your server return:
+
+```text
+HTTP is a protocol.
+```
+
+and correctly calculate:
+
+```http
+Content-Length
+```
+
+Don't manually calculate it; let Python do it.
+
+---
+
+### Exercise 2
+
+Return this JSON:
+
+```json
+{
+  "name": "Riyaz",
+  "topic": "HTTP"
+}
+```
+
+with:
+
+```http
+Content-Type: application/json
+```
+
+---
+
+### Exercise 3
+
+Use:
+
+```bash
+curl -i http://localhost:8080/
+```
+
+Notice the difference between:
+
+```bash
+curl
+```
+
+and:
+
+```bash
+curl -i
+```
+
+`-i` tells curl to include the response headers in its output.
+
+---
+
+### Exercise 4
+
+Use:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+and identify:
+
+```text
+1. Status line
+2. Content-Type
+3. Content-Length
+4. Empty line
+5. Body
+```
+
+---
+
+# The big idea from Lesson 3
+
+We're slowly building the complete picture:
+
+```text
+                 HTTP MESSAGE
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+       REQUEST                 RESPONSE
+          │                       │
+    Request Line              Status Line
+          │                       │
+       Headers                  Headers
+          │                       │
+      Empty Line              Empty Line
+          │                       │
+        Body                    Body
+```
+
+And now you understand something deeper:
+
+> **HTTP isn't only about endpoints and methods. It also defines how the bytes of a message are structured and how the receiver determines where different parts of the message begin and end.**
+
+Next we'll focus entirely on **headers**. We'll create our own headers, inspect them on the server, understand why `Host`, `Accept`, `Content-Type`, `User-Agent`, `Authorization`, etc. exist, and—most importantly—learn the difference between **request headers and response headers**.
+
+---
+
