@@ -9225,3 +9225,587 @@ We'll answer a very practical backend question:
 And we'll implement both manually in our Python HTTP server.
 
 ---
+
+# Lesson 12 — Path Parameters vs Query Parameters
+
+This is an important distinction because you'll use both constantly when building APIs.
+
+---
+
+## 1. Look at these two requests
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+```
+
+and:
+
+```http
+GET /users?active=true&page=2 HTTP/1.1
+Host: localhost:8080
+```
+
+They look similar, but they communicate different things.
+
+### Path parameter
+
+```text
+/users/123
+       ^^^
+       ID
+```
+
+Usually means:
+
+> "I want the user identified by `123`."
+
+### Query parameter
+
+```text
+/users?active=true&page=2
+       ^^^^^^^^^^^^^^^^^
+       options/criteria
+```
+
+Usually means:
+
+> "I want users, filtered/paginated according to these options."
+
+A useful mental model:
+
+```text
+PATH
+  → Which resource?
+
+QUERY
+  → How should I search/filter/modify the representation?
+```
+
+---
+
+# 2. Path parameters
+
+Consider:
+
+```http
+GET /users/123
+```
+
+Here:
+
+```text
+/users     → collection
+/123       → particular resource
+```
+
+Typical examples:
+
+```text
+/users/123
+/products/456
+/orders/789
+/users/123/orders
+/users/123/orders/456
+```
+
+The path identifies **which resource or sub-resource** you're talking about.
+
+For example:
+
+```http
+GET /users/123/orders
+```
+
+can mean:
+
+> Get the orders belonging to user 123.
+
+---
+
+# 3. Query parameters
+
+Now consider:
+
+```http
+GET /users?active=true
+```
+
+The resource is still:
+
+```text
+/users
+```
+
+The query gives additional criteria:
+
+```text
+active=true
+```
+
+Other examples:
+
+```text
+/users?page=2
+/users?limit=20
+/users?sort=name
+/users?active=true
+/users?role=admin
+/users?name=riyaz
+```
+
+You can combine them:
+
+```http
+GET /users?active=true&role=admin&page=2
+```
+
+The server can interpret this as:
+
+> Give me users who are active, have the admin role, and are on page 2.
+
+---
+
+# 4. The important conceptual difference
+
+Imagine you have:
+
+```text
+/users/123
+```
+
+You're identifying a **specific resource**.
+
+But:
+
+```text
+/users?role=admin
+```
+
+You're asking for a **collection matching some criteria**.
+
+So:
+
+```text
+/users/123
+```
+
+→ resource identity
+
+while:
+
+```text
+/users?role=admin
+```
+
+→ resource selection/filtering
+
+This isn't an absolute rule enforced by HTTP. HTTP doesn't say:
+
+> "Query parameters must mean filtering."
+
+That's application-level semantics.
+
+HTTP simply gives us the request target.
+
+Your API defines what the target means.
+
+---
+
+# 5. Let's see what the server actually receives
+
+Modify your Python server:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+
+        print("\n--- REQUEST ---")
+
+        print("Raw target:", self.path)
+
+        parsed = urlparse(self.path)
+
+        print("Path:", parsed.path)
+        print("Query:", parsed.query)
+
+        params = parse_qs(parsed.query)
+
+        print("Query parameters:", params)
+
+        body = f"""
+Path: {parsed.path}
+Query: {params}
+""".encode()
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+
+        self.wfile.write(body)
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+
+server.serve_forever()
+```
+
+Now:
+
+```bash
+curl "http://localhost:8080/users/123"
+```
+
+You should see something like:
+
+```text
+Raw target: /users/123
+Path: /users/123
+Query:
+Query parameters: {}
+```
+
+Now:
+
+```bash
+curl "http://localhost:8080/users?active=true&page=2"
+```
+
+You'll get:
+
+```text
+Raw target: /users?active=true&page=2
+Path: /users
+Query: active=true&page=2
+Query parameters: {'active': ['true'], 'page': ['2']}
+```
+
+Notice something important:
+
+```text
+/users?active=true&page=2
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        request target
+
+/users
+^^^^^^
+path
+
+active=true&page=2
+^^^^^^^^^^^^^^^^^
+query
+```
+
+---
+
+# 6. Why does `parse_qs()` return lists?
+
+This is interesting.
+
+Try:
+
+```python
+from urllib.parse import parse_qs
+
+print(parse_qs("page=2"))
+```
+
+Result:
+
+```python
+{'page': ['2']}
+```
+
+Why a list?
+
+Because URLs can contain repeated parameters:
+
+```text
+/users?id=10&id=20&id=30
+```
+
+Then:
+
+```python
+parse_qs("id=10&id=20&id=30")
+```
+
+gives:
+
+```python
+{
+    'id': ['10', '20', '30']
+}
+```
+
+So query parameters are technically capable of having multiple values.
+
+---
+
+# 7. Path parameters aren't automatically understood either
+
+This:
+
+```http
+GET /users/123
+```
+
+doesn't magically give Python a variable called `id`.
+
+Your application has to interpret:
+
+```text
+/users/123
+```
+
+For example:
+
+```python
+path = "/users/123"
+
+parts = path.strip("/").split("/")
+
+print(parts)
+```
+
+Result:
+
+```text
+['users', '123']
+```
+
+You could then interpret:
+
+```python
+resource = parts[0]
+user_id = parts[1]
+```
+
+giving:
+
+```text
+resource = "users"
+user_id   = "123"
+```
+
+Frameworks such as Spring, Express, FastAPI, etc. automate this routing/parsing.
+
+But underneath, they still received:
+
+```http
+GET /users/123 HTTP/1.1
+```
+
+---
+
+# 8. A very useful example
+
+Consider an ecommerce API.
+
+### Get product 123
+
+```http
+GET /products/123
+```
+
+Meaning:
+
+```text
+Product identity = 123
+```
+
+### Search products
+
+```http
+GET /products?category=shoes
+```
+
+Meaning:
+
+```text
+Resource = products
+Filter = category=shoes
+```
+
+### Pagination
+
+```http
+GET /products?page=2&limit=20
+```
+
+### Sorting
+
+```http
+GET /products?sort=price&order=asc
+```
+
+### Filtering + pagination + sorting
+
+```http
+GET /products?category=shoes&minPrice=1000&page=2&limit=20&sort=price
+```
+
+And a nested resource:
+
+```http
+GET /users/123/orders
+```
+
+Meaning:
+
+```text
+User = 123
+Resource = orders belonging to that user
+```
+
+---
+
+# 9. One subtle but important point
+
+Don't think:
+
+> Path = mandatory, Query = optional.
+
+That's not the real distinction.
+
+The deeper distinction is **semantics**.
+
+For example, an API could technically have:
+
+```text
+/users?userId=123
+```
+
+instead of:
+
+```text
+/users/123
+```
+
+HTTP doesn't prevent it.
+
+But API designers generally use:
+
+```text
+/users/123
+```
+
+when `123` identifies the specific user, because the URL structure communicates resource identity more clearly.
+
+---
+
+# 10. One more experiment with `nc`
+
+Start:
+
+```bash
+nc localhost 8080
+```
+
+Then manually send:
+
+```http
+GET /users/123?active=true&page=2 HTTP/1.1
+Host: localhost:8080
+
+```
+
+Your server sees one request target:
+
+```text
+/users/123?active=true&page=2
+```
+
+Python separates it into:
+
+```text
+path  = /users/123
+
+query = active=true&page=2
+```
+
+So the flow is:
+
+```text
+Raw HTTP
+   ↓
+GET /users/123?active=true&page=2 HTTP/1.1
+   ↓
+HTTP parser
+   ↓
+Request target
+   ↓
+URL parsing
+   ├── path  → /users/123
+   └── query → active=true&page=2
+```
+
+---
+
+## 11. Remember this mental model
+
+When you see:
+
+```text
+/users/123/orders?status=paid&page=2
+```
+
+break it down as:
+
+```text
+/users
+   ↓
+collection
+
+/123
+   ↓
+specific user
+
+/orders
+   ↓
+user's orders
+
+?status=paid
+   ↓
+filter
+
+&page=2
+   ↓
+pagination
+```
+
+So:
+
+> **Path generally identifies the resource hierarchy. Query parameters generally provide additional instructions/criteria for the request.**
+
+And importantly, **HTTP provides the syntax; your application defines the semantics.**
+
+---
+
+### Next: Lesson 13 — URL Encoding in real APIs
+
+We'll go one level deeper and see why these can behave differently:
+
+```text
+/users/John%20Doe
+/users?name=John%20Doe
+```
+
+and especially why characters like:
+
+```text
+/ ? & = # %
+```
+
+need special treatment.
+
+---
+
