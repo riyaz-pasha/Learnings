@@ -5498,3 +5498,974 @@ original data
 
 ---
 
+# Lesson 8 — HTTP Status Codes
+
+We've already seen:
+
+```http
+HTTP/1.0 200 OK
+```
+
+and:
+
+```http
+HTTP/1.0 404 Not Found
+```
+
+Now let's understand **what status codes actually mean and why there are so many of them**.
+
+---
+
+## 1. The basic structure
+
+Every HTTP response starts with a status line:
+
+```http
+HTTP/1.1 200 OK
+```
+
+It contains:
+
+```text
+HTTP-version
+    ↓
+HTTP/1.1  200  OK
+         │    │
+         │    └── reason phrase
+         └─────── status code
+```
+
+The important part is:
+
+```text
+200
+```
+
+The reason phrase:
+
+```text
+OK
+```
+
+is mainly human-readable.
+
+The **status code is what matters to software**.
+
+---
+
+# 2. Status codes are grouped into 5 classes
+
+The first digit tells you the general category:
+
+```text
+1xx → Informational
+2xx → Success
+3xx → Redirection
+4xx → Client error
+5xx → Server error
+```
+
+Think:
+
+```text
+1xx  "I'm still processing / here's information"
+2xx  "The request succeeded"
+3xx  "Look somewhere else / use another representation"
+4xx  "The request can't be fulfilled as submitted"
+5xx  "The server failed to fulfill a valid request"
+```
+
+We'll go through the important ones.
+
+---
+
+# 3. 2xx — Success
+
+## 200 OK
+
+The most common successful response.
+
+Example:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": 123,
+  "name": "Riyaz"
+}
+```
+
+Meaning:
+
+> The request succeeded.
+
+---
+
+## 201 Created
+
+Used when a request successfully creates a resource.
+
+For example:
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+Response:
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{
+  "id": 123,
+  "name": "Riyaz"
+}
+```
+
+Often you'll also see:
+
+```http
+Location: /users/123
+```
+
+So the response might be:
+
+```http
+HTTP/1.1 201 Created
+Location: /users/123
+Content-Type: application/json
+```
+
+This communicates:
+
+> The resource was created, and this is its location.
+
+---
+
+# 4. 204 No Content
+
+This means:
+
+> The request succeeded, but there is no response content to return.
+
+For example:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: example.com
+```
+
+Response:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+There is no response body.
+
+This is common for:
+
+```text
+DELETE
+```
+
+and sometimes:
+
+```text
+PUT
+PATCH
+```
+
+when the server doesn't need to return the updated resource.
+
+---
+
+# 5. 3xx — Redirection
+
+3xx responses generally tell the client:
+
+> The requested resource or representation requires another action/location.
+
+The most famous ones are:
+
+```text
+301
+302
+303
+307
+308
+```
+
+We'll focus on the important concepts first.
+
+---
+
+## 301 Moved Permanently
+
+Suppose:
+
+```text
+http://example.com/old
+```
+
+has permanently moved to:
+
+```text
+https://example.com/new
+```
+
+The server can respond:
+
+```http
+HTTP/1.1 301 Moved Permanently
+Location: https://example.com/new
+```
+
+The important header is:
+
+```http
+Location: ...
+```
+
+The client can then make another request to that location.
+
+---
+
+# 6. 302 Found
+
+Historically, `302` has been used for temporary redirects.
+
+Example:
+
+```http
+HTTP/1.1 302 Found
+Location: /login
+```
+
+The client may then request:
+
+```http
+GET /login HTTP/1.1
+Host: example.com
+```
+
+There is an important historical complication around how clients handle methods across redirects.
+
+That's why HTTP also defines:
+
+```text
+303 See Other
+307 Temporary Redirect
+308 Permanent Redirect
+```
+
+We'll return to this when we study redirects properly.
+
+For now:
+
+```text
+301 → permanent redirect
+302 → temporary redirect (with historical behavior)
+```
+
+is enough.
+
+---
+
+# 7. 4xx — Client-side/request problems
+
+This category is extremely important for APIs.
+
+It generally means:
+
+> The server received the request, but there is something wrong with the request or the request cannot be fulfilled as submitted.
+
+---
+
+## 400 Bad Request
+
+The request is malformed or invalid.
+
+For example:
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+
+{"name":
+```
+
+That's invalid JSON.
+
+The server might respond:
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "Invalid JSON"
+}
+```
+
+Think:
+
+```text
+400
+↓
+"I can't properly process this request as submitted."
+```
+
+---
+
+# 8. 401 Unauthorized
+
+This one causes a lot of confusion.
+
+`401` generally means:
+
+> Authentication is required or the supplied authentication credentials are not acceptable.
+
+For example:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+```
+
+Server:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+```
+
+Notice the important header:
+
+```text
+WWW-Authenticate
+```
+
+We'll study this deeply in the authentication section.
+
+### Important terminology
+
+Despite the name:
+
+```text
+401 Unauthorized
+```
+
+it is fundamentally about **authentication**.
+
+Think:
+
+```text
+401 → "Who are you?"
+```
+
+---
+
+# 9. 403 Forbidden
+
+Now suppose the client is authenticated:
+
+```text
+User = Riyaz
+```
+
+but doesn't have permission to access something.
+
+Example:
+
+```http
+DELETE /admin/users/123 HTTP/1.1
+Authorization: Bearer ...
+```
+
+Server:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+Think:
+
+```text
+401 → "You haven't successfully authenticated."
+
+403 → "I know who you are, but this request isn't permitted."
+```
+
+This distinction is extremely useful.
+
+---
+
+# 10. 404 Not Found
+
+You've already seen this.
+
+```http
+HTTP/1.1 404 Not Found
+```
+
+Typically means the server cannot find a current representation/resource corresponding to the request target.
+
+Example:
+
+```http
+GET /users/999999 HTTP/1.1
+```
+
+If user 999999 doesn't exist:
+
+```http
+HTTP/1.1 404 Not Found
+```
+
+---
+
+# 11. 405 Method Not Allowed
+
+This is different from 404.
+
+Suppose:
+
+```text
+/users/123
+```
+
+exists, but the API only supports:
+
+```text
+GET
+PATCH
+DELETE
+```
+
+and you send:
+
+```http
+POST /users/123 HTTP/1.1
+```
+
+The server can return:
+
+```http
+HTTP/1.1 405 Method Not Allowed
+Allow: GET, PATCH, DELETE
+```
+
+Notice:
+
+```text
+Allow: ...
+```
+
+This header tells the client which methods are supported for that resource.
+
+---
+
+# 12. 409 Conflict
+
+This is used when the request conflicts with the current state of the resource.
+
+Classic example:
+
+```text
+POST /users
+```
+
+with:
+
+```json
+{
+  "email": "riyaz@example.com"
+}
+```
+
+Suppose that email must be unique and already exists.
+
+The server might return:
+
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{
+  "error": "Email already exists"
+}
+```
+
+Another example is concurrent resource state conflicts.
+
+The key idea:
+
+```text
+409
+↓
+"The request conflicts with the current state."
+```
+
+---
+
+# 13. 422 Unprocessable Content
+
+You may encounter:
+
+```http
+HTTP/1.1 422 Unprocessable Content
+```
+
+This is commonly used when:
+
+> The request is syntactically valid, but its content cannot be processed because it violates application-level validation/semantic rules.
+
+For example:
+
+```json
+{
+  "email": "not-an-email",
+  "age": -5
+}
+```
+
+The JSON itself is valid.
+
+So this isn't necessarily:
+
+```text
+400 → malformed JSON
+```
+
+Instead, the content may fail validation.
+
+A server could respond:
+
+```http
+HTTP/1.1 422 Unprocessable Content
+Content-Type: application/json
+
+{
+  "errors": {
+    "email": "Invalid email",
+    "age": "Must be positive"
+  }
+}
+```
+
+There is some variation among API designs over when to use `400` versus `422`; consistency within an API matters.
+
+---
+
+# 14. 429 Too Many Requests
+
+Imagine a client sends:
+
+```text
+10,000 requests/second
+```
+
+while the API allows:
+
+```text
+100 requests/minute
+```
+
+The server may respond:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+Meaning:
+
+> You are being rate limited.
+
+This becomes important when we study:
+
+* rate limiting
+* APIs
+* retries
+* distributed systems
+
+---
+
+# 15. 5xx — Server problems
+
+Now we reach:
+
+```text
+5xx
+```
+
+These generally mean:
+
+> The server failed to fulfill a request that it otherwise received appropriately.
+
+---
+
+## 500 Internal Server Error
+
+The generic server failure.
+
+For example:
+
+```python
+def do_GET(self):
+    result = 10 / 0
+```
+
+If your server doesn't handle the exception properly, the request may result in a server error.
+
+Conceptually:
+
+```http
+HTTP/1.1 500 Internal Server Error
+```
+
+Think:
+
+```text
+500
+↓
+"Something went wrong on the server."
+```
+
+---
+
+# 16. 502 Bad Gateway
+
+This becomes particularly important in distributed systems.
+
+Imagine:
+
+```text
+Client
+   ↓
+Load Balancer / API Gateway
+   ↓
+Backend Service
+```
+
+Suppose the gateway receives an invalid/unusable response from the upstream service.
+
+It might return:
+
+```http
+HTTP/1.1 502 Bad Gateway
+```
+
+So:
+
+```text
+502
+↓
+"I am acting as a gateway/proxy and got a bad response from upstream."
+```
+
+---
+
+# 17. 503 Service Unavailable
+
+Used when the server is currently unable to handle the request, often temporarily.
+
+Examples include:
+
+```text
+server overloaded
+maintenance
+temporarily unavailable
+```
+
+Response:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Retry-After: 30
+```
+
+This can tell the client:
+
+> Try again later.
+
+---
+
+# 18. 504 Gateway Timeout
+
+Again, imagine:
+
+```text
+Client
+   ↓
+API Gateway
+   ↓
+Backend
+```
+
+The gateway waits for the backend:
+
+```text
+10 seconds...
+20 seconds...
+30 seconds...
+```
+
+and the upstream doesn't respond in time.
+
+The gateway may return:
+
+```http
+HTTP/1.1 504 Gateway Timeout
+```
+
+Think:
+
+```text
+502 → upstream response was bad
+
+504 → upstream didn't respond in time
+```
+
+---
+
+# 19. The most useful status-code map
+
+For backend/API development, this is a good initial mental map:
+
+```text
+SUCCESS
+------
+200  OK
+201  Created
+204  No Content
+
+
+REDIRECTION
+-----------
+301  Moved Permanently
+302  Found
+303  See Other
+307  Temporary Redirect
+308  Permanent Redirect
+
+
+CLIENT / REQUEST
+----------------
+400  Bad Request
+401  Authentication required / failed
+403  Forbidden
+404  Not Found
+405  Method Not Allowed
+409  Conflict
+422  Unprocessable Content
+429  Too Many Requests
+
+
+SERVER / INFRASTRUCTURE
+-----------------------
+500  Internal Server Error
+502  Bad Gateway
+503  Service Unavailable
+504  Gateway Timeout
+```
+
+Don't try to memorize every HTTP status code.
+
+Understand the **categories and situations**.
+
+---
+
+# 20. Let's make our server return different codes
+
+Modify your server:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+
+        if self.path == "/":
+            body = b"Hello HTTP!"
+            self.send_response(200)
+
+        elif self.path == "/created":
+            body = b"Created"
+            self.send_response(201)
+
+        elif self.path == "/empty":
+            body = b""
+            self.send_response(204)
+
+        elif self.path == "/bad":
+            body = b"Bad request"
+            self.send_response(400)
+
+        elif self.path == "/missing":
+            body = b"Not found"
+            self.send_response(404)
+
+        else:
+            body = b"Internal server error"
+            self.send_response(500)
+
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+
+        if body:
+            self.wfile.write(body)
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+server.serve_forever()
+```
+
+Restart it and try:
+
+```bash
+curl -i http://localhost:8080/
+```
+
+Then:
+
+```bash
+curl -i http://localhost:8080/created
+```
+
+Then:
+
+```bash
+curl -i http://localhost:8080/empty
+```
+
+Then:
+
+```bash
+curl -i http://localhost:8080/missing
+```
+
+Observe the first line of each response.
+
+---
+
+# 21. One very important misconception
+
+Don't think:
+
+```text
+HTTP status code = whether my business operation succeeded
+```
+
+It's slightly more nuanced.
+
+HTTP status codes describe the **HTTP-level outcome** of the request.
+
+Your application then has its own semantics.
+
+For example, this is possible:
+
+```http
+HTTP/1.1 200 OK
+
+{
+    "success": false,
+    "error": "Payment declined"
+}
+```
+
+Technically the HTTP request succeeded and the server successfully communicated the application result.
+
+Whether an API **should** design responses this way is a separate API-design question.
+
+A common API design instead might use an appropriate HTTP status for the application outcome.
+
+We'll revisit this when we build our API.
+
+---
+
+# 🧠 The bigger picture
+
+You now have:
+
+```text
+HTTP Request
+│
+├── Method
+├── Request-target
+├── HTTP version
+├── Headers
+├── Blank line
+└── Body
+          │
+          ▼
+       Server
+          │
+          ▼
+HTTP Response
+│
+├── Status code
+├── Headers
+├── Blank line
+└── Body
+```
+
+And the status code gives the client a standardized signal about what happened.
+
+For example:
+
+```text
+GET /users/123
+
+        ↓
+
+200 → here is the user
+404 → no such resource
+401 → authentication required
+403 → request isn't permitted
+500 → server failed
+```
+
+---
+
+## 🧪 Small challenge
+
+Without looking back, what status code would you choose for each?
+
+1. `GET /users/123` and user exists
+2. `POST /users` successfully creates a user
+3. `DELETE /users/123` successfully deletes the user and there's nothing to return
+4. User doesn't exist
+5. User isn't authenticated
+6. User is authenticated but doesn't have permission
+7. JSON request body is malformed
+8. API rate limit exceeded
+9. Backend service behind an API gateway timed out
+10. Server encountered an unexpected exception
+
+Once you've got these, say **next**.
+
+Next we'll move into **request headers in much more depth**: `Accept`, `Content-Type`, `Authorization`, `Cookie`, `User-Agent`, `Host`, `Connection`, and why headers are essentially the **metadata/control plane of HTTP**.
+
+
+---
+
