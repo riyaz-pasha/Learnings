@@ -2338,3 +2338,839 @@ Next we'll focus entirely on **headers**. We'll create our own headers, inspect 
 
 ---
 
+# Lesson 4 — HTTP Headers
+
+Now let's focus entirely on **headers**.
+
+Headers are one of the most important parts of HTTP because they allow the client and server to communicate information **about the request or response**, without putting that information into the main body.
+
+---
+
+# 1. Start with the simplest request
+
+Run:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You'll see something similar to:
+
+```http
+> GET / HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.x.x
+> Accept: */*
+>
+```
+
+There are three headers here:
+
+```text
+Host
+User-Agent
+Accept
+```
+
+These are not arbitrary Python things.
+
+They are HTTP header fields defined/used by the HTTP specifications and the wider HTTP ecosystem.
+
+---
+
+# 2. What exactly is a header?
+
+At its simplest:
+
+```text
+Header-Name: Header-Value
+```
+
+For example:
+
+```http
+Host: localhost:8080
+```
+
+Think:
+
+```text
+┌──────────────┬──────────────────┐
+│ Header Name  │ Header Value     │
+├──────────────┼──────────────────┤
+│ Host         │ localhost:8080   │
+└──────────────┴──────────────────┘
+```
+
+Another:
+
+```http
+Content-Type: application/json
+```
+
+means:
+
+```text
+name  = Content-Type
+value = application/json
+```
+
+---
+
+# 3. Request headers vs response headers
+
+This distinction is extremely important.
+
+## Request headers
+
+Sent:
+
+```text
+CLIENT → SERVER
+```
+
+Example:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+Authorization: Bearer abc123
+```
+
+The client is telling the server things about the request.
+
+---
+
+## Response headers
+
+Sent:
+
+```text
+SERVER → CLIENT
+```
+
+Example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 42
+Cache-Control: max-age=60
+```
+
+The server is telling the client things about the response.
+
+So:
+
+```text
+               REQUEST
+CLIENT ─────────────────────> SERVER
+       Host
+       Accept
+       Authorization
+       ...
+
+
+               RESPONSE
+CLIENT <───────────────────── SERVER
+       Content-Type
+       Content-Length
+       Cache-Control
+       ...
+```
+
+---
+
+# 4. Let's inspect the headers ourselves
+
+Modify your server:
+
+```python
+def do_GET(self):
+
+    print("\n--- REQUEST ---")
+
+    print("Method:", self.command)
+    print("Path:", self.path)
+
+    print("\nHeaders:")
+
+    for name, value in self.headers.items():
+        print(f"{name} = {value}")
+
+    body = b"Hello HTTP!"
+
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+
+    self.wfile.write(body)
+```
+
+Restart your server.
+
+Then:
+
+```bash
+curl http://localhost:8080/
+```
+
+Look at the **server terminal**.
+
+You'll see something similar to:
+
+```text
+--- REQUEST ---
+Method: GET
+Path: /
+
+Headers:
+Host = localhost:8080
+User-Agent = curl/8.x.x
+Accept = */*
+```
+
+This is useful because now you can see:
+
+```text
+curl
+ │
+ │ constructs headers
+ ▼
+HTTP request
+ │
+ ▼
+Python server
+ │
+ │ parses headers
+ ▼
+self.headers
+```
+
+---
+
+# 5. Let's create our own header
+
+Use curl:
+
+```bash
+curl \
+  -H "X-Student: Riyaz" \
+  http://localhost:8080/
+```
+
+On the server:
+
+```text
+Headers:
+
+Host = localhost:8080
+User-Agent = curl/...
+Accept = */*
+X-Student = Riyaz
+```
+
+You just created a custom HTTP header.
+
+The syntax is simply:
+
+```text
+-H "Name: Value"
+```
+
+---
+
+# 6. Why would custom headers exist?
+
+Suppose you have an application that needs to tell the server:
+
+```text
+Which mobile app version am I using?
+```
+
+You could send:
+
+```http
+X-App-Version: 5.2.1
+```
+
+Or perhaps:
+
+```http
+X-Request-ID: abc-123
+```
+
+for request tracing.
+
+Historically, headers beginning with `X-` were commonly used for unofficial/custom fields.
+
+Today, the HTTP ecosystem generally doesn't recommend `X-` as a special convention for new fields, but you'll still encounter many legacy `X-*` headers.
+
+For learning, the important point is:
+
+> HTTP provides a mechanism for sending metadata as header fields.
+
+---
+
+# 7. The `Host` header
+
+Let's examine:
+
+```http
+Host: localhost:8080
+```
+
+Why does the server need this?
+
+Imagine a single server machine has multiple websites:
+
+```text
+example.com
+google.com
+mycompany.com
+```
+
+They could potentially all resolve to the same IP address.
+
+For example:
+
+```text
+example.com   ─┐
+google.com    ─┼──> 203.0.113.10
+mycompany.com ─┘
+```
+
+The server receives a connection to:
+
+```text
+203.0.113.10:80
+```
+
+But which website did the client actually request?
+
+The `Host` header helps answer that:
+
+```http
+Host: example.com
+```
+
+versus:
+
+```http
+Host: google.com
+```
+
+This mechanism is especially important for **virtual hosting**.
+
+---
+
+# 8. Let's test it
+
+Run:
+
+```bash
+curl \
+  -H "Host: example.com" \
+  http://localhost:8080/
+```
+
+Your TCP connection is still going to:
+
+```text
+localhost:8080
+```
+
+but the HTTP request says:
+
+```http
+Host: example.com
+```
+
+So:
+
+```text
+TCP destination
+      ↓
+localhost:8080
+
+HTTP Host
+      ↓
+example.com
+```
+
+These are different concepts.
+
+That's a **very important distinction**.
+
+---
+
+# 9. `User-Agent`
+
+You've probably seen:
+
+```http
+User-Agent: curl/8.x.x
+```
+
+The client uses this to identify itself.
+
+A browser might send something much longer.
+
+For example, browsers commonly send information identifying the browser and platform.
+
+Why?
+
+Servers may use it for things such as:
+
+* analytics
+* compatibility behavior
+* debugging
+* logging
+* content selection
+
+But don't think of `User-Agent` as trustworthy identity.
+
+A client can simply send:
+
+```bash
+curl -H "User-Agent: MySuperBrowser"
+```
+
+So the server should generally treat it as **client-provided metadata**, not authentication.
+
+---
+
+# 10. `Accept`
+
+Consider:
+
+```http
+Accept: application/json
+```
+
+This means roughly:
+
+> "I can accept a response represented as JSON."
+
+Compare:
+
+```http
+Accept: text/html
+```
+
+versus:
+
+```http
+Accept: application/json
+```
+
+This is about the **response representation the client wants/accepts**.
+
+---
+
+# 11. `Accept` vs `Content-Type`
+
+This is one of the most common HTTP confusions.
+
+Compare:
+
+```http
+Accept: application/json
+```
+
+and:
+
+```http
+Content-Type: application/json
+```
+
+They mean different things.
+
+### Accept
+
+```text
+What representation do I want/accept?
+```
+
+### Content-Type
+
+```text
+What representation is this body?
+```
+
+For example:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+Here:
+
+```text
+Accept
+   ↓
+"I want the response as JSON."
+
+Content-Type
+   ↓
+"The request body I'm sending is JSON."
+```
+
+This distinction will become extremely important when we build a POST API.
+
+---
+
+# 12. Response headers
+
+So far we've mostly looked at request headers.
+
+Let's examine response headers.
+
+Our server sends:
+
+```python
+self.send_response(200)
+
+self.send_header(
+    "Content-Type",
+    "text/plain"
+)
+
+self.send_header(
+    "Content-Length",
+    str(len(body))
+)
+
+self.end_headers()
+```
+
+Those become:
+
+```http
+HTTP/1.0 200 OK
+Content-Type: text/plain
+Content-Length: 11
+```
+
+These are **response headers**.
+
+The server is providing metadata about the response.
+
+---
+
+# 13. Headers aren't only about the body
+
+This is an important mental shift.
+
+Headers can describe many different things:
+
+```text
+Request information
+        ↓
+Host
+User-Agent
+Accept
+Authorization
+
+Body information
+        ↓
+Content-Type
+Content-Length
+Content-Encoding
+
+Caching
+        ↓
+Cache-Control
+ETag
+If-None-Match
+
+Security
+        ↓
+Authorization
+Cookie
+...
+
+Redirection
+        ↓
+Location
+```
+
+We'll encounter these gradually.
+
+---
+
+# 14. One HTTP request can have many headers
+
+For example:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+User-Agent: curl/8.7.1
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer abc123
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+Don't think of this as:
+
+```text
+GET has 3 headers
+POST has 5 headers
+```
+
+There isn't a fixed number.
+
+The request can contain multiple header fields depending on what the client and server need.
+
+---
+
+# 15. Headers are not the same as arguments
+
+This distinction will save you a lot of confusion later.
+
+Consider:
+
+```http
+GET /users?page=2 HTTP/1.1
+Host: example.com
+Authorization: Bearer abc
+```
+
+There are three different concepts:
+
+### Path
+
+```text
+/users
+```
+
+### Query parameter
+
+```text
+page=2
+```
+
+### Header
+
+```text
+Authorization: Bearer abc
+```
+
+They all travel as part of the HTTP request, but they serve different purposes.
+
+Conceptually:
+
+```text
+URL
+ │
+ ├── Path
+ │     /users
+ │
+ └── Query
+       page=2
+
+Headers
+ │
+ ├── Host
+ ├── Authorization
+ └── Accept
+```
+
+We'll spend an entire lesson on URLs later.
+
+---
+
+# 16. Try this experiment
+
+Run:
+
+```bash
+curl \
+  -H "Accept: application/json" \
+  -H "X-Student: Riyaz" \
+  -H "X-Course: HTTP" \
+  http://localhost:8080/users
+```
+
+Look at the server output.
+
+You should now be able to identify:
+
+```text
+Host
+User-Agent
+Accept
+X-Student
+X-Course
+```
+
+without needing a framework to explain them.
+
+---
+
+# 17. A useful rule
+
+Whenever you encounter an HTTP header, ask:
+
+> **Who is sending it, and what information is it describing?**
+
+For example:
+
+```text
+                    Who sends it?
+                         │
+          ┌──────────────┴──────────────┐
+          │                             │
+       Client                         Server
+          │                             │
+          ▼                             ▼
+       Accept                     Content-Type
+       User-Agent                 Content-Length
+       Authorization              Location
+       Cookie                     Cache-Control
+```
+
+It's not an absolute division—some headers can appear in different contexts—but this is a useful learning model.
+
+---
+
+# 🎯 Exercises
+
+### Exercise 1 — Custom headers
+
+Send:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+X-Student: Riyaz
+X-Lesson: Headers
+```
+
+using `nc`.
+
+Look at your server.
+
+---
+
+### Exercise 2 — Change User-Agent
+
+```bash
+curl \
+  -H "User-Agent: MyHTTPClient/1.0" \
+  http://localhost:8080/
+```
+
+Verify it on the server.
+
+---
+
+### Exercise 3 — Accept
+
+Try:
+
+```bash
+curl \
+  -H "Accept: application/json" \
+  http://localhost:8080/
+```
+
+Then:
+
+```bash
+curl \
+  -H "Accept: text/html" \
+  http://localhost:8080/
+```
+
+Notice that **the client expressing a preference doesn't automatically make the server change its response**.
+
+The server has to implement behavior based on that header.
+
+---
+
+### Exercise 4 — Host
+
+Try:
+
+```bash
+curl \
+  -H "Host: example.com" \
+  http://localhost:8080/
+```
+
+Verify what your Python server receives.
+
+---
+
+# One important thing before the next lesson
+
+We've now encountered:
+
+```text
+Host
+User-Agent
+Accept
+Content-Type
+Content-Length
+Authorization
+Cookie
+```
+
+**Don't try to memorize them.**
+
+Instead, understand the general mechanism:
+
+```text
+Header = metadata attached to an HTTP message
+```
+
+and:
+
+```text
+Header-Name: Header-Value
+```
+
+The next lesson is where this becomes much more practical:
+
+# Lesson 5 — HTTP Methods
+
+We'll take:
+
+```text
+GET
+POST
+PUT
+PATCH
+DELETE
+```
+
+and instead of memorizing definitions, we'll **build endpoints and make actual requests**.
+
+You'll see why:
+
+```http
+GET /users
+```
+
+is fundamentally different from:
+
+```http
+POST /users
+```
+
+and we'll introduce the concept of **request body** for the first time.
+
+---
+
