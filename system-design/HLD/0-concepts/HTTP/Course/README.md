@@ -7334,3 +7334,991 @@ Next we'll go deeper into **request bodies and `Content-Type`**, including the d
 
 ----
 
+# Lesson 10 — HTTP Request Bodies & `Content-Type`
+
+We've now seen that an HTTP request can contain:
+
+```text
+Request line
+Headers
+Blank line
+Body
+```
+
+The body is where the client can send **data to the server**.
+
+This lesson is important because it connects raw HTTP to things you'll constantly encounter as a backend engineer:
+
+* JSON APIs
+* HTML forms
+* file uploads
+* binary data
+* `Content-Type`
+* `Content-Length`
+
+---
+
+# 1. Does every HTTP request have a body?
+
+No.
+
+For example, a typical GET:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+has no body.
+
+But a POST might have:
+
+```http
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+So:
+
+```text
+GET
+ └── usually no body
+
+POST
+ └── commonly has a body
+
+PUT
+ └── commonly has a body
+
+PATCH
+ └── commonly has a body
+
+DELETE
+ └── may or may not have a body
+```
+
+The important point is:
+
+> **HTTP does not define "POST = JSON". POST is a method; JSON is a representation format.**
+
+---
+
+# 2. The blank line is extremely important
+
+Look at this:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+There is an empty line between:
+
+```http
+Content-Length: 16
+```
+
+and:
+
+```text
+{"name":"Riyaz"}
+```
+
+That empty line marks the end of the header section.
+
+Conceptually:
+
+```text
+┌────────────────────────────┐
+│ Request line               │
+├────────────────────────────┤
+│ Headers                    │
+│                            │
+│ Content-Type: ...          │
+│ Content-Length: ...        │
+├────────────────────────────┤
+│ BLANK LINE                 │
+├────────────────────────────┤
+│ Body                       │
+│                            │
+│ {"name":"Riyaz"}           │
+└────────────────────────────┘
+```
+
+This is why when using `nc`, you need that blank line.
+
+---
+
+# 3. `Content-Type` tells us what the body represents
+
+Suppose the body is:
+
+```text
+Hello HTTP
+```
+
+We could send:
+
+```http
+Content-Type: text/plain
+```
+
+If the body is JSON:
+
+```json
+{"name":"Riyaz"}
+```
+
+we send:
+
+```http
+Content-Type: application/json
+```
+
+If the body is HTML:
+
+```html
+<h1>Hello</h1>
+```
+
+we could send:
+
+```http
+Content-Type: text/html
+```
+
+So:
+
+```text
+Content-Type
+     ↓
+"What format is the message body in?"
+```
+
+---
+
+# 4. JSON
+
+JSON is probably the most familiar representation for modern APIs.
+
+Request:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+The body is:
+
+```json
+{"name":"Riyaz"}
+```
+
+The server can parse it as JSON.
+
+For example:
+
+```python
+import json
+
+content_length = int(self.headers.get("Content-Length", 0))
+
+body = self.rfile.read(content_length)
+
+data = json.loads(body)
+
+print(data)
+print(data["name"])
+```
+
+The important sequence is:
+
+```text
+raw bytes
+   ↓
+read body
+   ↓
+decode bytes → text
+   ↓
+parse JSON
+   ↓
+Python object
+```
+
+For example:
+
+```text
+b'{"name":"Riyaz"}'
+        ↓
+'{"name":"Riyaz"}'
+        ↓
+{"name": "Riyaz"}
+```
+
+---
+
+# 5. JSON is NOT HTTP
+
+This distinction is fundamental.
+
+You might hear:
+
+> "The API uses JSON."
+
+That doesn't mean HTTP itself is JSON.
+
+HTTP transports the bytes.
+
+JSON is simply one possible representation of those bytes.
+
+Think:
+
+```text
+HTTP
+│
+├── request line
+├── headers
+├── body
+│     └── JSON
+│
+└── response
+```
+
+You could instead send:
+
+```text
+HTTP
+│
+└── body
+      ├── JSON
+      ├── text
+      ├── HTML
+      ├── XML
+      ├── form data
+      └── binary data
+```
+
+---
+
+# 6. Let's manually send JSON
+
+This is a great experiment.
+
+Start your server:
+
+```bash
+python3 server.py
+```
+
+Then in another terminal:
+
+```bash
+nc localhost 8080
+```
+
+Type:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+Remember:
+
+**After `Content-Length: 16`, press Enter twice.**
+
+The server reads exactly 16 bytes:
+
+```text
+{"name":"Riyaz"}
+```
+
+Let's verify the count.
+
+```text
+{
+"
+n
+a
+m
+e
+"
+:
+"
+R
+i
+y
+a
+z
+"
+}
+```
+
+That's 16 bytes because these are all ASCII characters, where each character occupies one byte in UTF-8.
+
+---
+
+# 7. Why `Content-Length` matters
+
+Suppose the server receives:
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+The server knows:
+
+```text
+Read 16 bytes from the body.
+```
+
+Without knowing where the body ends, the server would have to rely on another HTTP framing mechanism.
+
+This becomes particularly important when multiple HTTP messages use the same connection.
+
+We'll eventually get into:
+
+```text
+Content-Length
+Transfer-Encoding: chunked
+connection persistence
+HTTP/1.1 message framing
+```
+
+For now:
+
+> **`Content-Length` tells the recipient how many bytes belong to the body when that framing mechanism is used.**
+
+---
+
+# 8. Let's try plain text
+
+Change the request:
+
+```http
+POST /message HTTP/1.1
+Host: localhost:8080
+Content-Type: text/plain
+Content-Length: 11
+
+Hello World
+```
+
+The body is simply:
+
+```text
+Hello World
+```
+
+Your application could do:
+
+```python
+body = self.rfile.read(content_length)
+
+text = body.decode("utf-8")
+
+print(text)
+```
+
+No JSON parsing is necessary.
+
+---
+
+# 9. `application/x-www-form-urlencoded`
+
+Before JSON APIs became dominant, HTML forms commonly submitted data like:
+
+```text
+name=Riyaz&age=30
+```
+
+with:
+
+```http
+Content-Type: application/x-www-form-urlencoded
+```
+
+Example:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 16
+
+name=Riyaz&age=30
+```
+
+Conceptually:
+
+```text
+name → Riyaz
+age  → 30
+```
+
+Notice how this looks somewhat like a URL query:
+
+```text
+?name=Riyaz&age=30
+```
+
+That's not an accident. Form URL encoding uses similar encoding rules.
+
+---
+
+# 10. `multipart/form-data`
+
+Now imagine uploading a profile picture.
+
+You might send:
+
+```text
+name = Riyaz
+profile_picture = photo.jpg
+```
+
+A common format is:
+
+```http
+Content-Type: multipart/form-data; boundary=----XYZ
+```
+
+The body is divided into multiple parts:
+
+```text
+------XYZ
+Content-Disposition: form-data; name="name"
+
+Riyaz
+------XYZ
+Content-Disposition: form-data; name="profile_picture"; filename="photo.jpg"
+Content-Type: image/jpeg
+
+...binary image data...
+------XYZ--
+```
+
+Conceptually:
+
+```text
+HTTP body
+│
+├── Part 1
+│    └── name = Riyaz
+│
+└── Part 2
+     └── photo.jpg
+```
+
+This is how many traditional web forms and file-upload APIs work.
+
+Don't worry about manually parsing multipart yet.
+
+Just understand:
+
+> **The body can contain structured data, and `Content-Type` tells the receiver how that body is structured.**
+
+---
+
+# 11. Binary data
+
+HTTP doesn't require the body to be text.
+
+You can send:
+
+```text
+image
+PDF
+video
+ZIP
+audio
+```
+
+For example:
+
+```http
+Content-Type: application/pdf
+```
+
+or:
+
+```http
+Content-Type: image/jpeg
+```
+
+or:
+
+```http
+Content-Type: application/octet-stream
+```
+
+The body is ultimately just:
+
+```text
+bytes
+```
+
+This is an important mental model.
+
+At the network level:
+
+```text
+HTTP body
+   ↓
+bytes
+```
+
+Then `Content-Type` tells the application how those bytes should be interpreted.
+
+---
+
+# 12. The same HTTP mechanism can carry completely different data
+
+Imagine these three requests:
+
+### JSON
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+### Plain text
+
+```http
+POST /message HTTP/1.1
+Content-Type: text/plain
+
+Hello HTTP
+```
+
+### PDF
+
+```http
+POST /documents HTTP/1.1
+Content-Type: application/pdf
+
+...PDF bytes...
+```
+
+The HTTP mechanism is essentially the same:
+
+```text
+POST
+headers
+blank line
+body
+```
+
+Only the representation of the body changes.
+
+---
+
+# 13. `Accept` comes back into the picture
+
+Now combine what we learned earlier.
+
+Suppose the client sends:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+The client is communicating:
+
+```text
+"I can accept JSON as the response representation."
+```
+
+The server could respond:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 27
+
+{"id":123,"name":"Riyaz"}
+```
+
+Now we have:
+
+```text
+REQUEST
+-------------------------
+Accept: application/json
+        ↓
+What response representation is acceptable?
+
+
+RESPONSE
+-------------------------
+Content-Type: application/json
+        ↓
+What representation am I sending?
+```
+
+This distinction is one of the most important HTTP concepts.
+
+---
+
+# 14. What if `Content-Type` is wrong?
+
+Suppose you send:
+
+```http
+Content-Type: application/json
+
+Hello World
+```
+
+That's a problem.
+
+You've told the server:
+
+> "The body is JSON."
+
+But:
+
+```text
+Hello World
+```
+
+is not valid JSON.
+
+A proper server may reject the request.
+
+For example:
+
+```http
+HTTP/1.1 400 Bad Request
+```
+
+The problem isn't that HTTP can't transport the bytes.
+
+It can.
+
+The problem is that the **representation doesn't match its declared type**.
+
+---
+
+# 15. What happens in a typical backend?
+
+Suppose your Java/Spring API receives:
+
+```http
+POST /users HTTP/1.1
+Content-Type: application/json
+
+{"name":"Riyaz","age":30}
+```
+
+A framework might make this feel magical:
+
+```java
+@PostMapping("/users")
+public User createUser(@RequestBody CreateUserRequest request) {
+    ...
+}
+```
+
+But underneath, conceptually:
+
+```text
+TCP
+ ↓
+HTTP parser
+ ↓
+headers
+ ↓
+Content-Type: application/json
+ ↓
+body bytes
+ ↓
+JSON parser
+ ↓
+Java object
+ ↓
+controller
+```
+
+The framework isn't inventing a new protocol.
+
+It is doing the HTTP parsing and representation handling for you.
+
+This is exactly why learning raw HTTP is valuable.
+
+---
+
+# 16. Let's make our tiny server understand JSON
+
+Try this version:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_POST(self):
+
+        print("\n--- REQUEST ---")
+        print("Method:", self.command)
+        print("Path:", self.path)
+
+        content_type = self.headers.get("Content-Type")
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        print("Content-Type:", content_type)
+        print("Content-Length:", content_length)
+
+        body = self.rfile.read(content_length)
+
+        print("Raw body:", body)
+
+        if content_type == "application/json":
+            data = json.loads(body.decode("utf-8"))
+
+            print("Parsed JSON:", data)
+
+            response = json.dumps({
+                "received": data
+            }).encode("utf-8")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+
+            self.wfile.write(response)
+
+        else:
+            self.send_response(415)
+            self.end_headers()
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+server.serve_forever()
+```
+
+Now run:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz","age":30}' \
+  http://localhost:8080/users
+```
+
+You should get something like:
+
+```json
+{"received": {"name": "Riyaz", "age": 30}}
+```
+
+---
+
+# 17. What's `415`?
+
+We just introduced another status code:
+
+```http
+HTTP/1.1 415 Unsupported Media Type
+```
+
+It means, roughly:
+
+> The server doesn't support the media type of the request content for this request.
+
+Our tiny server only understands:
+
+```text
+application/json
+```
+
+So if you send:
+
+```bash
+curl \
+  -X POST \
+  -H "Content-Type: text/plain" \
+  -d "Hello" \
+  http://localhost:8080/users
+```
+
+our server returns:
+
+```text
+415
+```
+
+because we explicitly programmed it that way.
+
+---
+
+# 18. Important distinction: bytes → representation → application object
+
+This is the deeper concept I want you to remember.
+
+Suppose the client sends:
+
+```json
+{"name":"Riyaz"}
+```
+
+The journey is conceptually:
+
+```text
+                 NETWORK
+                    │
+                    ▼
+              raw HTTP bytes
+                    │
+                    ▼
+             HTTP parser
+                    │
+           ┌────────┴────────┐
+           │                 │
+        headers             body
+           │                 │
+           │          bytes: {...}
+           │                 │
+           │                 ▼
+           │       Content-Type tells us
+           │       how to interpret it
+           │                 │
+           │                 ▼
+           │            JSON parser
+           │                 │
+           │                 ▼
+           │          application object
+           │
+           └───────────────────────
+```
+
+That is essentially what frameworks hide from you.
+
+---
+
+# 🧪 Hands-on exercise
+
+Try all three.
+
+### JSON
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+### Plain text
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: text/plain" \
+  -d "Hello HTTP" \
+  http://localhost:8080/users
+```
+
+### No Content-Type
+
+```bash
+curl -v \
+  -X POST \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+Compare what the server receives.
+
+Pay attention to:
+
+```text
+Content-Type
+Content-Length
+body
+response status
+```
+
+---
+
+# 🧠 The mental model
+
+You should now be able to look at this:
+
+```http
+POST /users HTTP/1.1
+Host: example.com
+Accept: application/json
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+and understand every piece:
+
+```text
+POST
+ ↓
+What operation is being requested?
+
+/users
+ ↓
+What resource is being targeted?
+
+Accept: application/json
+ ↓
+What response representation can the client accept?
+
+Content-Type: application/json
+ ↓
+What representation is the request body?
+
+Content-Length: 16
+ ↓
+How many bytes belong to the body?
+
+{"name":"Riyaz"}
+ ↓
+The actual request payload
+```
+
+### Next
+
+We'll learn **JSON and HTTP request/response bodies more deeply**, including **serialization vs deserialization**, UTF-8/bytes, malformed JSON, and why `Content-Length` is measured in **bytes rather than characters**. Then we'll move into **path parameters and query parameters** and start building a real REST-style API.
+
+
+---
+

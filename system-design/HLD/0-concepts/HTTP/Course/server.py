@@ -58,22 +58,36 @@ class Handler(BaseHTTPRequestHandler):
         print("Headers:")
         print(self.headers)
 
+        content_type = self.headers.get("Content-Type")
         content_length=int(self.headers.get("Content-Length", 0))
+
+        print("Content-Type:", content_type)
+        print("Content-Length:", content_length)
 
         body = self.rfile.read(content_length)
 
-        print("\nBody:")
+        print("\nRaw Body:")
         print(body.decode())
 
-        response=b"User Created"
+        if content_type == "application/json":
+            data = json.loads(body.decode("utf-8"))
 
-        self.send_response(201)
-        self.send_header("Content-Type","text/plain")
-        self.send_header("Content-Length", str(len(response)))
-        self.end_headers()
+            print("Parsed JSON:", data)
 
-        self.wfile.write(response)
-        
+            response = json.dumps({
+                "received": data
+            }).encode("utf-8")
+
+            self.send_response(201)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+
+            self.wfile.write(response)
+
+        else:
+            self.send_response(415)
+            self.end_headers()
 
 
 server = HTTPServer(("localhost",8080),Handler)
