@@ -49,6 +49,32 @@ class Handler(BaseHTTPRequestHandler):
 
         self.wfile.write(body.encode())
 
+    def do_POST(self):
+
+        print("\n")
+        print("===== POST REQUEST =====")
+        print("Method", self.command)
+        print("Path", self.path)
+        print("Headers:")
+        print(self.headers)
+
+        content_length=int(self.headers.get("Content-Length", 0))
+
+        body = self.rfile.read(content_length)
+
+        print("\nBody:")
+        print(body.decode())
+
+        response=b"User Created"
+
+        self.send_response(201)
+        self.send_header("Content-Type","text/plain")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+
+        self.wfile.write(response)
+        
+
 
 server = HTTPServer(("localhost",8080),Handler)
 

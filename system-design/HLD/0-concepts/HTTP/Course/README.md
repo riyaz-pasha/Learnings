@@ -3174,3 +3174,907 @@ and we'll introduce the concept of **request body** for the first time.
 
 ---
 
+# Lesson 5 — HTTP Methods
+
+Now we're going to understand one of the most important pieces of an HTTP request:
+
+```http
+GET /users HTTP/1.1
+```
+
+Specifically:
+
+```text
+GET
+```
+
+What does it actually mean?
+
+And why do we have:
+
+```text
+GET
+POST
+PUT
+PATCH
+DELETE
+```
+
+instead of simply having URLs like:
+
+```text
+/users/get
+/users/create
+/users/update
+/users/delete
+```
+
+---
+
+# 1. The basic idea
+
+Remember our request line:
+
+```http
+GET /users HTTP/1.1
+```
+
+The first part is the **HTTP method**.
+
+It tells the server what kind of operation the client is requesting.
+
+A simplified mental model:
+
+```text
+GET       → retrieve
+POST      → submit/create
+PUT       → replace
+PATCH     → partially modify
+DELETE    → delete
+```
+
+But don't memorize that table yet.
+
+Let's actually build an API.
+
+---
+
+# 2. Our tiny User API
+
+Let's say our server manages users.
+
+We want these operations:
+
+```text
+GET    /users
+GET    /users/123
+
+POST   /users
+
+PUT    /users/123
+
+PATCH  /users/123
+
+DELETE /users/123
+```
+
+Notice something interesting:
+
+The **URL alone isn't enough** to determine the operation.
+
+For example:
+
+```http
+/users/123
+```
+
+could mean:
+
+```text
+GET    → retrieve user
+PUT    → replace user
+PATCH  → modify user
+DELETE → delete user
+```
+
+The method gives the request its intended semantics.
+
+---
+
+# 3. GET
+
+Let's start with:
+
+```http
+GET /users HTTP/1.1
+Host: localhost:8080
+
+```
+
+This essentially says:
+
+> Give me the representation of `/users`.
+
+Our server might respond:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+    {"id": 1, "name": "Alice"},
+    {"id": 2, "name": "Bob"}
+]
+```
+
+Notice something:
+
+### GET can have a response body.
+
+Absolutely.
+
+The misconception that "GET has no body" is common.
+
+What's more important is that **GET requests are not normally used to send the main data of the operation in a request body**. HTTP semantics allow a content on a GET in the modern specification, but its meaning is not generally defined and many implementations don't support it as an ordinary API mechanism.
+
+For our course, use:
+
+```text
+GET → retrieve
+```
+
+and put filtering/input in the URL/query parameters.
+
+---
+
+# 4. Try GET manually
+
+```bash
+nc localhost 8080
+```
+
+Then:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+
+```
+
+You already did this.
+
+Now use curl:
+
+```bash
+curl -v http://localhost:8080/users
+```
+
+The important part is:
+
+```http
+GET /users HTTP/1.1
+```
+
+---
+
+# 5. POST
+
+Now imagine we want to create a user.
+
+We need to send information:
+
+```json
+{
+  "name": "Riyaz"
+}
+```
+
+We can use:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+Now notice what changed.
+
+We have a **request body**:
+
+```text
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+              ↓ empty line
+
+{"name":"Riyaz"}
+              ↑
+           body
+```
+
+---
+
+# 6. Let's actually send it
+
+Using curl:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+The `-d` means:
+
+> Send this data as the request body.
+
+Conceptually curl constructs:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+---
+
+# 7. Let's see the body on the server
+
+Add this to your server:
+
+```python
+def do_POST(self):
+
+    print("\n--- POST REQUEST ---")
+
+    print("Method:", self.command)
+    print("Path:", self.path)
+
+    print("\nHeaders:")
+    print(self.headers)
+
+    content_length = int(
+        self.headers.get("Content-Length", 0)
+    )
+
+    body = self.rfile.read(content_length)
+
+    print("\nBody:")
+    print(body.decode())
+
+    response = b"User received"
+
+    self.send_response(201)
+    self.send_header("Content-Type", "text/plain")
+    self.send_header("Content-Length", str(len(response)))
+    self.end_headers()
+
+    self.wfile.write(response)
+```
+
+Restart the server.
+
+Then:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+Look at your server terminal.
+
+You should see:
+
+```text
+--- POST REQUEST ---
+
+Method: POST
+Path: /users
+
+Headers:
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+Body:
+{"name":"Riyaz"}
+```
+
+This is the first time we're dealing with the complete request:
+
+```text
+┌──────────────────────────────────┐
+│ POST /users HTTP/1.1             │
+├──────────────────────────────────┤
+│ Host: localhost:8080             │
+│ Content-Type: application/json   │
+│ Content-Length: 16               │
+├──────────────────────────────────┤
+│                                  │
+├──────────────────────────────────┤
+│ {"name":"Riyaz"}                 │
+└──────────────────────────────────┘
+```
+
+---
+
+# 8. Why POST instead of GET?
+
+Compare:
+
+```http
+GET /users
+```
+
+with:
+
+```http
+POST /users
+```
+
+The URL is identical.
+
+The **method changes the semantics**.
+
+Think:
+
+```text
+GET /users
+    ↓
+"I want to retrieve users."
+
+POST /users
+    ↓
+"I want to submit data to /users."
+```
+
+The server decides what that means according to the API's design.
+
+For a typical REST API:
+
+```text
+POST /users
+    ↓
+Create a new user
+```
+
+---
+
+# 9. PUT
+
+Suppose user `123` already exists:
+
+```text
+/users/123
+```
+
+We want to replace the user's representation.
+
+We might send:
+
+```http
+PUT /users/123 HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+The important word is:
+
+> **replace**
+
+Conceptually:
+
+```text
+Existing:
+
+{
+    "id": 123,
+    "name": "Alice",
+    "email": "alice@example.com"
+}
+
+        ↓ PUT
+
+New:
+
+{
+    "id": 123,
+    "name": "Riyaz",
+    "email": "riyaz@example.com"
+}
+```
+
+PUT traditionally represents replacing the target resource's representation.
+
+---
+
+# 10. PATCH
+
+Now suppose we only want to change the name.
+
+We could use:
+
+```http
+PATCH /users/123 HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{
+  "name": "Riyaz"
+}
+```
+
+Conceptually:
+
+```text
+PATCH
+  ↓
+"Apply this modification."
+```
+
+So:
+
+```text
+PUT
+
+"Here is the new representation."
+
+PATCH
+
+"Here is a partial modification."
+```
+
+There are more nuances to PATCH semantics, which we'll cover later.
+
+---
+
+# 11. DELETE
+
+To delete user 123:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+```
+
+Notice:
+
+**No request body is necessary.**
+
+The server can understand:
+
+```text
+Method = DELETE
+Target = /users/123
+```
+
+and perform the operation.
+
+A successful response might be:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+We'll discuss `204` later.
+
+---
+
+# 12. The same URL, different meaning
+
+This is probably the most important idea in this lesson.
+
+Consider:
+
+```text
+/users/123
+```
+
+Now:
+
+```http
+GET /users/123
+```
+
+means:
+
+```text
+Retrieve user 123
+```
+
+While:
+
+```http
+PUT /users/123
+```
+
+means:
+
+```text
+Replace user 123
+```
+
+While:
+
+```http
+PATCH /users/123
+```
+
+means:
+
+```text
+Modify user 123
+```
+
+While:
+
+```http
+DELETE /users/123
+```
+
+means:
+
+```text
+Delete user 123
+```
+
+So the HTTP request target isn't the complete operation.
+
+It's:
+
+```text
+        METHOD + TARGET
+             ↓
+         semantics
+```
+
+---
+
+# 13. Why not just use URLs like this?
+
+You might ask:
+
+Why don't we do:
+
+```text
+POST /users/create
+POST /users/update
+POST /users/delete
+```
+
+You *can* design APIs that way.
+
+But HTTP already provides standardized method semantics.
+
+Using them gives clients, servers, proxies, caches, browsers, and other infrastructure useful information about what the request means.
+
+Compare:
+
+```text
+POST /users/delete/123
+```
+
+with:
+
+```text
+DELETE /users/123
+```
+
+The second explicitly communicates:
+
+```text
+HTTP method = DELETE
+```
+
+The protocol itself understands the general semantic category.
+
+---
+
+# 14. A very important property: Safe methods
+
+Now we're getting into proper HTTP semantics.
+
+Some methods are considered **safe**.
+
+The important ones for us:
+
+```text
+GET
+HEAD
+OPTIONS
+TRACE
+```
+
+"Safe" doesn't mean:
+
+> The server does absolutely nothing.
+
+It means the client isn't requesting a state-changing action as the purpose of the request.
+
+For example:
+
+```http
+GET /users
+```
+
+shouldn't mean:
+
+```text
+GET users
+↓
+delete all users
+```
+
+That would violate the expected semantics of GET.
+
+The server might still update things such as:
+
+```text
+analytics counters
+access logs
+metrics
+```
+
+while processing a GET.
+
+So:
+
+> **Safe ≠ literally no side effects anywhere.**
+
+---
+
+# 15. Idempotency
+
+Here's another very important HTTP concept.
+
+Some methods are **idempotent**.
+
+Roughly:
+
+> Performing the same request multiple times has the same intended effect on the server's state as performing it once.
+
+For example:
+
+```http
+PUT /users/123
+```
+
+with the same representation:
+
+```json
+{
+  "name": "Riyaz"
+}
+```
+
+Sending it:
+
+```text
+once
+twice
+10 times
+```
+
+should leave the resource in the same intended state.
+
+Compare that with:
+
+```http
+POST /orders
+```
+
+Sending the same POST multiple times might create:
+
+```text
+Order #1
+Order #2
+Order #3
+```
+
+So POST is generally **not idempotent**.
+
+We'll spend more time on this when we discuss retries and distributed systems.
+
+---
+
+# 16. Don't confuse idempotent with safe
+
+These are different concepts.
+
+```text
+Safe
+  ↓
+Doesn't request a state-changing operation
+
+Idempotent
+  ↓
+Repeating the same request has the same intended state effect
+```
+
+For example:
+
+| Method | Safe? | Idempotent?     |
+| ------ | ----- | --------------- |
+| GET    | Yes   | Yes             |
+| PUT    | No    | Yes             |
+| DELETE | No    | Yes             |
+| POST   | No    | No              |
+| PATCH  | No    | Not necessarily |
+
+These are general HTTP semantics; individual applications still need to implement behavior consistently.
+
+---
+
+# 17. Your exercises
+
+Let's make this hands-on.
+
+### Exercise 1
+
+Send:
+
+```bash
+curl -v http://localhost:8080/users
+```
+
+Identify:
+
+```text
+Method
+Target
+Headers
+Body
+```
+
+---
+
+### Exercise 2
+
+Send:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+Look at the server terminal.
+
+Answer yourself:
+
+```text
+What is the method?
+What is the target?
+Which headers did curl add?
+What is the body?
+```
+
+---
+
+### Exercise 3
+
+Try manually with `nc`:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 16
+
+{"name":"Riyaz"}
+```
+
+**Notice that `Content-Length` is 16.**
+
+The body:
+
+```text
+{"name":"Riyaz"}
+```
+
+is 16 bytes in UTF-8/ASCII.
+
+You are now manually constructing a POST request.
+
+---
+
+### Exercise 4
+
+Try:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+```
+
+You don't need a body.
+
+---
+
+# The mental model to keep
+
+At this point, don't think:
+
+```text
+GET = fetch
+POST = create
+PUT = update
+PATCH = update
+DELETE = delete
+```
+
+That's too simplistic.
+
+Instead think:
+
+```text
+HTTP METHOD
+     ↓
+defines standardized semantics
+
+HTTP TARGET
+     ↓
+identifies what the request is about
+
+HEADERS
+     ↓
+metadata about the message/request
+
+BODY
+     ↓
+optional content being transferred
+```
+
+And the full request:
+
+```text
+┌──────────────────────────────────────┐
+│ POST /users HTTP/1.1                 │ ← method + target + version
+├──────────────────────────────────────┤
+│ Host: localhost:8080                 │
+│ Content-Type: application/json       │ ← headers
+│ Content-Length: 16                   │
+├──────────────────────────────────────┤
+│                                      │ ← empty line
+├──────────────────────────────────────┤
+│ {"name":"Riyaz"}                     │ ← body
+└──────────────────────────────────────┘
+```
+
+Next, we'll tackle **URL structure** properly:
+
+```text
+http://example.com:8080/users/123?active=true&page=2#profile
+│    │           │    │         │
+│    │           │    │         └── fragment
+│    │           │    └──────────── query
+│    │           └───────────────── path
+│    └───────────────────────────── host/port
+└────────────────────────────────── scheme
+```
+
+We'll break down **scheme, host, port, path, query parameters, and fragments**, and you'll manually construct requests to different targets.
+
+----
+
