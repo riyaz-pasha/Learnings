@@ -4078,3 +4078,715 @@ We'll break down **scheme, host, port, path, query parameters, and fragments**, 
 
 ----
 
+# Lesson 6 — URLs: How HTTP Identifies a Resource
+
+So far, we've seen requests like:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+Now let's understand **exactly what `/users/123` means**, and how URLs are structured.
+
+---
+
+## 1. A URL has multiple parts
+
+Consider:
+
+```text
+https://example.com:8080/users/123?active=true&page=2#profile
+```
+
+Break it down:
+
+```text
+https://example.com:8080/users/123?active=true&page=2#profile
+  │         │       │       │              │
+scheme     host    port    path           query
+                                             │
+                                          fragment
+```
+
+More precisely:
+
+```text
+https://
+   ↓
+scheme
+
+example.com
+   ↓
+host
+
+:8080
+   ↓
+port
+
+/users/123
+   ↓
+path
+
+?active=true&page=2
+   ↓
+query
+
+#profile
+   ↓
+fragment
+```
+
+Let's understand each one.
+
+---
+
+# 2. Scheme
+
+```text
+https://
+```
+
+The scheme tells the client **which protocol/access mechanism to use**.
+
+Common examples:
+
+```text
+http://
+https://
+```
+
+For example:
+
+```text
+http://example.com
+https://example.com
+```
+
+The important distinction:
+
+```text
+HTTP
+```
+
+is the application protocol.
+
+```text
+HTTPS
+```
+
+is essentially HTTP carried over a secure TLS connection.
+
+We'll get into HTTPS and TLS much later.
+
+---
+
+# 3. Host
+
+```text
+example.com
+```
+
+The host identifies the destination server/service.
+
+For example:
+
+```text
+http://example.com
+http://api.example.com
+http://localhost
+```
+
+When using HTTP/1.1, this becomes the `Host` header:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+This is something important we already encountered.
+
+The URL:
+
+```text
+http://example.com/users
+```
+
+results in a request conceptually like:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+Notice that the **host is not normally repeated in the request target** for an origin-form HTTP/1.1 request.
+
+---
+
+# 4. Port
+
+Consider:
+
+```text
+http://example.com:8080/users
+```
+
+The port is:
+
+```text
+8080
+```
+
+It tells the client which TCP port to connect to.
+
+For example:
+
+```text
+http://localhost:8080
+```
+
+means:
+
+```text
+TCP connection → localhost:8080
+```
+
+Our Python server is listening here:
+
+```python
+HTTPServer(("localhost", 8080), Handler)
+```
+
+So:
+
+```bash
+curl http://localhost:8080/
+```
+
+connects to:
+
+```text
+localhost:8080
+```
+
+### Default ports
+
+HTTP normally uses:
+
+```text
+http  → 80
+https → 443
+```
+
+Therefore these are equivalent in terms of the default port:
+
+```text
+http://example.com
+http://example.com:80
+```
+
+and:
+
+```text
+https://example.com
+https://example.com:443
+```
+
+---
+
+# 5. Path
+
+Now:
+
+```text
+/users/123
+```
+
+is the **path**.
+
+It identifies a resource within the server's namespace.
+
+Examples:
+
+```text
+/
+```
+
+```text
+/users
+```
+
+```text
+/users/123
+```
+
+```text
+/products/42/reviews
+```
+
+HTTP itself doesn't know what these resources actually mean.
+
+Your application decides.
+
+For example:
+
+```text
+/users/123
+```
+
+might mean:
+
+> User whose ID is 123.
+
+While:
+
+```text
+/products/42
+```
+
+might mean:
+
+> Product whose ID is 42.
+
+---
+
+# 6. Path segments
+
+A path can contain multiple segments.
+
+For example:
+
+```text
+/users/123/orders/456
+```
+
+can be viewed as:
+
+```text
+users
+  ↓
+123
+  ↓
+orders
+  ↓
+456
+```
+
+These are called **path segments**.
+
+A common REST API design is:
+
+```text
+/users
+/users/123
+/users/123/orders
+/users/123/orders/456
+```
+
+Conceptually:
+
+```text
+/users
+    → collection of users
+
+/users/123
+    → user 123
+
+/users/123/orders
+    → orders belonging to user 123
+
+/users/123/orders/456
+    → order 456 belonging to user 123
+```
+
+Again, these meanings are application-level conventions, not something HTTP itself enforces.
+
+---
+
+# 7. Query parameters
+
+Now add:
+
+```text
+?active=true&page=2
+```
+
+Example:
+
+```text
+/users?active=true&page=2
+```
+
+The query contains parameters:
+
+```text
+active=true
+page=2
+```
+
+Typically:
+
+```text
+?key=value&key=value
+```
+
+For example:
+
+```text
+/products?category=books&page=2&limit=20
+```
+
+Conceptually:
+
+```text
+category → books
+page     → 2
+limit    → 20
+```
+
+---
+
+# 8. Path vs Query
+
+This distinction is extremely important for API design.
+
+Compare:
+
+```text
+/users/123
+```
+
+and:
+
+```text
+/users?id=123
+```
+
+Both could potentially be implemented by an application to retrieve user 123.
+
+But they communicate different structures.
+
+Typically:
+
+```text
+/users/123
+```
+
+means:
+
+> The specific resource identified as user 123.
+
+While:
+
+```text
+/users?id=123
+```
+
+means something more like:
+
+> Query the `/users` resource using `id=123` as a parameter.
+
+A common API pattern is:
+
+```text
+GET /users/123
+```
+
+for one specific user.
+
+And:
+
+```text
+GET /users?page=2&limit=20
+```
+
+for querying/filtering the collection.
+
+---
+
+# 9. Fragment
+
+Now consider:
+
+```text
+/users/123#profile
+```
+
+Everything after:
+
+```text
+#
+```
+
+is the **fragment**:
+
+```text
+profile
+```
+
+Here's the surprising part:
+
+### The fragment is generally NOT sent to the HTTP server.
+
+If you enter:
+
+```text
+https://example.com/users/123#profile
+```
+
+the browser uses:
+
+```text
+/users/123
+```
+
+for the HTTP request.
+
+The:
+
+```text
+#profile
+```
+
+part is handled client-side.
+
+This is particularly common with web pages:
+
+```text
+https://example.com/docs#authentication
+```
+
+The browser can use `#authentication` to navigate to a particular section of the document.
+
+---
+
+# 10. Let's see this ourselves
+
+Start our server:
+
+```bash
+python3 server.py
+```
+
+Now:
+
+```bash
+curl -v "http://localhost:8080/users/123?active=true&page=2"
+```
+
+Your server should see something like:
+
+```text
+GET /users/123?active=true&page=2 HTTP/1.1
+```
+
+Notice:
+
+```text
+/users/123?active=true&page=2
+```
+
+is what arrives as the request target.
+
+---
+
+## Now try a fragment
+
+Run:
+
+```bash
+curl -v "http://localhost:8080/users/123?active=true#profile"
+```
+
+Your server should see:
+
+```text
+GET /users/123?active=true HTTP/1.1
+```
+
+Not:
+
+```text
+GET /users/123?active=true#profile HTTP/1.1
+```
+
+The fragment never made it into the HTTP request.
+
+This is a **very useful thing to remember**.
+
+---
+
+# 11. Let's inspect the URL in Python
+
+Modify our handler:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        print("\n--- REQUEST ---")
+        print("Method:", self.command)
+        print("Path:", self.path)
+
+        print("Headers:")
+        for name, value in self.headers.items():
+            print(f"{name}: {value}")
+
+        body = b"Hello HTTP!"
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+
+        self.wfile.write(body)
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+server.serve_forever()
+```
+
+Then:
+
+```bash
+curl "http://localhost:8080/products?category=books&page=2"
+```
+
+You'll see:
+
+```text
+Method: GET
+Path: /products?category=books&page=2
+```
+
+Our server gets the **path + query**, but not the fragment.
+
+---
+
+# 12. One important terminology correction
+
+Earlier we simplified the request target as "the path."
+
+Strictly speaking, that's not always correct.
+
+HTTP/1.1 defines a **request-target**, which can have different forms.
+
+The common one you've been using is:
+
+```text
+/users/123
+```
+
+or:
+
+```text
+/users/123?active=true
+```
+
+This is called **origin-form**.
+
+There are other forms used for specific situations, such as proxies and the `CONNECT` method.
+
+You don't need those yet.
+
+For now, think:
+
+```text
+URL
+ ↓
+scheme + host + port + path + query + fragment
+```
+
+and:
+
+```text
+HTTP request
+ ↓
+method + request-target + HTTP version
+```
+
+with the host typically represented separately by:
+
+```http
+Host: example.com
+```
+
+---
+
+# 13. Your mental model
+
+Keep this picture:
+
+```text
+URL
+
+https://example.com:8080/users/123?active=true&page=2#profile
+│       │           │       │              │
+│       │           │       │              └── Fragment
+│       │           │       └───────────────── Query
+│       │           └───────────────────────── Path
+│       └───────────────────────────────────── Host + Port
+└───────────────────────────────────────────── Scheme
+```
+
+HTTP request:
+
+```http
+GET /users/123?active=true&page=2 HTTP/1.1
+Host: example.com
+```
+
+Notice:
+
+```text
+#profile
+```
+
+is missing.
+
+That's because the fragment is not part of the HTTP request sent to the server.
+
+---
+
+## 🧪 Exercise
+
+Try these one by one:
+
+```bash
+curl -v "http://localhost:8080/"
+```
+
+```bash
+curl -v "http://localhost:8080/users/123"
+```
+
+```bash
+curl -v "http://localhost:8080/users/123?active=true"
+```
+
+```bash
+curl -v "http://localhost:8080/users/123?active=true&page=2"
+```
+
+```bash
+curl -v "http://localhost:8080/users/123?active=true#profile"
+```
+
+For each one, look specifically at the line:
+
+```http
+GET ...
+```
+
+and ask yourself:
+
+**Which parts of the URL actually became part of the HTTP request?**
+
+Once that's clear, the next lesson is **URL encoding** — why spaces, `&`, `?`, Unicode, and characters like `+` and `%20` can completely change how a URL is interpreted.
+
+---
+
