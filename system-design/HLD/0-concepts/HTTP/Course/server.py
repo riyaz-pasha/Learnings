@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
 import json
 
 class Handler(BaseHTTPRequestHandler):
@@ -13,7 +14,59 @@ class Handler(BaseHTTPRequestHandler):
         print(self.headers)
         print("=================")
 
-        if self.path=="/":
+        parsed = urlparse(self.path)
+
+        path = parsed.path
+        params = parse_qs(parsed.query)
+
+        print("=====Parsed Path=====")
+        print("parsed: ", parsed)
+        print("Path: ", path)
+        print("params: ",params)
+        print("=================")
+
+        users = {
+            "1": {"id": 1, "name": "Alice"},
+            "2": {"id": 2, "name": "Bob"},
+            "3": {"id": 3, "name": "Riyaz"},
+        }
+
+
+        if path.startswith("/users/"):
+
+            user_id = path.split("/")[-1]
+
+            user = users.get(user_id)
+
+            if user is None:
+
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            body = json.dumps(user).encode("utf-8")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+            self.wfile.write(body)
+            return
+
+        elif path == "/users":
+
+            body = json.dumps(users).encode("utf-8")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+            self.wfile.write(body)
+            return
+
+        elif path=="/":
             response = {
                 "message": "Hello HTTP",
                 "course": "HTTP fundamentals"
@@ -28,9 +81,6 @@ class Handler(BaseHTTPRequestHandler):
 
             self.wfile.write(body)
             return
-
-        elif self.path=="/users":
-            body="List of users"
 
         else:
             self.send_response(404)

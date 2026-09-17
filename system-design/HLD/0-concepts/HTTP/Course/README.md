@@ -10520,3 +10520,741 @@ Next we'll move into **REST-style API design with GET**, and connect everything 
 
 
 ---
+
+# Lesson 14 — GET: Reading Resources
+
+Now we start connecting the HTTP pieces we've learned into **real API behavior**.
+
+We've already seen:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+```
+
+But now let's understand what GET actually means, why it exists, and what makes a good GET API.
+
+---
+
+## 1. The problem GET solves
+
+Imagine a client wants information from a server.
+
+The simplest idea would be:
+
+```text
+Client → Server
+         "Give me user 123"
+```
+
+HTTP gives us a standardized way to express that:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+The important part is:
+
+```text
+GET
+```
+
+It tells the server:
+
+> I want to retrieve the current representation of this resource.
+
+The server might respond:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 42
+
+{"id":123,"name":"Riyaz","active":true}
+```
+
+---
+
+# 2. GET doesn't mean "database SELECT"
+
+This distinction is important for backend development.
+
+You might internally implement:
+
+```sql
+SELECT * FROM users WHERE id = 123;
+```
+
+But HTTP doesn't know anything about SQL.
+
+HTTP only knows:
+
+```http
+GET /users/123
+```
+
+Your application could retrieve the data from:
+
+```text
+PostgreSQL
+Redis
+MongoDB
+another API
+a file
+memory
+```
+
+HTTP doesn't care.
+
+So think:
+
+```text
+HTTP
+  ↓
+GET /users/123
+  ↓
+Application
+  ↓
+Whatever mechanism is necessary
+  ↓
+Representation of user
+```
+
+---
+
+# 3. GET normally has no request body
+
+A typical GET request is:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+
+```
+
+Notice:
+
+```text
+headers
+   ↓
+blank line
+   ↓
+no body
+```
+
+You *can* encounter GET requests with bodies in some systems, but their semantics and interoperability are problematic/undefined enough that you shouldn't design ordinary APIs around GET request bodies.
+
+For normal API design:
+
+> Put GET inputs in the request target — path and/or query parameters.
+
+For example:
+
+```http
+GET /users/123
+```
+
+or:
+
+```http
+GET /users?active=true&page=2
+```
+
+---
+
+# 4. GET collection vs individual resource
+
+A very common pattern is:
+
+### Collection
+
+```http
+GET /users
+```
+
+Meaning:
+
+> Retrieve a representation of the users collection.
+
+### Individual resource
+
+```http
+GET /users/123
+```
+
+Meaning:
+
+> Retrieve a representation of user 123.
+
+These are different resources.
+
+```text
+/users
+   │
+   ├── /123
+   ├── /456
+   └── /789
+```
+
+You can think of it as:
+
+```text
+/users       → collection
+/users/123   → one member
+```
+
+---
+
+# 5. Query parameters with GET
+
+Suppose there are millions of users.
+
+You probably don't want:
+
+```http
+GET /users
+```
+
+to return all of them.
+
+You can provide query parameters:
+
+```http
+GET /users?page=2&limit=20
+```
+
+Or filtering:
+
+```http
+GET /users?active=true
+```
+
+Or searching:
+
+```http
+GET /users?name=Riyaz
+```
+
+Or sorting:
+
+```http
+GET /users?sort=name&order=asc
+```
+
+The important idea:
+
+```text
+Path
+ ↓
+Which resource?
+
+Query
+ ↓
+Which subset / representation / retrieval options?
+```
+
+---
+
+# 6. Let's build this into our Python server
+
+Use:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+
+        parsed = urlparse(self.path)
+
+        path = parsed.path
+        params = parse_qs(parsed.query)
+
+        # GET /users
+        if path == "/users":
+            users = [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+                {"id": 3, "name": "Riyaz"},
+            ]
+
+            body = json.dumps(users).encode("utf-8")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+            self.wfile.write(body)
+            return
+
+        # Anything else
+        self.send_response(404)
+        self.end_headers()
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+
+server.serve_forever()
+```
+
+Now:
+
+```bash
+curl -i http://localhost:8080/users
+```
+
+You should receive:
+
+```http
+HTTP/1.0 200 OK
+Content-Type: application/json
+Content-Length: ...
+
+[{"id": 1, "name": "Alice"}, ...]
+```
+
+---
+
+# 7. Add `/users/{id}`
+
+Now let's make the server understand:
+
+```http
+GET /users/2
+```
+
+Add:
+
+```python
+if path.startswith("/users/"):
+
+    user_id = path.split("/")[-1]
+
+    users = {
+        "1": {"id": 1, "name": "Alice"},
+        "2": {"id": 2, "name": "Bob"},
+        "3": {"id": 3, "name": "Riyaz"},
+    }
+
+    user = users.get(user_id)
+
+    if user is None:
+        self.send_response(404)
+        self.end_headers()
+        return
+
+    body = json.dumps(user).encode("utf-8")
+
+    self.send_response(200)
+    self.send_header("Content-Type", "application/json")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+
+    self.wfile.write(body)
+    return
+```
+
+Now:
+
+```bash
+curl -i http://localhost:8080/users/2
+```
+
+returns something like:
+
+```json
+{"id": 2, "name": "Bob"}
+```
+
+But:
+
+```bash
+curl -i http://localhost:8080/users/999
+```
+
+returns:
+
+```http
+404 Not Found
+```
+
+That's a real API behavior:
+
+```text
+GET /users/2
+     ↓
+Does resource exist?
+     ↓
+YES → 200
+
+GET /users/999
+     ↓
+Does resource exist?
+     ↓
+NO → 404
+```
+
+---
+
+# 8. GET is safe
+
+HTTP defines GET as a **safe** method.
+
+That means the request semantics are intended for retrieval rather than asking the server to change state.
+
+For example:
+
+```http
+GET /users/123
+```
+
+shouldn't mean:
+
+```text
+delete user 123
+```
+
+or:
+
+```text
+change user's name
+```
+
+The server may still have incidental side effects.
+
+For example, processing a GET might:
+
+```text
+write logs
+update metrics
+populate a cache
+```
+
+That's okay.
+
+"Safe" doesn't mean:
+
+> absolutely nothing anywhere on the server changes.
+
+It means:
+
+> The client isn't requesting a state-changing operation through the method's defined semantics.
+
+---
+
+# 9. GET is idempotent
+
+GET is also **idempotent**.
+
+Suppose:
+
+```http
+GET /users/123
+```
+
+is sent:
+
+```text
+once
+twice
+100 times
+```
+
+The intended effect on the resource is the same: retrieve it.
+
+Compare that with:
+
+```http
+POST /users
+```
+
+which may create a new user each time.
+
+So:
+
+```text
+GET
+ ├── safe
+ └── idempotent
+
+POST
+ ├── not safe
+ └── generally not idempotent
+```
+
+We'll explore POST next.
+
+---
+
+# 10. GET and caching
+
+Because GET is intended for retrieval and is safe, GET responses are particularly suitable for HTTP caching.
+
+For example:
+
+```http
+GET /products/123
+```
+
+could return:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=60
+
+{"id":123,"name":"Laptop"}
+```
+
+A cache could potentially reuse the response for the permitted period rather than contacting the server every time.
+
+This eventually leads to:
+
+```text
+GET
+ ↓
+Cache
+ ↓
+Server
+```
+
+instead of always:
+
+```text
+GET
+ ↓
+Server
+```
+
+We'll study caching properly later.
+
+---
+
+# 11. A common API mistake
+
+Don't do this:
+
+```http
+GET /deleteUser?id=123
+```
+
+with the expectation that it deletes the user.
+
+Why?
+
+Because you're using GET semantics for a state-changing operation.
+
+Instead:
+
+```http
+DELETE /users/123
+```
+
+communicates the operation through the HTTP method.
+
+Similarly, avoid:
+
+```http
+GET /createUser?name=Riyaz
+```
+
+Prefer:
+
+```http
+POST /users
+```
+
+This separation is one of the foundations of REST-style API design.
+
+---
+
+# 12. GET request anatomy
+
+Let's put everything we've learned together:
+
+```http
+GET /users/123?details=true HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+User-Agent: curl/...
+
+```
+
+Breakdown:
+
+```text
+GET
+ ↓
+method
+
+/users/123
+ ↓
+path
+
+?details=true
+ ↓
+query
+
+HTTP/1.1
+ ↓
+HTTP version
+
+Host
+ ↓
+target host
+
+Accept
+ ↓
+desired response representation
+
+blank line
+ ↓
+end of headers
+
+(no body)
+```
+
+And the response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 42
+
+{"id":123,"name":"Riyaz","active":true}
+```
+
+Breakdown:
+
+```text
+200
+ ↓
+request succeeded
+
+Content-Type
+ ↓
+body is JSON
+
+Content-Length
+ ↓
+body contains N bytes
+
+blank line
+ ↓
+headers finished
+
+JSON
+ ↓
+response body
+```
+
+---
+
+# 13. Your mental model now
+
+You can now look at:
+
+```http
+GET /users/123?active=true HTTP/1.1
+Host: api.example.com
+Accept: application/json
+```
+
+and understand the whole thing:
+
+```text
+                  HTTP REQUEST
+                       │
+                       ▼
+                    GET
+                       │
+            ┌──────────┴──────────┐
+            ▼                     ▼
+       /users/123            active=true
+            │                     │
+            ▼                     ▼
+      resource identity       query criteria
+            │
+            └──────────┬──────────┘
+                       ▼
+                   HTTP server
+                       │
+                       ▼
+                  application
+                       │
+                       ▼
+                  JSON response
+```
+
+---
+
+## Exercise
+
+Before moving on, try these manually with `curl`:
+
+```bash
+curl -i http://localhost:8080/users
+```
+
+```bash
+curl -i http://localhost:8080/users/1
+```
+
+```bash
+curl -i http://localhost:8080/users/999
+```
+
+```bash
+curl -v "http://localhost:8080/users?active=true&page=2"
+```
+
+Then use:
+
+```bash
+nc localhost 8080
+```
+
+and manually send:
+
+```http
+GET /users/2 HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+
+```
+
+At this point, you're no longer just learning syntax—you've manually constructed a real HTTP request and built a server that interprets it.
+
+**Next: Lesson 15 — POST: Sending Data to the Server**, where we'll follow the complete journey:
+
+```text
+JSON object
+   ↓
+JSON serialization
+   ↓
+UTF-8 bytes
+   ↓
+HTTP request body
+   ↓
+Content-Type
+   ↓
+Content-Length
+   ↓
+server
+   ↓
+JSON parsing
+   ↓
+create resource
+   ↓
+201 Created
+```
+
