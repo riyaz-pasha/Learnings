@@ -19470,3 +19470,925 @@ If those five are clear, the next important step is:
 
 ---
 
+# Lesson 25 — How JWT Verification Actually Works
+
+Now let's go one level deeper.
+
+We know:
+
+```text
+JWT = Header.Payload.Signature
+```
+
+But **how does the server actually verify the signature?**
+
+We'll build the idea from scratch.
+
+---
+
+## 1. Start With a Simple Message
+
+Imagine the authorization server wants to issue this token:
+
+```json
+{
+  "sub": "123",
+  "role": "user"
+}
+```
+
+It needs to somehow create proof that:
+
+> "I, the trusted authorization server, created this token, and its contents haven't been modified."
+
+That's what the signature provides.
+
+---
+
+# 2. Step 1 — Create the Header
+
+Start with:
+
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+```
+
+`HS256` means:
+
+```text
+HMAC + SHA-256
+```
+
+We'll use HS256 first because it's easier to understand.
+
+---
+
+# 3. Step 2 — Create the Payload
+
+For example:
+
+```json
+{
+  "sub": "123",
+  "role": "user",
+  "exp": 1789732800
+}
+```
+
+So we now have:
+
+```text
+Header
++
+Payload
+```
+
+---
+
+# 4. Step 3 — Base64URL Encode Them
+
+JWT does not simply put raw JSON into the token.
+
+It encodes both pieces.
+
+Conceptually:
+
+```text
+JSON Header
+     ↓
+Base64URL
+     ↓
+encoded header
+```
+
+and:
+
+```text
+JSON Payload
+     ↓
+Base64URL
+     ↓
+encoded payload
+```
+
+So we get:
+
+```text
+encodedHeader
+.
+encodedPayload
+```
+
+Notice the dot.
+
+---
+
+# 5. Step 4 — Create the Signing Input
+
+This is the exact data that gets signed:
+
+```text
+encodedHeader + "." + encodedPayload
+```
+
+For example:
+
+```text
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMiLCJyb2xlIjoidXNlciJ9
+```
+
+Call this:
+
+```text
+signing_input
+```
+
+---
+
+# 6. Step 5 — Sign It
+
+With HS256, we have a secret:
+
+```text
+my-super-secret-key
+```
+
+The authorization server computes:
+
+```text
+HMAC-SHA256(
+    secret,
+    signing_input
+)
+```
+
+That produces bytes representing the signature.
+
+Then the signature is Base64URL encoded.
+
+Finally:
+
+```text
+JWT =
+encodedHeader
+.
+encodedPayload
+.
+encodedSignature
+```
+
+So:
+
+```text
+             Header
+                │
+                ↓
+          Base64URL
+                │
+                ↓
+          encodedHeader
+                │
+                │
+             Payload
+                │
+                ↓
+          Base64URL
+                │
+                ↓
+          encodedPayload
+                │
+                └──────┐
+                       ↓
+              header.payload
+                       │
+                       ↓
+                HMAC-SHA256
+                       ↑
+                    secret
+                       │
+                       ↓
+                  signature
+                       │
+                       ↓
+        header.payload.signature
+```
+
+That's a JWT.
+
+---
+
+# 7. Now the Interesting Part — Verification
+
+The client sends:
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJ...
+```
+
+The server receives the JWT.
+
+It splits:
+
+```text
+header.payload.signature
+```
+
+into:
+
+```text
+header
+payload
+signature
+```
+
+Then it calculates a **new signature**:
+
+```text
+HMAC-SHA256(
+    serverSecret,
+    header + "." + payload
+)
+```
+
+And compares:
+
+```text
+calculated_signature
+        vs
+received_signature
+```
+
+If they match:
+
+```text
+✓ Signature valid
+```
+
+If they don't:
+
+```text
+✗ Signature invalid
+```
+
+---
+
+# 8. Why Can't an Attacker Change the Payload?
+
+Suppose the legitimate token says:
+
+```json
+{
+  "sub": "123",
+  "role": "user"
+}
+```
+
+An attacker decodes it and changes:
+
+```json
+{
+  "sub": "123",
+  "role": "admin"
+}
+```
+
+They can absolutely do that.
+
+Remember:
+
+> JWT payloads aren't encrypted.
+
+But now:
+
+```text
+header.payload
+```
+
+has changed.
+
+The attacker doesn't know the server's secret.
+
+Therefore they can't produce the correct new signature.
+
+The original signature was calculated over:
+
+```text
+header.payload(user)
+```
+
+but the attacker is now sending:
+
+```text
+header.payload(admin)
+```
+
+The server calculates:
+
+```text
+HMAC(secret, header.payload(admin))
+```
+
+That doesn't match the original signature.
+
+Therefore:
+
+```text
+❌ Invalid signature
+```
+
+---
+
+# 9. This Is the Core Security Property
+
+The signature gives us **integrity and authenticity of the signed data**.
+
+Think:
+
+```text
+             SECRET
+                │
+                ↓
+        ┌──────────────┐
+        │ Sign content │
+        └──────────────┘
+                │
+                ↓
+            Signature
+```
+
+Later:
+
+```text
+Content + Signature
+        │
+        ↓
+   Verify with key
+        │
+     ┌──┴──┐
+     ↓     ↓
+   valid invalid
+```
+
+If valid, the verifier has evidence that the signed content wasn't modified and was produced by a party possessing the signing key.
+
+---
+
+# 10. Let's Do This With Python
+
+We can demonstrate the mechanics without using a JWT library.
+
+Start:
+
+```python
+import base64
+import hashlib
+import hmac
+import json
+```
+
+We'll create a helper:
+
+```python
+def base64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+```
+
+Why remove `=`?
+
+JWT uses **Base64URL encoding without padding**.
+
+---
+
+# 11. Encode the Header
+
+```python
+header = {
+    "alg": "HS256",
+    "typ": "JWT"
+}
+
+header_json = json.dumps(
+    header,
+    separators=(",", ":")
+).encode()
+
+encoded_header = base64url_encode(header_json)
+
+print(encoded_header)
+```
+
+The important part isn't the exact output.
+
+It's:
+
+```text
+Python dict
+    ↓
+JSON
+    ↓
+UTF-8 bytes
+    ↓
+Base64URL
+    ↓
+JWT header
+```
+
+---
+
+# 12. Encode the Payload
+
+```python
+payload = {
+    "sub": "123",
+    "role": "user",
+    "exp": 1789732800
+}
+
+payload_json = json.dumps(
+    payload,
+    separators=(",", ":")
+).encode()
+
+encoded_payload = base64url_encode(payload_json)
+
+print(encoded_payload)
+```
+
+Now:
+
+```python
+signing_input = (
+    encoded_header
+    + "."
+    + encoded_payload
+)
+
+print(signing_input)
+```
+
+---
+
+# 13. Create the Signature
+
+```python
+secret = b"my-super-secret-key"
+
+signature = hmac.new(
+    secret,
+    signing_input.encode(),
+    hashlib.sha256
+).digest()
+
+encoded_signature = base64url_encode(signature)
+
+print(encoded_signature)
+```
+
+Finally:
+
+```python
+jwt = (
+    encoded_header
+    + "."
+    + encoded_payload
+    + "."
+    + encoded_signature
+)
+
+print(jwt)
+```
+
+You just created the basic structure of a JWT.
+
+---
+
+# 14. Now Verify It
+
+Take the JWT:
+
+```python
+parts = jwt.split(".")
+
+encoded_header = parts[0]
+encoded_payload = parts[1]
+received_signature = parts[2]
+```
+
+Reconstruct the signing input:
+
+```python
+signing_input = (
+    encoded_header
+    + "."
+    + encoded_payload
+)
+```
+
+Calculate what the signature **should** be:
+
+```python
+expected_signature = hmac.new(
+    secret,
+    signing_input.encode(),
+    hashlib.sha256
+).digest()
+
+expected_signature = base64url_encode(
+    expected_signature
+)
+```
+
+Compare:
+
+```python
+if hmac.compare_digest(
+    received_signature,
+    expected_signature
+):
+    print("Valid JWT")
+else:
+    print("Invalid JWT")
+```
+
+Notice something important:
+
+```text
+Server does NOT need to trust the payload.
+```
+
+It verifies the signature first.
+
+---
+
+# 15. Let's Attack Our JWT
+
+Suppose we decode the payload:
+
+```json
+{
+  "sub": "123",
+  "role": "user",
+  "exp": 1789732800
+}
+```
+
+An attacker changes:
+
+```json
+{
+  "sub": "123",
+  "role": "admin",
+  "exp": 1789732800
+}
+```
+
+They can Base64URL encode the modified payload.
+
+But they don't know:
+
+```text
+my-super-secret-key
+```
+
+Therefore they cannot calculate the correct signature.
+
+So:
+
+```text
+Modified payload
+      +
+Original signature
+      ↓
+❌ verification failure
+```
+
+---
+
+# 16. What About Decoding the JWT?
+
+This is why websites can easily show JWT contents.
+
+A JWT is roughly:
+
+```text
+Base64URL(header)
+.
+Base64URL(payload)
+.
+Base64URL(signature)
+```
+
+The first two components are simply encoded data.
+
+You don't need the secret to decode them.
+
+You need the appropriate key to **verify the signature**.
+
+This distinction is fundamental:
+
+```text
+Decode
+   ↓
+Can anyone do it?
+
+YES
+
+Verify
+   ↓
+Requires cryptographic key
+```
+
+---
+
+# 17. Now Let's Look at RS256
+
+HS256 uses:
+
+```text
+             SAME SECRET
+              /       \
+             ↓         ↓
+          Sign       Verify
+```
+
+This creates a problem in larger systems.
+
+Imagine 50 services need to verify tokens.
+
+If they all need the secret:
+
+```text
+Secret
+  ↓
+Service A
+Service B
+Service C
+...
+Service Z
+```
+
+Every service possesses a powerful secret.
+
+Instead, we can use asymmetric cryptography.
+
+---
+
+# 18. Private Key + Public Key
+
+With RS256:
+
+```text
+Private key
+     ↓
+   SIGN
+     ↓
+   JWT
+     ↓
+Public key
+     ↓
+  VERIFY
+```
+
+Only the authorization server needs the private key.
+
+Other services only need the public key.
+
+```text
+             Authorization Server
+                     │
+               PRIVATE KEY
+                     │
+                     ↓
+                   SIGN
+                     │
+                     ↓
+                    JWT
+                     │
+       ┌─────────────┼─────────────┐
+       ↓             ↓             ↓
+   Service A      Service B     Service C
+       │             │             │
+   PUBLIC KEY     PUBLIC KEY    PUBLIC KEY
+       │             │             │
+       └─────────────┼─────────────┘
+                     ↓
+                  VERIFY
+```
+
+This is one reason asymmetric signing is common in distributed authentication systems.
+
+---
+
+# 19. Public Key Doesn't Mean Public Data
+
+This distinction is subtle.
+
+The public key can be distributed to services.
+
+That's okay.
+
+The private key must remain protected.
+
+```text
+Public key
+→ verification
+
+Private key
+→ signing
+```
+
+If someone gets the public key:
+
+```text
+Can they create valid JWTs?
+
+No.
+```
+
+If someone gets the private key:
+
+```text
+They may be able to create valid signatures.
+```
+
+That's why private-key protection is critical.
+
+---
+
+# 20. What Does JWT Verification Actually Mean?
+
+When an API receives a JWT, verification isn't just:
+
+```text
+signature == valid
+```
+
+A proper implementation typically checks multiple things.
+
+For example:
+
+```text
+JWT
+ │
+ ├─ Is it structurally valid?
+ │
+ ├─ Is the algorithm acceptable?
+ │
+ ├─ Is the signature valid?
+ │
+ ├─ Is it expired?
+ │
+ ├─ Is it not-before constraint satisfied, if used?
+ │
+ ├─ Is issuer correct?
+ │
+ ├─ Is audience correct?
+ │
+ └─ Are required claims present?
+```
+
+Then:
+
+```text
+Valid authentication context
+        ↓
+Authorization rules
+        ↓
+Allow / deny operation
+```
+
+The exact checks depend on the protocol and architecture.
+
+---
+
+# 21. One Dangerous Mistake
+
+Never think:
+
+```text
+JWT payload says:
+
+"role": "admin"
+
+therefore
+
+user is admin
+```
+
+Instead:
+
+```text
+JWT
+ ↓
+verify signature
+ ↓
+validate issuer/audience/time/etc.
+ ↓
+trusted claims
+ ↓
+authorization policy
+ ↓
+allow/deny
+```
+
+The signature is what gives the server confidence that the claims came from the trusted signer and weren't modified.
+
+---
+
+# 22. Our Authentication Architecture Is Now Becoming Clear
+
+We've gone from:
+
+```text
+username + password
+```
+
+to:
+
+```text
+username + password
+        ↓
+      login
+        ↓
+   access token
+        ↓
+Authorization: Bearer <token>
+```
+
+Then:
+
+```text
+access token
+      ↓
+     JWT
+      ↓
+header.payload.signature
+```
+
+And:
+
+```text
+JWT
+ ↓
+signature verification
+ ↓
+claims validation
+ ↓
+authentication
+ ↓
+authorization
+```
+
+---
+
+## The 5 Things You Should Remember
+
+If you remember nothing else from this lesson:
+
+```text
+1. JWT has:
+   header.payload.signature
+
+2. Header and payload are encoded, not encrypted.
+
+3. Signature protects the integrity/authenticity of the signed content.
+
+4. The server verifies the signature before trusting claims.
+
+5. A valid JWT proves a valid token, NOT that the user can perform every action.
+```
+
+### Next: Lesson 26 — JWT in a Real Distributed System
+
+We'll connect this to the architecture you're likely to encounter in backend systems:
+
+```text
+                    User
+                      │
+                      ↓
+               Login / Auth Server
+                      │
+              access JWT + refresh
+                      │
+                      ↓
+                 API Gateway
+                      │
+          ┌───────────┼───────────┐
+          ↓           ↓           ↓
+       User API   Order API   Payment API
+          │           │           │
+          └───────────┼───────────┘
+                      ↓
+                 JWT validation
+```
+
+We'll cover **JWKS, public-key distribution, key rotation, issuer/audience, API Gateway vs service-level validation, and what actually happens when a signing key is rotated.**
+
+
+----
+
