@@ -17874,3 +17874,712 @@ This is where **access tokens, refresh tokens, expiration, rotation, and logout/
 
 ---
 
+# Lesson 23 — Access Tokens vs Refresh Tokens
+
+We now have the pieces:
+
+```text
+Login
+  ↓
+username + password
+  ↓
+server verifies credentials
+  ↓
+?
+```
+
+The question is: **what should the server give the client after login, and how should that credential remain useful over time?**
+
+---
+
+## 1. The Problem With Sending the Password
+
+Imagine we did this:
+
+```http
+POST /login
+
+{
+  "username": "riyaz",
+  "password": "secret123"
+}
+```
+
+Then every protected request sends the password:
+
+```http
+GET /profile
+
+Authorization: Basic riyaz:secret123
+```
+
+That's obviously undesirable.
+
+We want:
+
+```text
+Password
+   ↓
+used only during login
+   ↓
+credential/token
+   ↓
+used for normal API requests
+```
+
+So we introduce an **access token**.
+
+---
+
+# 2. Access Token
+
+An access token is a credential that the client presents when accessing protected resources.
+
+For example:
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer abc123
+```
+
+The important part is:
+
+```text
+Authorization: Bearer abc123
+                         ↑
+                    access token
+```
+
+The server validates the token and determines which user it represents.
+
+For example:
+
+```text
+abc123 → user_id = 123
+```
+
+Then:
+
+```text
+Request
+   ↓
+Access token
+   ↓
+Validate token
+   ↓
+User = 123
+   ↓
+Check authorization
+   ↓
+Return /profile
+```
+
+---
+
+# 3. Why Not Make the Access Token Live Forever?
+
+Suppose we create:
+
+```text
+access_token = abc123
+```
+
+and it never expires.
+
+A user logs in on Monday.
+
+On Tuesday:
+
+```http
+Authorization: Bearer abc123
+```
+
+Wednesday:
+
+```http
+Authorization: Bearer abc123
+```
+
+One month later:
+
+```http
+Authorization: Bearer abc123
+```
+
+The problem is obvious.
+
+If someone steals:
+
+```text
+abc123
+```
+
+they potentially have access for a very long time.
+
+So we make access tokens **short-lived**.
+
+For example:
+
+```text
+Access token
+    ↓
+expires in 15 minutes
+```
+
+Now we have a new problem.
+
+---
+
+# 4. The New Problem
+
+Suppose the user is using your application.
+
+At 10:00:
+
+```text
+Access token
+expires at 10:15
+```
+
+At 10:16 the user makes:
+
+```http
+GET /profile
+Authorization: Bearer abc123
+```
+
+The server responds:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+Should the user have to enter their password again?
+
+That would be terrible UX.
+
+We need another mechanism.
+
+---
+
+# 5. Refresh Token
+
+A **refresh token** is a longer-lived credential used to obtain a new access token.
+
+The login response can contain both:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "access_token": "access-abc",
+  "refresh_token": "refresh-xyz"
+}
+```
+
+Conceptually:
+
+```text
+Login
+  │
+  ├── access token
+  │      short-lived
+  │
+  └── refresh token
+         longer-lived
+```
+
+The access token is used for normal API requests.
+
+The refresh token is used to obtain a new access token.
+
+---
+
+# 6. Normal API Request
+
+Client:
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer access-abc
+```
+
+Server:
+
+```text
+Validate access token
+        ↓
+    valid?
+      /   \
+    yes    no
+     ↓      ↓
+return    401
+data
+```
+
+---
+
+# 7. Access Token Expires
+
+Eventually:
+
+```text
+access-abc
+     ↓
+   expired
+```
+
+Client tries:
+
+```http
+GET /profile HTTP/1.1
+Authorization: Bearer access-abc
+```
+
+Server:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+The client can use the refresh token:
+
+```http
+POST /token HTTP/1.1
+Host: api.example.com
+Content-Type: application/json
+
+{
+  "refresh_token": "refresh-xyz"
+}
+```
+
+Server validates the refresh token.
+
+If valid:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "access_token": "access-new"
+}
+```
+
+Now the client continues:
+
+```http
+GET /profile HTTP/1.1
+Authorization: Bearer access-new
+```
+
+The user didn't need to log in again.
+
+---
+
+# 8. Why Two Tokens?
+
+This is the key idea.
+
+### Access token
+
+Used frequently:
+
+```text
+Client → API
+```
+
+Therefore we want it relatively short-lived.
+
+### Refresh token
+
+Used less frequently:
+
+```text
+Client → Authorization server
+```
+
+Therefore it can generally have a longer lifetime and can be subject to stronger protection and additional server-side controls.
+
+Think:
+
+```text
+             LOGIN
+               │
+       ┌───────┴────────┐
+       ↓                ↓
+ Access Token      Refresh Token
+       │                │
+       │                │
+       ↓                ↓
+   API calls       Get new access
+       │                token
+       ↓                │
+   expires ─────────────┘
+```
+
+---
+
+# 9. Important: Refresh Token Is NOT Sent to Every API
+
+This distinction is extremely important.
+
+Normal request:
+
+```http
+GET /orders
+
+Authorization: Bearer access-abc
+```
+
+Not:
+
+```http
+Authorization: Bearer refresh-xyz
+```
+
+The refresh token is generally only presented to the token/authorization endpoint to obtain a new access token.
+
+So:
+
+```text
+Access token
+     ↓
+Protected API
+
+Refresh token
+     ↓
+Token endpoint
+     ↓
+New access token
+```
+
+---
+
+# 10. What Happens If the Refresh Token Is Stolen?
+
+This is why refresh tokens need strong protection too.
+
+Imagine:
+
+```text
+refresh-xyz
+```
+
+gets stolen.
+
+An attacker may be able to obtain new access tokens.
+
+So systems commonly use measures such as:
+
+* secure storage
+* HTTPS
+* expiration
+* server-side revocation
+* refresh-token rotation
+* detecting reuse of rotated refresh tokens
+* appropriate cookie protections when cookies are used
+
+The exact architecture depends on the application.
+
+---
+
+# 11. Refresh Token Rotation
+
+Suppose the client has:
+
+```text
+refresh-1
+```
+
+It sends:
+
+```http
+POST /token
+
+{
+  "refresh_token": "refresh-1"
+}
+```
+
+Server returns:
+
+```text
+access-2
+refresh-2
+```
+
+The old refresh token:
+
+```text
+refresh-1
+```
+
+may now be invalidated.
+
+So:
+
+```text
+refresh-1
+     ↓
+used
+     ↓
+access-2 + refresh-2
+     ↓
+refresh-1 invalid
+```
+
+This is called **refresh token rotation**.
+
+It can help detect/reduce the impact of stolen refresh tokens.
+
+---
+
+# 12. Access Token vs Refresh Token
+
+|                 | Access Token                                     | Refresh Token                                                              |
+| --------------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
+| Purpose         | Access protected APIs                            | Obtain new access token                                                    |
+| Lifetime        | Usually shorter                                  | Usually longer                                                             |
+| Sent to         | Resource/API server                              | Token/authorization endpoint                                               |
+| Used frequently | Yes                                              | No                                                                         |
+| If stolen       | Attacker may access APIs until expiry/revocation | Potentially more serious because it can enable obtaining new access tokens |
+| Typical format  | Opaque token or JWT                              | Often opaque, but architecture varies                                      |
+
+The important thing is **purpose**, not the token's string format.
+
+---
+
+# 13. Where Does JWT Fit?
+
+Remember our previous discussion:
+
+```text
+Bearer ≠ JWT
+```
+
+Bearer is the authentication scheme:
+
+```http
+Authorization: Bearer <credential>
+```
+
+The credential could be:
+
+```text
+abc123
+```
+
+or a JWT:
+
+```text
+eyJhbGciOi...
+```
+
+So you could have:
+
+```text
+Access token
+    ↓
+JWT
+    ↓
+Authorization: Bearer <JWT>
+```
+
+Or:
+
+```text
+Access token
+    ↓
+opaque random value
+    ↓
+Authorization: Bearer abc123
+```
+
+Both are possible.
+
+Similarly, a refresh token does **not** have to be a JWT.
+
+---
+
+# 14. The Complete Flow
+
+Here's the mental model I want you to remember:
+
+```text
+                    LOGIN
+                      │
+              username/password
+                      │
+                      ↓
+                 Authenticate
+                      │
+             ┌────────┴─────────┐
+             ↓                  ↓
+       Access Token       Refresh Token
+       short-lived        longer-lived
+             │                  │
+             ↓                  │
+        API requests            │
+             │                  │
+             ↓                  │
+          expires ──────────────┘
+                                │
+                                ↓
+                         Token endpoint
+                                │
+                                ↓
+                         New Access Token
+```
+
+The password is primarily used to establish the authenticated session/token relationship; it should not be repeatedly sent to ordinary APIs.
+
+---
+
+# 15. One More Important Distinction
+
+Don't confuse:
+
+```text
+Session
+Token
+Cookie
+Access Token
+Refresh Token
+JWT
+```
+
+They are different concepts.
+
+```text
+Session
+→ server-side authentication state
+
+Cookie
+→ HTTP/browser mechanism for storing and sending data
+
+Access token
+→ credential used to access protected resources
+
+Refresh token
+→ credential used to obtain new access tokens
+
+JWT
+→ a token format
+
+Bearer
+→ an HTTP authentication scheme
+```
+
+And they can be combined.
+
+For example:
+
+```text
+Browser
+   │
+   │ Cookie: refresh_token=...
+   ↓
+Server
+   │
+   ├── access token
+   ↓
+API
+   │
+   │ Authorization: Bearer <access-token>
+   ↓
+Resource
+```
+
+That's why saying simply **"we use tokens"** isn't enough when discussing authentication architecture.
+
+---
+
+# Hands-on Exercise
+
+Let's make our toy server support:
+
+### `POST /login`
+
+Request:
+
+```http
+POST /login HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{
+  "username": "riyaz",
+  "password": "secret123"
+}
+```
+
+Response:
+
+```json
+{
+  "access_token": "access-abc123",
+  "refresh_token": "refresh-xyz789"
+}
+```
+
+Then:
+
+### `GET /profile`
+
+```http
+GET /profile HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer access-abc123
+```
+
+And finally:
+
+### `POST /refresh`
+
+```http
+POST /refresh HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{
+  "refresh_token": "refresh-xyz789"
+}
+```
+
+Response:
+
+```json
+{
+  "access_token": "access-new456"
+}
+```
+
+For learning, you can keep the tokens hardcoded initially. The important thing is to implement the **flow**, not build production-grade token security yet.
+
+### Next lesson
+
+**Lesson 24 — What exactly is a JWT?**
+
+We'll build a JWT by hand conceptually:
+
+```text
+header.payload.signature
+```
+
+and answer the important questions:
+
+* Why does a JWT have three parts?
+* Is the payload encrypted?
+* How does the server know it wasn't modified?
+* What does the signature actually do?
+* Why can the server validate a JWT without a database lookup?
+* What does `exp` mean?
+* Why shouldn't you put secrets in a JWT?
+
+----
+
