@@ -18583,3 +18583,890 @@ and answer the important questions:
 
 ----
 
+# Lesson 24 — JWT: What Exactly Is It?
+
+We just learned that an access token can be:
+
+```text
+opaque token
+```
+
+or:
+
+```text
+JWT
+```
+
+Now let's understand **what a JWT actually is**, without jumping into libraries.
+
+---
+
+## 1. Why Was JWT Introduced?
+
+Consider an opaque token:
+
+```text
+access-abc123
+```
+
+The server receives:
+
+```http
+GET /profile HTTP/1.1
+Authorization: Bearer access-abc123
+```
+
+How does the server know who this belongs to?
+
+It might need a database/Redis lookup:
+
+```text
+access-abc123
+       ↓
+   Token Store
+       ↓
+   user_id = 123
+   role = admin
+   expires = ...
+```
+
+That works, but every request may require server-side state.
+
+JWT provides another approach:
+
+```text
+Token itself contains claims
+        ↓
+Server verifies signature
+        ↓
+Server trusts verified claims
+```
+
+---
+
+# 2. JWT Stands for JSON Web Token
+
+A JWT typically looks like this:
+
+```text
+xxxxx.yyyyy.zzzzz
+```
+
+There are **three parts**:
+
+```text
+HEADER.PAYLOAD.SIGNATURE
+```
+
+For example:
+
+```text
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+.
+eyJzdWIiOiIxMjMiLCJyb2xlIjoiYWRtaW4ifQ
+.
+abc123...
+```
+
+The three parts are:
+
+```text
+┌─────────────┐
+│   Header    │
+├─────────────┤
+│   Payload   │
+├─────────────┤
+│ Signature   │
+└─────────────┘
+```
+
+---
+
+# 3. Part 1 — Header
+
+The header contains metadata about the JWT.
+
+Conceptually:
+
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+```
+
+`alg` means:
+
+```text
+Which cryptographic algorithm is being used?
+```
+
+`typ` indicates the token type.
+
+The header is then encoded using **Base64URL encoding**.
+
+So:
+
+```text
+JSON header
+    ↓
+Base64URL
+    ↓
+xxxxx
+```
+
+---
+
+# 4. Part 2 — Payload
+
+The payload contains **claims**.
+
+For example:
+
+```json
+{
+  "sub": "123",
+  "role": "admin",
+  "exp": 1789732800
+}
+```
+
+These are statements/claims about the token.
+
+Common registered claims include:
+
+### `sub`
+
+Subject.
+
+Usually identifies the entity the token represents.
+
+```json
+{
+  "sub": "123"
+}
+```
+
+Could mean:
+
+```text
+user_id = 123
+```
+
+---
+
+### `exp`
+
+Expiration time.
+
+```json
+{
+  "exp": 1789732800
+}
+```
+
+This is a Unix timestamp.
+
+After that time, the token should no longer be accepted.
+
+---
+
+### `iat`
+
+Issued-at time.
+
+```json
+{
+  "iat": 1789729200
+}
+```
+
+---
+
+### `iss`
+
+Issuer.
+
+```json
+{
+  "iss": "https://auth.example.com"
+}
+```
+
+---
+
+### `aud`
+
+Audience.
+
+```json
+{
+  "aud": "my-api"
+}
+```
+
+This can indicate which service/API the token is intended for.
+
+---
+
+# 5. Is the JWT Payload Encrypted?
+
+**No.**
+
+This is one of the most important JWT concepts.
+
+Suppose the payload is:
+
+```json
+{
+  "sub": "123",
+  "role": "admin"
+}
+```
+
+JWT encoding makes it transportable:
+
+```text
+eyJzdWIiOiIxMjMiLCJyb2xlIjoiYWRtaW4ifQ
+```
+
+But this is **not encryption**.
+
+Anyone who obtains the JWT can decode the header and payload.
+
+For example:
+
+```text
+JWT
+ ↓
+Base64URL decode
+ ↓
+JSON
+```
+
+Therefore:
+
+> **Do not put secrets/passwords/private information into a normal JWT payload merely because it is a JWT.**
+
+---
+
+# 6. Then What Prevents Someone From Changing It?
+
+This is where the third part comes in.
+
+```text
+HEADER.PAYLOAD.SIGNATURE
+```
+
+The signature protects the integrity of the token.
+
+Imagine the original payload:
+
+```json
+{
+  "sub": "123",
+  "role": "user"
+}
+```
+
+An attacker changes it to:
+
+```json
+{
+  "sub": "123",
+  "role": "admin"
+}
+```
+
+They can easily modify the payload because it's not encrypted.
+
+But now the signature no longer matches.
+
+The server detects that.
+
+---
+
+# 7. The Signature
+
+For a simplified HMAC-based JWT such as HS256:
+
+```text
+signature =
+HMAC(
+    secret,
+    base64url(header) + "." + base64url(payload)
+)
+```
+
+So conceptually:
+
+```text
+HEADER
+   +
+PAYLOAD
+   ↓
+cryptographic algorithm + secret
+   ↓
+SIGNATURE
+```
+
+The final JWT is:
+
+```text
+encodedHeader
+.
+encodedPayload
+.
+signature
+```
+
+---
+
+# 8. What Happens When the Server Receives It?
+
+Client sends:
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer <JWT>
+```
+
+Server performs roughly:
+
+```text
+             JWT
+              │
+       ┌──────┴───────┐
+       ↓              ↓
+    Header         Payload
+       │              │
+       └──────┬───────┘
+              ↓
+        Verify signature
+              │
+          ┌───┴───┐
+          ↓       ↓
+        valid   invalid
+          │       │
+          ↓       ↓
+     validate     401
+       claims
+          │
+          ↓
+      authorize
+          │
+          ↓
+       /profile
+```
+
+The crucial part is:
+
+```text
+The server does NOT simply trust the payload.
+```
+
+It first verifies the token's cryptographic integrity.
+
+---
+
+# 9. Why Is This Useful?
+
+With an opaque token:
+
+```text
+access-abc123
+       ↓
+Redis / DB
+       ↓
+user = 123
+```
+
+With a self-contained JWT:
+
+```text
+JWT
+ ↓
+verify signature
+ ↓
+read claims
+ ↓
+user = 123
+```
+
+Therefore, a service can often validate the token **without looking up that access token in a database**.
+
+This is one reason JWTs can be useful in distributed systems.
+
+For example:
+
+```text
+                 API Gateway
+                      │
+          ┌───────────┼───────────┐
+          ↓           ↓           ↓
+       Service A   Service B   Service C
+          │           │           │
+          └───────────┼───────────┘
+                      │
+                 JWT validation
+```
+
+Each service can potentially validate the JWT independently.
+
+---
+
+# 10. But Wait — How Does the Server Know the Secret?
+
+This depends on the signing algorithm.
+
+There are two important families to understand.
+
+### Symmetric signing
+
+Example:
+
+```text
+HS256
+```
+
+Same secret is used to sign and verify:
+
+```text
+           SECRET
+          /      \
+         ↓        ↓
+      signing   verification
+```
+
+For example:
+
+```text
+Authorization Server
+        │
+        │ shared secret
+        ↓
+   API Service
+```
+
+Both sides need the secret.
+
+---
+
+### Asymmetric signing
+
+Examples include:
+
+```text
+RS256
+ES256
+```
+
+Now we have:
+
+```text
+Private key
+    ↓
+sign
+
+Public key
+    ↓
+verify
+```
+
+Conceptually:
+
+```text
+Authorization Server
+        │
+        │ private key
+        ↓
+      SIGN
+        │
+        ↓
+       JWT
+        │
+        ↓
+API Service
+        │
+        │ public key
+        ↓
+      VERIFY
+```
+
+The API service doesn't need the private signing key.
+
+This is particularly useful when many services need to verify tokens.
+
+---
+
+# 11. A Very Important Mental Model
+
+Think about signing like this:
+
+```text
+Private secret/key
+       +
+    message
+       ↓
+   signature
+```
+
+The signature answers:
+
+> "Was this token produced by someone possessing the appropriate signing key, and has the signed content been altered?"
+
+It does **not** answer:
+
+> "Is this user a good person?"
+
+It does not make authorization decisions by itself.
+
+The application still needs to decide:
+
+```text
+Is this authenticated identity
+allowed to perform this operation?
+```
+
+---
+
+# 12. Authentication vs Authorization With JWT
+
+Suppose JWT contains:
+
+```json
+{
+  "sub": "123",
+  "role": "user"
+}
+```
+
+After validation:
+
+```text
+JWT valid
+   ↓
+User = 123
+Role = user
+```
+
+Now request:
+
+```http
+DELETE /users/456
+Authorization: Bearer <JWT>
+```
+
+Authentication:
+
+```text
+Who is this?
+→ user 123
+```
+
+Authorization:
+
+```text
+Can user 123 delete user 456?
+→ application policy decides
+```
+
+So:
+
+```text
+JWT validation
+      ↓
+Authentication context
+      ↓
+Authorization decision
+```
+
+A valid JWT does **not** automatically mean the request is authorized.
+
+---
+
+# 13. What Does `exp` Actually Do?
+
+Suppose:
+
+```json
+{
+  "sub": "123",
+  "exp": 1789732800
+}
+```
+
+The server checks:
+
+```text
+current_time < exp ?
+```
+
+If:
+
+```text
+current_time < exp
+```
+
+the token hasn't expired.
+
+If:
+
+```text
+current_time >= exp
+```
+
+the token is expired.
+
+Then the API can return:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+This is one reason access tokens can be short-lived.
+
+---
+
+# 14. JWT Is Not Automatically Secure
+
+This is another important point.
+
+People sometimes say:
+
+> "We're using JWT, so authentication is secure."
+
+That's not enough.
+
+Security depends on things such as:
+
+```text
+HTTPS
++
+secure key management
++
+correct signature validation
++
+algorithm configuration
++
+expiration
++
+audience/issuer validation where appropriate
++
+secure token storage
++
+authorization rules
++
+refresh-token handling
+```
+
+JWT is simply a token format plus mechanisms for signing/verification.
+
+---
+
+# 15. JWT vs Opaque Token
+
+Now compare them.
+
+|                                 | Opaque Token                    | JWT                            |
+| ------------------------------- | ------------------------------- | ------------------------------ |
+| Example                         | `abc123`                        | `eyJhbGci...`                  |
+| Server can read claims directly | No                              | Yes                            |
+| Usually requires token lookup   | Often                           | Often not for basic validation |
+| Self-contained                  | No                              | Yes                            |
+| Easily revoked server-side      | Usually yes                     | More involved                  |
+| Payload visible to holder       | No meaningful payload           | Yes                            |
+| Integrity protection            | Server-side lookup / validation | Cryptographic signature        |
+| Format                          | Arbitrary                       | Standardized structure         |
+
+But remember:
+
+**JWT does not mean "no database ever."**
+
+A JWT-based system might still maintain:
+
+```text
+revoked token IDs
+sessions
+user state
+permissions
+refresh tokens
+```
+
+So:
+
+```text
+JWT ≠ automatically stateless
+```
+
+---
+
+# 16. The Complete Access-Token Picture
+
+Now combine everything we've learned.
+
+```text
+                  LOGIN
+                    │
+             username/password
+                    │
+                    ↓
+             Authentication
+                    │
+                    ↓
+             Create access JWT
+                    │
+          ┌─────────┴─────────┐
+          ↓                   ↓
+     Header + Payload      Signature
+          │                   │
+          └─────────┬─────────┘
+                    ↓
+                   JWT
+                    │
+                    ↓
+              Client stores
+                    │
+                    ↓
+       Authorization: Bearer JWT
+                    │
+                    ↓
+                  API
+                    │
+                    ↓
+            Verify signature
+                    │
+                    ↓
+             Validate claims
+                    │
+                    ↓
+             Authentication
+                    │
+                    ↓
+             Authorization
+                    │
+                    ↓
+                Response
+```
+
+---
+
+# 17. One Subtle but Important Point
+
+Suppose someone steals this JWT:
+
+```text
+HEADER.PAYLOAD.SIGNATURE
+```
+
+They don't need your password.
+
+If the token is valid and hasn't expired, they may be able to use it as a **bearer credential**.
+
+That's why:
+
+```text
+JWT
++
+Bearer
+```
+
+should make you think:
+
+> **Whoever possesses the valid credential may be able to use it.**
+
+The signature prevents **modification**.
+
+It does not prevent **theft**.
+
+That's a very important distinction.
+
+---
+
+# 18. Our Authentication Vocabulary So Far
+
+You should now be able to distinguish these:
+
+```text
+Password
+   ↓
+Used to authenticate/login
+
+Access Token
+   ↓
+Credential used for API access
+
+Refresh Token
+   ↓
+Credential used to obtain new access tokens
+
+JWT
+   ↓
+A token format
+
+Bearer
+   ↓
+HTTP authentication scheme
+
+Cookie
+   ↓
+Browser mechanism for storing/sending data
+
+Session
+   ↓
+Server-side authentication state
+```
+
+And these aren't mutually exclusive.
+
+For example:
+
+```text
+Login
+ ↓
+Refresh token in HttpOnly cookie
+ ↓
+Access JWT
+ ↓
+Authorization: Bearer <JWT>
+ ↓
+API
+```
+
+That's a perfectly plausible architecture.
+
+---
+
+## Hands-on Exercise
+
+You don't need a JWT library yet.
+
+Take this payload:
+
+```json
+{
+  "sub": "123",
+  "role": "user",
+  "exp": 1789732800
+}
+```
+
+Answer these before moving on:
+
+**1.** Can a user decode this payload if they have the JWT?
+
+**2.** Can a user modify `"role": "user"` to `"role": "admin"`?
+
+**3.** If they modify it, what happens to the signature?
+
+**4.** What does the server need to check before trusting the claims?
+
+**5.** Does a valid JWT automatically mean the user is authorized to perform every operation?
+
+If those five are clear, the next important step is:
+
+**Lesson 25 — How JWT verification actually works, including Base64URL, signing, public/private keys, and a JWT we build ourselves with Python.**
+
+---
+
