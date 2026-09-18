@@ -16838,3 +16838,1039 @@ This will make browser authentication much less mysterious.
 
 ----
 
+# Lesson 22 — Cookies
+
+We've just learned:
+
+```text
+Login
+  ↓
+Server creates session
+  ↓
+session_id = abc123
+  ↓
+Client needs to send that ID on future requests
+```
+
+A very common mechanism for doing that in browsers is **HTTP cookies**.
+
+Today we'll understand cookies from the raw HTTP level.
+
+---
+
+# 1. What problem do cookies solve?
+
+HTTP itself is stateless.
+
+Imagine:
+
+```http
+POST /login
+```
+
+The server authenticates you.
+
+Then you make:
+
+```http
+GET /profile
+```
+
+The second request doesn't automatically know that you logged in.
+
+We need some way for the server to tell the client:
+
+> "Remember this piece of information and send it back to me on relevant future requests."
+
+That's what cookies provide.
+
+---
+
+# 2. The two important headers
+
+Cookies primarily involve two HTTP headers.
+
+### Server → Client
+
+```http
+Set-Cookie
+```
+
+### Client → Server
+
+```http
+Cookie
+```
+
+Think:
+
+```text
+Server
+  │
+  │ Set-Cookie
+  ↓
+Browser
+  │
+  │ Cookie
+  ↓
+Server
+```
+
+This distinction is extremely important.
+
+---
+
+# 3. Creating a cookie
+
+Suppose login succeeds.
+
+Server responds:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Type: application/json
+Content-Length: 29
+
+{"message":"Login success"}
+```
+
+The browser sees:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+and stores the cookie.
+
+Conceptually:
+
+```text
+Browser Cookie Jar
+──────────────────────
+session_id = abc123
+```
+
+---
+
+# 4. Sending the cookie back
+
+Later, the browser requests:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+Notice:
+
+```text
+Server → Browser
+
+Set-Cookie
+```
+
+but:
+
+```text
+Browser → Server
+
+Cookie
+```
+
+Not:
+
+```http
+Cookie: session_id=abc123
+```
+
+on the response.
+
+And not:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+on every request.
+
+---
+
+# 5. Let's manually simulate it
+
+You can use `nc`:
+
+```bash
+nc localhost 8080
+```
+
+Pretend we're logging in:
+
+```http
+POST /login HTTP/1.1
+Host: localhost:8080
+Content-Length: 0
+
+```
+
+Imagine the server responds:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Length: 0
+
+```
+
+The browser would store:
+
+```text
+session_id=abc123
+```
+
+Then a future request:
+
+```http
+GET /profile HTTP/1.1
+Host: localhost:8080
+Cookie: session_id=abc123
+
+```
+
+That's the entire basic cookie mechanism.
+
+---
+
+# 6. Cookies are not inherently authentication
+
+This is another important distinction.
+
+A cookie can contain:
+
+```text
+session_id=abc123
+```
+
+but it could also contain:
+
+```text
+language=en
+```
+
+or:
+
+```text
+theme=dark
+```
+
+or other application state.
+
+So:
+
+```text
+Cookie ≠ authentication
+```
+
+Rather:
+
+```text
+Cookie
+  ↓
+transport/store small pieces of state
+  ↓
+one possible use
+  ↓
+session authentication
+```
+
+---
+
+# 7. Cookie attributes
+
+The interesting part is that `Set-Cookie` can contain additional attributes.
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+```
+
+Let's break that down.
+
+```text
+session_id=abc123
+       │
+       └── cookie name/value
+
+HttpOnly
+       └── JavaScript access restriction
+
+Secure
+       └── send only over secure connections
+
+SameSite=Lax
+       └── controls cross-site sending behavior
+```
+
+These attributes are extremely important for authentication cookies.
+
+---
+
+# 8. `HttpOnly`
+
+Suppose we have:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly
+```
+
+`HttpOnly` tells a browser that the cookie should not be accessible through JavaScript APIs such as:
+
+```javascript
+document.cookie
+```
+
+So conceptually:
+
+```text
+Browser
+  │
+  ├── HTTP requests → cookie available
+  │
+  └── JavaScript → cannot directly read HttpOnly cookie
+```
+
+Why is this useful?
+
+Imagine a malicious script somehow executes in your page.
+
+Without `HttpOnly`, it may be able to read a session cookie through JavaScript.
+
+With:
+
+```text
+HttpOnly
+```
+
+the browser prevents JavaScript from directly reading that cookie.
+
+---
+
+# 9. Important security nuance
+
+`HttpOnly` does **not** mean:
+
+> "This cookie is completely protected from attacks."
+
+It only prevents JavaScript from directly accessing the cookie.
+
+If malicious JavaScript is executing in your page, it may still be able to make requests from the user's browser.
+
+For example, JavaScript might cause:
+
+```text
+POST /change-email
+```
+
+The browser could still attach applicable cookies automatically.
+
+So:
+
+```text
+HttpOnly
+   ↓
+protects cookie confidentiality from JS access
+```
+
+but it doesn't solve every browser security problem.
+
+This distinction becomes important when we discuss **CSRF**.
+
+---
+
+# 10. `Secure`
+
+Consider:
+
+```http
+Set-Cookie: session_id=abc123; Secure
+```
+
+`Secure` tells the browser:
+
+> Send this cookie only over a secure connection.
+
+In practice, that means HTTPS.
+
+So:
+
+```text
+https://example.com
+      ↓
+cookie can be sent
+```
+
+while:
+
+```text
+http://example.com
+      ↓
+Secure cookie should not be sent
+```
+
+This protects against accidentally sending a sensitive cookie over plaintext HTTP.
+
+---
+
+# 11. Why does this matter?
+
+Suppose your session cookie is:
+
+```text
+session_id=abc123
+```
+
+and someone can observe plaintext HTTP traffic.
+
+Without appropriate transport security, the credential could potentially be exposed.
+
+Remember:
+
+```text
+Cookie
+   ↓
+authentication credential
+   ↓
+protect it
+```
+
+That's why authentication cookies are normally used with HTTPS and commonly marked:
+
+```text
+Secure
+```
+
+---
+
+# 12. `SameSite`
+
+This one is more subtle.
+
+Suppose you're logged into:
+
+```text
+bank.example
+```
+
+Your browser has:
+
+```text
+session_id=abc123
+```
+
+Now you visit:
+
+```text
+evil.example
+```
+
+That website might try to cause your browser to make a request to:
+
+```text
+bank.example/transfer
+```
+
+The question becomes:
+
+> Should the browser automatically attach your `bank.example` cookie to that cross-site request?
+
+This is part of the problem `SameSite` helps control.
+
+---
+
+# 13. `SameSite=Lax`
+
+A common setting is:
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Lax
+```
+
+This tells the browser to apply restrictions to cross-site cookie sending, while allowing cookies in certain top-level navigation scenarios.
+
+The exact browser rules are more nuanced than:
+
+```text
+Lax = never cross-site
+```
+
+so don't memorize it that way.
+
+The important concept is:
+
+> `SameSite` controls when cookies are sent in cross-site contexts.
+
+---
+
+# 14. `SameSite=Strict`
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Strict
+```
+
+This applies stricter cross-site restrictions.
+
+Conceptually:
+
+```text
+Same-site request
+    ↓
+cookie available
+
+Cross-site context
+    ↓
+cookie generally withheld
+```
+
+This can provide stronger CSRF protection, but can also affect some legitimate cross-site navigation flows.
+
+---
+
+# 15. `SameSite=None`
+
+There's also:
+
+```http
+SameSite=None
+```
+
+This allows the cookie to be sent in cross-site contexts, subject to other browser requirements.
+
+Modern browsers require `Secure` when using:
+
+```text
+SameSite=None
+```
+
+So you'll commonly see:
+
+```http
+Set-Cookie: something=value; SameSite=None; Secure
+```
+
+---
+
+# 16. Why does SameSite matter for authentication?
+
+Because cookies are **automatically attached by the browser** when their rules say they apply.
+
+Compare this with:
+
+```http
+Authorization: Bearer abc123
+```
+
+JavaScript/API clients typically explicitly construct that header.
+
+Cookies are different:
+
+```text
+Browser
+   │
+   │ automatically decides
+   │ whether applicable cookies
+   │ should accompany request
+   ↓
+Server
+```
+
+That automatic behavior is extremely convenient.
+
+But it also creates security considerations.
+
+---
+
+# 17. Cookie authentication vs Authorization header
+
+Let's compare.
+
+### Cookie-based session
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+Browser:
+
+```text
+stores cookie
+     ↓
+automatically attaches it
+```
+
+Server:
+
+```text
+session_id
+    ↓
+session store
+    ↓
+user
+```
+
+---
+
+### Bearer token
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer abc123
+```
+
+Client:
+
+```text
+stores access token
+     ↓
+explicitly adds Authorization header
+```
+
+Server:
+
+```text
+token
+  ↓
+validate token
+  ↓
+identity
+```
+
+---
+
+# 18. Cookie attributes in one example
+
+A production authentication cookie might look conceptually like:
+
+```http
+Set-Cookie: session_id=abc123; Path=/; HttpOnly; Secure; SameSite=Lax
+```
+
+We've seen:
+
+```text
+session_id=abc123
+```
+
+Now:
+
+### `Path=/`
+
+The cookie applies to requests under the `/` path.
+
+For example:
+
+```text
+/profile
+/orders
+/api/users
+```
+
+---
+
+### `HttpOnly`
+
+JavaScript can't directly read the cookie.
+
+---
+
+### `Secure`
+
+Send it only over secure connections.
+
+---
+
+### `SameSite=Lax`
+
+Apply SameSite restrictions to cross-site contexts.
+
+---
+
+# 19. Cookie lifetime
+
+Cookies can also have lifetime information.
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; Max-Age=3600
+```
+
+means the cookie has a maximum lifetime of 3600 seconds from when it is set.
+
+You may also encounter:
+
+```http
+Expires=...
+```
+
+which specifies an expiration date/time.
+
+There are also **session cookies**, which don't specify a persistent expiration and are generally associated with the browser's session.
+
+Important:
+
+> Cookie lifetime and server-side session lifetime are related but are not automatically the same thing.
+
+For example:
+
+```text
+Browser cookie expires in 1 hour
+Server session expires in 30 minutes
+```
+
+The browser may still possess the cookie after 30 minutes, but the server can reject the corresponding session.
+
+---
+
+# 20. Deleting a cookie
+
+A server can tell the browser to remove a cookie.
+
+For example:
+
+```http
+Set-Cookie: session_id=; Max-Age=0
+```
+
+Conceptually:
+
+```text
+Browser
+session_id=abc123
+       ↓
+Max-Age=0
+       ↓
+remove cookie
+```
+
+Logout often involves both:
+
+```text
+1. Invalidate server-side session
+2. Remove/expire client-side cookie
+```
+
+Both matter.
+
+---
+
+# 21. Domain and Path
+
+Cookies can have scope.
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; Path=/api
+```
+
+The browser won't treat that cookie as applicable to every unrelated path.
+
+There is also a `Domain` attribute, which controls which hosts can receive the cookie.
+
+This matters when you have:
+
+```text
+app.example.com
+api.example.com
+admin.example.com
+```
+
+Cookie scope can determine where the browser sends the credential.
+
+This is another reason cookie configuration is part of your security design, not merely a convenience setting.
+
+---
+
+# 22. A complete browser session flow
+
+Now put everything together:
+
+```text
+                         LOGIN
+
+Browser
+   │
+   │ POST /login
+   │ username + password
+   ↓
+Server
+   │
+   │ verify credentials
+   │
+   │ create session
+   │
+   │ session_id = abc123
+   ↓
+Browser
+   │
+   │ Set-Cookie:
+   │ session_id=abc123;
+   │ HttpOnly;
+   │ Secure;
+   │ SameSite=Lax
+   │
+   ↓
+Cookie Jar
+```
+
+Then:
+
+```text
+                    FUTURE REQUEST
+
+Browser
+   │
+   │ GET /profile
+   │ Cookie: session_id=abc123
+   ↓
+Server
+   │
+   │ lookup session
+   ↓
+user = Riyaz
+   │
+   ↓
+return profile
+```
+
+---
+
+# 23. Where CSRF enters the picture
+
+Now we can understand why cookies have a special security concern.
+
+Because the browser can automatically send:
+
+```http
+Cookie: session_id=abc123
+```
+
+a malicious site could potentially try to cause requests to your application using the user's authenticated browser context.
+
+That's the basic idea behind **Cross-Site Request Forgery (CSRF)**.
+
+Conceptually:
+
+```text
+User logged into bank
+        ↓
+Browser has session cookie
+        ↓
+User visits malicious site
+        ↓
+Malicious site causes request to bank
+        ↓
+Browser may attach bank cookie
+```
+
+`SameSite` can reduce this risk, but applications may also use explicit **CSRF tokens** and other defenses depending on the architecture.
+
+We'll return to CSRF after we understand the authentication mechanisms more completely.
+
+---
+
+# 24. Cookies vs Sessions vs Tokens
+
+At this point, keep these three concepts separate:
+
+```text
+Cookie
+   ↓
+Browser mechanism for storing/sending data
+```
+
+```text
+Session
+   ↓
+Server-side state representing an authenticated interaction
+```
+
+```text
+Token
+   ↓
+Credential presented to authenticate/access a resource
+```
+
+They can be combined:
+
+```text
+Cookie
+   ↓
+session ID
+   ↓
+server-side session
+```
+
+or:
+
+```text
+Cookie
+   ↓
+access token
+```
+
+or:
+
+```text
+Authorization header
+   ↓
+Bearer access token
+```
+
+There are many possible architectures.
+
+---
+
+# 🧠 The mental model
+
+Remember this simple flow:
+
+```text
+Set-Cookie
+    ↓
+Browser stores cookie
+    ↓
+Browser decides when cookie applies
+    ↓
+Cookie header sent with request
+    ↓
+Server reads cookie
+    ↓
+Server uses cookie value
+    ↓
+possibly finds session/user
+```
+
+And for security-sensitive session cookies, you'll frequently encounter:
+
+```text
+HttpOnly
+Secure
+SameSite
+```
+
+Each solves a **different problem**.
+
+---
+
+# 🧪 Hands-on exercise
+
+Start your server and use `curl`:
+
+```bash
+curl -v \
+  -c cookies.txt \
+  http://localhost:8080/login
+```
+
+The `-c` option tells curl to save received cookies.
+
+Then inspect:
+
+```bash
+cat cookies.txt
+```
+
+Now send those cookies on another request:
+
+```bash
+curl -v \
+  -b cookies.txt \
+  http://localhost:8080/profile
+```
+
+This is useful because you're now seeing something very close to what a browser does:
+
+```text
+Response
+   ↓
+Set-Cookie
+   ↓
+cookie storage
+   ↓
+future request
+   ↓
+Cookie
+```
+
+You can also manually create a request:
+
+```bash
+nc localhost 8080
+```
+
+```http
+GET /profile HTTP/1.1
+Host: localhost:8080
+Cookie: session_id=abc123
+
+```
+
+---
+
+# Next → Lesson 23: Access Tokens vs Refresh Tokens
+
+Now that we understand:
+
+```text
+password
+   ↓
+login
+   ↓
+session
+   ↓
+cookie
+```
+
+and:
+
+```text
+password
+   ↓
+login
+   ↓
+access token
+   ↓
+Authorization: Bearer ...
+```
+
+we can tackle the next real-world problem:
+
+> **Why not make the access token last forever?**
+
+We'll build the solution from the problem:
+
+```text
+Long-lived token
+      ↓
+stolen token is dangerous
+      ↓
+make access token short-lived
+      ↓
+but user shouldn't login repeatedly
+      ↓
+refresh token
+      ↓
+new access token
+```
+
+This is where **access tokens, refresh tokens, expiration, rotation, and logout/revocation** start fitting together.
+
+
+---
+
