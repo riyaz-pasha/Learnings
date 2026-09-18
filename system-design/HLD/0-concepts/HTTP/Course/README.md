@@ -11258,3 +11258,889 @@ create resource
 201 Created
 ```
 
+---
+
+# Lesson 15 — POST: Sending Data to the Server
+
+Now we move from:
+
+```text
+GET → "Give me something"
+```
+
+to:
+
+```text
+POST → "Here is some data; process it."
+```
+
+This is where HTTP starts becoming much more interesting because we're combining:
+
+* method
+* URL
+* headers
+* body
+* Content-Type
+* Content-Length
+* JSON
+* status codes
+
+---
+
+# 1. The problem POST solves
+
+Suppose a client wants to create a user.
+
+With GET, you might be tempted to do:
+
+```http
+GET /create-user?name=Riyaz&email=riyaz@example.com
+```
+
+But that's a poor fit.
+
+We want a request that says:
+
+> I'm submitting some data to the server.
+
+HTTP provides:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{"name":"Riyaz","email":"riyaz@example.com"}
+```
+
+Notice the important difference from GET:
+
+```text
+GET
+ ↓
+usually no request body
+
+POST
+ ↓
+request body commonly carries submitted data
+```
+
+---
+
+# 2. POST doesn't mean "insert into database"
+
+Just like GET doesn't mean SQL `SELECT`, POST doesn't literally mean SQL `INSERT`.
+
+HTTP defines POST around submitting a representation to a resource for processing.
+
+For an API, one common use is:
+
+```http
+POST /users
+```
+
+→ create a new user.
+
+But POST can also be used for other operations such as:
+
+```text
+POST /orders
+POST /payments
+POST /search
+POST /users/123/reset-password
+```
+
+The application defines the exact semantics.
+
+---
+
+# 3. Let's construct the request
+
+Suppose we want to create:
+
+```json
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+The HTTP request could be:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 46
+
+{"name":"Riyaz","email":"riyaz@example.com"}
+```
+
+There are several layers here.
+
+### Method
+
+```text
+POST
+```
+
+### Target
+
+```text
+/users
+```
+
+### Content-Type
+
+```text
+application/json
+```
+
+Tells the server:
+
+> Interpret the body as JSON.
+
+### Content-Length
+
+```text
+46
+```
+
+Tells the server:
+
+> Read 46 bytes for the body.
+
+### Body
+
+```json
+{"name":"Riyaz","email":"riyaz@example.com"}
+```
+
+---
+
+# 4. What actually happens on the wire?
+
+Let's slow this down.
+
+Your Python object might start as:
+
+```python
+user = {
+    "name": "Riyaz",
+    "email": "riyaz@example.com"
+}
+```
+
+That's an application object.
+
+It can't simply be sent directly over HTTP.
+
+First:
+
+```text
+Python object
+      ↓
+JSON serialization
+      ↓
+'{"name":"Riyaz","email":"riyaz@example.com"}'
+      ↓
+UTF-8 encoding
+      ↓
+bytes
+      ↓
+HTTP request body
+```
+
+So:
+
+```python
+json.dumps(user)
+```
+
+produces JSON text.
+
+Then:
+
+```python
+.encode("utf-8")
+```
+
+produces bytes.
+
+Those bytes are what actually go into the HTTP body.
+
+---
+
+# 5. Let's use curl
+
+Run:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz","email":"riyaz@example.com"}' \
+  http://localhost:8080/users
+```
+
+Curl constructs the HTTP request for you.
+
+Conceptually it sends:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{"name":"Riyaz","email":"riyaz@example.com"}
+```
+
+This is why `curl` is so useful for learning HTTP.
+
+You're not hiding the HTTP concepts behind Postman or a framework.
+
+---
+
+# 6. Let's build the POST endpoint
+
+Modify the server:
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_POST(self):
+
+        print("\n--- POST REQUEST ---")
+
+        print("Method:", self.command)
+        print("Path:", self.path)
+
+        content_type = self.headers.get("Content-Type")
+        content_length = int(
+            self.headers.get("Content-Length", 0)
+        )
+
+        print("Content-Type:", content_type)
+        print("Content-Length:", content_length)
+
+        # Read exactly Content-Length bytes
+        body = self.rfile.read(content_length)
+
+        print("Raw body:", body)
+
+        # Convert bytes → string
+        text = body.decode("utf-8")
+
+        print("Body text:", text)
+
+        # Convert JSON → Python object
+        data = json.loads(text)
+
+        print("Parsed JSON:", data)
+
+        response = json.dumps({
+            "message": "User created",
+            "user": data
+        }).encode("utf-8")
+
+        self.send_response(201)
+
+        self.send_header(
+            "Content-Type",
+            "application/json"
+        )
+
+        self.send_header(
+            "Content-Length",
+            str(len(response))
+        )
+
+        self.end_headers()
+
+        self.wfile.write(response)
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+
+server.serve_forever()
+```
+
+---
+
+# 7. Now follow the request through the server
+
+When you send:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 46
+
+{"name":"Riyaz","email":"riyaz@example.com"}
+```
+
+the server does approximately:
+
+```text
+HTTP request
+     │
+     ▼
+HTTP parser
+     │
+     ├── method = POST
+     ├── path = /users
+     ├── headers
+     └── body
+            │
+            ▼
+      Content-Length
+            │
+            ▼
+       read N bytes
+            │
+            ▼
+          bytes
+            │
+            ▼
+      UTF-8 decoding
+            │
+            ▼
+          string
+            │
+            ▼
+       JSON parsing
+            │
+            ▼
+      Python dictionary
+```
+
+That final dictionary is what your application can work with.
+
+---
+
+# 8. Why Content-Type matters
+
+Suppose the client sends:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+The server knows:
+
+```text
+body representation = JSON
+```
+
+So it can do:
+
+```python
+json.loads(...)
+```
+
+But imagine:
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: text/plain
+
+{"name":"Riyaz"}
+```
+
+The bytes happen to look like JSON.
+
+But the client has explicitly said:
+
+```text
+Content-Type: text/plain
+```
+
+So the server shouldn't blindly assume it's JSON just because the content *looks* like JSON.
+
+This is an important principle:
+
+> **Content-Type describes the representation of the body.**
+
+---
+
+# 9. What if Content-Length is wrong?
+
+This is one of the most useful experiments from our earlier lessons.
+
+Suppose the actual body is:
+
+```text
+Hello
+```
+
+That's 5 bytes in ASCII/UTF-8.
+
+But you claim:
+
+```http
+Content-Length: 100
+```
+
+The server tries:
+
+```python
+self.rfile.read(100)
+```
+
+It may wait for more bytes because it was told that the body is 100 bytes long.
+
+Conversely, if you say:
+
+```http
+Content-Length: 2
+```
+
+the server reads only:
+
+```text
+He
+```
+
+The remaining bytes can remain unread and interfere with subsequent parsing on a persistent connection.
+
+So:
+
+```text
+Content-Length
+       ↓
+framing information
+       ↓
+where does the body end?
+```
+
+This is much more fundamental than just metadata.
+
+---
+
+# 10. Why does POST commonly return 201?
+
+If the POST creates a resource, a common response is:
+
+```http
+HTTP/1.1 201 Created
+```
+
+For example:
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Content-Length: ...
+
+{"id":123,"name":"Riyaz"}
+```
+
+Compare:
+
+```text
+200 OK
+```
+
+with:
+
+```text
+201 Created
+```
+
+`200` means:
+
+> The request succeeded.
+
+`201` communicates something more specific:
+
+> The request succeeded and resulted in a new resource being created.
+
+---
+
+# 11. Location header
+
+A particularly useful header with `201 Created` is:
+
+```http
+Location: /users/123
+```
+
+For example:
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /users/123
+Content-Length: 35
+
+{"id":123,"name":"Riyaz"}
+```
+
+Now the response communicates:
+
+```text
+POST /users
+     │
+     ▼
+created user
+     │
+     ▼
+/users/123
+```
+
+The client knows where the newly created resource can be retrieved.
+
+Then:
+
+```http
+GET /users/123
+```
+
+can retrieve it.
+
+This creates a nice HTTP flow:
+
+```text
+POST /users
+     │
+     │ create
+     ▼
+201 Created
+Location: /users/123
+     │
+     ▼
+GET /users/123
+```
+
+---
+
+# 12. POST is generally not idempotent
+
+Suppose:
+
+```http
+POST /users
+
+{"name":"Riyaz"}
+```
+
+creates user `101`.
+
+Send the same request again:
+
+```http
+POST /users
+
+{"name":"Riyaz"}
+```
+
+It could create user `102`.
+
+Again:
+
+```http
+POST /users
+```
+
+could create user `103`.
+
+So:
+
+```text
+POST
+  ↓
+same request repeated
+  ↓
+potentially multiple effects
+```
+
+That's why POST is generally **not idempotent**.
+
+This becomes extremely important when dealing with:
+
+* network retries
+* payment APIs
+* order creation
+* message submission
+* distributed systems
+
+Later we'll see how **idempotency keys** can address some of these problems.
+
+---
+
+# 13. POST vs GET
+
+Put them side by side.
+
+### GET
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+
+```
+
+Conceptually:
+
+```text
+"I want this resource."
+```
+
+### POST
+
+```http
+POST /users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+Conceptually:
+
+```text
+"Here is some data. Process it against this resource."
+```
+
+Notice:
+
+```text
+GET
+ ↓
+input often in URL
+
+POST
+ ↓
+input commonly in body
+```
+
+---
+
+# 14. Error handling
+
+Real APIs also need to handle invalid requests.
+
+Suppose the client sends:
+
+```json
+{"name": "Riyaz"}
+```
+
+but your application requires an email.
+
+You might return:
+
+```http
+HTTP/1.1 422 Unprocessable Content
+Content-Type: application/json
+
+{
+  "error": "email is required"
+}
+```
+
+Or your API might choose `400 Bad Request`.
+
+The exact API error convention varies, but the important concept is:
+
+```text
+HTTP parsing
+     ↓
+valid HTTP?
+     │
+     ├── no → HTTP-level error
+     │
+     ▼
+JSON parsing
+     │
+     ├── invalid JSON → client error
+     │
+     ▼
+validation
+     │
+     ├── invalid data → client error
+     │
+     ▼
+business logic
+     │
+     ▼
+resource creation
+```
+
+There are multiple layers of failure.
+
+---
+
+# 15. Try malformed JSON
+
+Run:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Riyaz"' \
+  http://localhost:8080/users
+```
+
+This JSON is missing:
+
+```text
+}
+```
+
+So:
+
+```python
+json.loads(text)
+```
+
+will raise an exception.
+
+Our tiny server will currently produce an ugly server error.
+
+That's intentional for the learning exercise.
+
+Later we'll improve it to return a proper:
+
+```http
+400 Bad Request
+```
+
+instead of crashing.
+
+---
+
+# 16. The complete POST pipeline
+
+This is the part I want you to remember:
+
+```text
+                 CLIENT
+                   │
+                   │ Python object
+                   ▼
+              JSON serialize
+                   │
+                   ▼
+              UTF-8 encode
+                   │
+                   ▼
+            HTTP request body
+                   │
+                   │
+                   ▼
+        ┌─────────────────────┐
+        │     HTTP SERVER      │
+        └─────────────────────┘
+                   │
+                   ▼
+             read headers
+                   │
+                   ▼
+           Content-Length
+                   │
+                   ▼
+             read N bytes
+                   │
+                   ▼
+            UTF-8 decode
+                   │
+                   ▼
+              JSON parse
+                   │
+                   ▼
+          application object
+                   │
+                   ▼
+            business logic
+                   │
+                   ▼
+            create resource
+                   │
+                   ▼
+             HTTP response
+                   │
+                   ▼
+              201 Created
+```
+
+This is basically the foundation underneath what Spring, Express, FastAPI, etc. eventually automate for you.
+
+---
+
+## Hands-on challenge
+
+Without looking at the answer, try to design the request for:
+
+> Create a product named `MacBook Pro` with price `1999`.
+
+You should produce something like:
+
+```http
+POST /products HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ???
+
+{"name":"MacBook Pro","price":1999}
+```
+
+Then send it with:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"MacBook Pro","price":1999}' \
+  http://localhost:8080/products
+```
+
+And ask yourself:
+
+1. What is the **method**?
+2. What is the **request target**?
+3. Which headers are present?
+4. Where does the body begin?
+5. Who determines the body's interpretation?
+6. Who determines how many bytes to read?
+7. Why is `201` appropriate when creation succeeds?
+8. Why might repeating the POST create multiple resources?
+
+---
+
+### Next: Lesson 16 — PUT
+
+We'll compare:
+
+```http
+POST /users
+```
+
+with:
+
+```http
+PUT /users/123
+```
+
+and answer the deceptively important question:
+
+> **Why does PUT exist if POST can also send data to the server?**
+
+That's where **replacement semantics and idempotency** become much clearer.
+
