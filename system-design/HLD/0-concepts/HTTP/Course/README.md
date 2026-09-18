@@ -20392,3 +20392,1014 @@ We'll cover **JWKS, public-key distribution, key rotation, issuer/audience, API 
 
 ----
 
+# Lesson 26 — JWT in a Real Distributed System
+
+So far, we looked at JWT from the inside:
+
+```text
+JWT
+ ↓
+Header
+Payload
+Signature
+ ↓
+Verify
+ ↓
+Trust claims
+```
+
+Now let's answer the backend/system-design question:
+
+> **How does this actually work when we have an Auth Server, API Gateway, and multiple microservices?**
+
+---
+
+# 1. The Architecture
+
+Imagine an e-commerce system:
+
+```text
+                         User
+                           │
+                           │ username/password
+                           ↓
+                    ┌──────────────┐
+                    │ Auth Server  │
+                    └──────────────┘
+                           │
+                           │ Access JWT
+                           ↓
+                    ┌──────────────┐
+                    │ API Gateway  │
+                    └──────────────┘
+                       │    │    │
+              ┌────────┘    │    └────────┐
+              ↓             ↓             ↓
+        User Service   Order Service  Payment Service
+```
+
+There are two fundamentally different responsibilities here.
+
+### Auth Server
+
+Responsible for:
+
+```text
+Login
+Token issuance
+Refresh tokens
+Signing tokens
+Key management
+```
+
+### Resource/API services
+
+Responsible for:
+
+```text
+Validate access token
+Identify user
+Authorize operation
+Serve request
+```
+
+---
+
+# 2. Login
+
+The user sends credentials to the authentication system:
+
+```http
+POST /login HTTP/1.1
+Host: auth.example.com
+Content-Type: application/json
+
+{
+  "username": "riyaz",
+  "password": "secret123"
+}
+```
+
+Auth server verifies the credentials.
+
+Then creates an access JWT.
+
+Conceptually:
+
+```json
+{
+  "sub": "123",
+  "iss": "https://auth.example.com",
+  "aud": "my-api",
+  "role": "user",
+  "exp": 1789732800
+}
+```
+
+The server signs it with its **private key**.
+
+```text
+Auth Server
+     │
+     │ private key
+     ↓
+    SIGN
+     │
+     ↓
+    JWT
+```
+
+The client receives it.
+
+---
+
+# 3. Client Calls the API
+
+Now the client wants:
+
+```http
+GET /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer <JWT>
+```
+
+The request reaches the API Gateway.
+
+The gateway needs to answer:
+
+```text
+Is this token valid?
+```
+
+---
+
+# 4. Where Does the Gateway Get the Public Key?
+
+Remember:
+
+```text
+Private key → sign
+Public key  → verify
+```
+
+The Auth Server can publish its public keys through a standard mechanism called **JWKS**.
+
+JWKS means:
+
+> JSON Web Key Set
+
+Conceptually:
+
+```text
+Auth Server
+     │
+     │ publishes public keys
+     ↓
+   JWKS
+     │
+     ↓
+API Gateway
+```
+
+The JWKS endpoint might conceptually look like:
+
+```text
+https://auth.example.com/.well-known/jwks.json
+```
+
+The exact URL depends on the identity provider/protocol configuration.
+
+The response contains public key information.
+
+For example, conceptually:
+
+```json
+{
+  "keys": [
+    {
+      "kid": "key-2026-01",
+      "kty": "RSA",
+      "alg": "RS256",
+      "use": "sig"
+    }
+  ]
+}
+```
+
+Don't worry about every field yet.
+
+The important idea is:
+
+```text
+Auth Server
+   ↓
+publishes public verification keys
+   ↓
+API services
+```
+
+---
+
+# 5. What Is `kid`?
+
+Look back at the JWT header.
+
+It can contain:
+
+```json
+{
+  "alg": "RS256",
+  "typ": "JWT",
+  "kid": "key-2026-01"
+}
+```
+
+`kid` means:
+
+```text
+Key ID
+```
+
+Why do we need it?
+
+Because the Auth Server may have multiple signing keys.
+
+For example:
+
+```text
+key-2025
+key-2026
+key-2027
+```
+
+The JWT says:
+
+```text
+kid = key-2026
+```
+
+The API can therefore find the corresponding public key.
+
+```text
+JWT
+ │
+ └── kid = key-2026
+          │
+          ↓
+        JWKS
+          │
+          ↓
+    public key 2026
+```
+
+---
+
+# 6. Why Would We Have Multiple Keys?
+
+This leads to an important production concept:
+
+**Key rotation.**
+
+Suppose today we have:
+
+```text
+Private Key A
+Public Key A
+```
+
+Auth Server signs new JWTs using A.
+
+Eventually we want to replace the key.
+
+Why?
+
+Because cryptographic keys shouldn't necessarily remain in use forever.
+
+So we introduce:
+
+```text
+Private Key B
+Public Key B
+```
+
+Now:
+
+```text
+Old JWTs
+   ↓
+signed with A
+
+New JWTs
+   ↓
+signed with B
+```
+
+The Auth Server changes:
+
+```text
+Current signing key
+A → B
+```
+
+---
+
+# 7. But What About Existing Tokens?
+
+This is where `kid` becomes useful.
+
+Suppose:
+
+```text
+Old JWT:
+kid = A
+```
+
+and:
+
+```text
+New JWT:
+kid = B
+```
+
+The API has:
+
+```text
+Public Key A
+Public Key B
+```
+
+Therefore:
+
+```text
+JWT
+ │
+ ├── kid=A → Public Key A → verify
+ │
+ └── kid=B → Public Key B → verify
+```
+
+During the transition, the system can keep the old public key available long enough to validate still-valid tokens.
+
+---
+
+# 8. Key Rotation Timeline
+
+Imagine:
+
+```text
+10:00
+Current signing key = A
+
+10:30
+New key B published
+
+11:00
+Auth server starts signing with B
+
+11:00+
+Old JWTs signed with A still exist
+```
+
+So the JWKS may temporarily contain:
+
+```text
+A → public key
+B → public key
+```
+
+Eventually, once old tokens can no longer be valid:
+
+```text
+A → removed
+B → remains
+```
+
+This is an important principle:
+
+> **You don't immediately remove an old verification key just because you stopped signing new tokens with it.**
+
+Otherwise, valid old tokens could suddenly fail verification.
+
+---
+
+# 9. Why Doesn't Every Request Call the Auth Server?
+
+You might initially imagine:
+
+```text
+User
+ ↓
+API Gateway
+ ↓
+Auth Server
+ ↓
+Is JWT valid?
+ ↓
+API
+```
+
+for every request.
+
+That would create unnecessary dependency and latency.
+
+With a signed JWT:
+
+```text
+User
+ ↓
+API Gateway
+ ↓
+verify JWT locally
+ ↓
+API
+```
+
+The gateway already has the public key.
+
+It can perform cryptographic verification locally.
+
+```text
+No database lookup
+No Auth Server request
+```
+
+for basic signature validation.
+
+That's one of the major benefits of self-contained signed access tokens.
+
+---
+
+# 10. But Then How Does the Gateway Get New Keys?
+
+It can retrieve the JWKS and cache the keys.
+
+Conceptually:
+
+```text
+                 Auth Server
+                     │
+                    JWKS
+                     │
+                     ↓
+              API Gateway cache
+                     │
+        ┌────────────┼────────────┐
+        ↓            ↓            ↓
+      key A        key B        ...
+```
+
+When a JWT contains:
+
+```text
+kid = B
+```
+
+the gateway looks up B in its cached key set.
+
+If necessary, it can refresh its JWKS cache according to the identity provider's configuration.
+
+The exact caching strategy depends on the implementation.
+
+---
+
+# 11. JWT Verification Is More Than Signature
+
+Suppose the gateway receives a JWT.
+
+It should conceptually perform:
+
+```text
+                 JWT
+                  │
+                  ↓
+            Parse structure
+                  │
+                  ↓
+           Read JWT header
+                  │
+                  ↓
+            Find kid/key
+                  │
+                  ↓
+          Verify signature
+                  │
+                  ↓
+        Validate registered claims
+                  │
+          ┌───────┼────────┐
+          ↓       ↓        ↓
+         exp     iss      aud
+                  │
+                  ↓
+        Authentication context
+```
+
+Let's understand the three particularly important claims.
+
+---
+
+# 12. `iss` — Issuer
+
+Suppose your system trusts:
+
+```text
+https://auth.example.com
+```
+
+JWT says:
+
+```json
+{
+  "iss": "https://auth.example.com"
+}
+```
+
+The service can verify:
+
+```text
+Is this token issued by the expected authority?
+```
+
+Without appropriate issuer validation, accepting a token from an unintended issuer can be dangerous.
+
+---
+
+# 13. `aud` — Audience
+
+Suppose we have:
+
+```text
+User API
+Order API
+Payment API
+```
+
+A token could specify:
+
+```json
+{
+  "aud": "order-api"
+}
+```
+
+This means, conceptually:
+
+```text
+This token is intended for Order API.
+```
+
+Then:
+
+```text
+Order API
+   ↓
+aud == order-api?
+```
+
+If not:
+
+```text
+401
+```
+
+Again, the exact validation rules depend on the token protocol and architecture, but the principle is:
+
+> **Don't accept a token merely because its signature is valid; validate that it was issued for the service/resource you're protecting.**
+
+---
+
+# 14. `exp` — Expiration
+
+We already saw this:
+
+```json
+{
+  "exp": 1789732800
+}
+```
+
+The API checks whether the token has expired.
+
+```text
+current time
+     │
+     ↓
+ current < exp ?
+    /     \
+  yes      no
+   ↓        ↓
+continue   reject
+```
+
+---
+
+# 15. Authentication vs Authorization Again
+
+Suppose the JWT says:
+
+```json
+{
+  "sub": "123",
+  "role": "user"
+}
+```
+
+The service verifies:
+
+```text
+Signature ✓
+Issuer ✓
+Audience ✓
+Expiration ✓
+```
+
+Now it knows:
+
+```text
+Authenticated user = 123
+```
+
+But the user requests:
+
+```http
+DELETE /admin/users/456
+```
+
+The service still needs authorization:
+
+```text
+Is user 123 allowed to delete users?
+```
+
+Maybe:
+
+```text
+role = user
+```
+
+doesn't allow it.
+
+So:
+
+```text
+JWT validation
+     ↓
+Authentication
+     ↓
+Authorization policy
+     ↓
+403 Forbidden
+```
+
+This is why **401 and 403 are different**.
+
+---
+
+# 16. Gateway vs Service Validation
+
+Now we get an interesting architecture decision.
+
+Should only the API Gateway validate JWTs?
+
+```text
+User
+ ↓
+Gateway
+ ↓
+Service
+```
+
+Or should services validate them too?
+
+```text
+User
+ ↓
+Gateway
+ ↓
+Service
+ ↓
+validate JWT
+```
+
+There isn't one universal answer.
+
+A common defense-in-depth design is:
+
+```text
+             JWT
+              │
+              ↓
+         API Gateway
+         validate
+              │
+              ↓
+         Service
+         validate
+              │
+              ↓
+          authorize
+```
+
+Why might a service validate independently?
+
+Because the service shouldn't necessarily trust that every request reaching it came through the gateway.
+
+For example, another internal service might call it directly.
+
+The security boundary matters.
+
+---
+
+# 17. A Critical Distinction
+
+Suppose the gateway validates the JWT and sends:
+
+```http
+X-User-Id: 123
+```
+
+to the backend.
+
+Should the backend blindly trust:
+
+```http
+X-User-Id: 123
+```
+
+?
+
+Not necessarily.
+
+Remember our earlier lesson:
+
+```text
+Client-controlled headers are not proof of identity.
+```
+
+If a service trusts identity headers, the architecture must ensure those headers can only be injected by a trusted component and cannot be spoofed by untrusted clients.
+
+One approach is to have the service validate the original credential itself.
+
+Another is to establish a strong trusted internal boundary.
+
+The architecture determines the correct mechanism.
+
+---
+
+# 18. JWT Doesn't Eliminate All Server State
+
+This is another misconception.
+
+You might hear:
+
+> "JWT is stateless."
+
+More precisely:
+
+```text
+Access-token validation can be stateless.
+```
+
+But the overall authentication system might still have:
+
+```text
+Users
+Refresh tokens
+Revoked tokens
+Signing keys
+Sessions
+Permissions
+Authorization data
+```
+
+For example:
+
+```text
+             Access JWT
+                  │
+             stateless
+             validation
+                  │
+                  ↓
+              API call
+
+Refresh token
+     │
+     ↓
+server-side storage
+     │
+     ↓
+rotation/revocation
+```
+
+So a system can be:
+
+```text
+stateless access-token validation
++
+stateful refresh-token management
+```
+
+That's very common conceptually.
+
+---
+
+# 19. What Happens During Logout?
+
+This gets interesting.
+
+Suppose access token expires in:
+
+```text
+15 minutes
+```
+
+and refresh token is still valid.
+
+If the user logs out, what should happen?
+
+The authentication system can invalidate/revoke the refresh credential.
+
+Then:
+
+```text
+Existing access token
+     ↓
+may remain valid
+until expiration
+```
+
+while:
+
+```text
+Refresh token
+     ↓
+revoked
+```
+
+Therefore the client can't obtain another access token.
+
+This illustrates an important property:
+
+> **JWTs aren't inherently instantly revocable.**
+
+If an API only validates the JWT signature and expiration, it may not know that a specific token was "logged out" before expiry.
+
+You can introduce server-side revocation/state when the requirements demand it.
+
+---
+
+# 20. The Full Production Mental Model
+
+Put everything together:
+
+```text
+                         ┌─────────────────┐
+                         │   Auth Server   │
+                         │                 │
+                         │ login           │
+                         │ refresh         │
+                         │ sign JWT        │
+                         │ manage keys     │
+                         └────────┬────────┘
+                                  │
+                         publishes public keys
+                                  │
+                                  ↓
+                                JWKS
+                                  │
+                                  │
+       ┌──────────────────────────┴─────────────────────────┐
+       │                                                    │
+       ↓                                                    ↓
+    Client                                            API Gateway
+       │                                                    │
+       │ Authorization: Bearer JWT                         │
+       └───────────────────────────────────────────────────→│
+                                                            │
+                                                     verify JWT
+                                                            │
+                                               ┌────────────┴──────────┐
+                                               ↓                       ↓
+                                           invalid                   valid
+                                               ↓                       ↓
+                                              401                   Service
+                                                                       │
+                                                                       ↓
+                                                               authorization
+                                                                       │
+                                                                 ┌─────┴─────┐
+                                                                 ↓           ↓
+                                                               allow        deny
+                                                                 ↓           ↓
+                                                              response      403
+```
+
+---
+
+# 21. The Most Important Mental Model
+
+At this point, authentication should look like layers:
+
+```text
+                    REQUEST
+                       │
+                       ↓
+             Authorization header
+                       │
+                       ↓
+                  Bearer JWT
+                       │
+                       ↓
+              ┌────────────────┐
+              │ Cryptographic  │
+              │ verification   │
+              └───────┬────────┘
+                      ↓
+               Token claims
+                      │
+             ┌────────┼────────┐
+             ↓        ↓        ↓
+            exp      iss      aud
+             │        │        │
+             └────────┼────────┘
+                      ↓
+               Authentication
+                      │
+                      ↓
+                Authorization
+                      │
+                 ┌────┴────┐
+                 ↓         ↓
+               allow      deny
+```
+
+The important distinction is:
+
+```text
+Signature
+    ↓
+"Was this token legitimately signed and unchanged?"
+
+Claims validation
+    ↓
+"Is this token acceptable for this API and time?"
+
+Authentication
+    ↓
+"Who does this token represent?"
+
+Authorization
+    ↓
+"What is that identity allowed to do?"
+```
+
+These are **different questions**.
+
+---
+
+## One final concept before we move on
+
+We now have:
+
+```text
+Password
+   ↓
+Login
+   ↓
+Access Token
+   ↓
+JWT
+   ↓
+Signature
+   ↓
+Public Key / JWKS
+   ↓
+API validation
+   ↓
+Authentication
+   ↓
+Authorization
+```
+
+But we haven't yet answered a very practical question:
+
+> **Where should the browser/mobile app actually store these tokens?**
+
+That's where security gets very interesting.
+
+### Next: Lesson 27 — Token Storage: Cookies vs Local Storage vs Memory
+
+We'll examine:
+
+```text
+HttpOnly Cookie
+localStorage
+sessionStorage
+in-memory token
+```
+
+and understand **XSS, CSRF, why HttpOnly exists, why `Secure` exists, and why choosing token storage is an architectural security decision rather than just a frontend implementation detail.**
+
+---
+
