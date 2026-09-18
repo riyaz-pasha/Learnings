@@ -13589,3 +13589,718 @@ Then we'll have covered the core HTTP methods and move into **authentication hea
 
 ---
 
+# Lesson 18 — DELETE: Removing a Resource
+
+We've seen:
+
+```text
+GET     → retrieve
+POST    → submit/create
+PUT     → replace
+PATCH   → partially modify
+DELETE  → remove
+```
+
+Now let's understand **DELETE properly**, especially one concept that often confuses people:
+
+> **How can DELETE be idempotent if the second DELETE might return 404?**
+
+---
+
+## 1. What problem does DELETE solve?
+
+Suppose our API has:
+
+```text
+/users/123
+```
+
+and user `123` exists.
+
+We want to tell the server:
+
+> Remove this resource.
+
+HTTP gives us the `DELETE` method for exactly this purpose.
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+```
+
+Notice something important:
+
+**There is no request body.**
+
+For a simple delete, the target itself tells the server what should be removed.
+
+---
+
+# 2. What does DELETE actually mean?
+
+Conceptually:
+
+```text
+DELETE /users/123
+       ↓
+"Remove the resource identified by this target"
+```
+
+But don't think:
+
+```text
+DELETE = SQL DELETE
+```
+
+HTTP doesn't know anything about SQL.
+
+The server could implement deletion as:
+
+```text
+DELETE /users/123
+        ↓
+Database DELETE
+```
+
+or:
+
+```text
+DELETE /users/123
+        ↓
+Mark deleted = true
+```
+
+or:
+
+```text
+DELETE /users/123
+        ↓
+Remove object from storage
+        ↓
+Publish deletion event
+        ↓
+Invalidate cache
+```
+
+HTTP only defines the **semantics of the request**.
+
+The application decides how to implement those semantics.
+
+---
+
+# 3. Raw DELETE request
+
+Using `nc`:
+
+```bash
+nc localhost 8080
+```
+
+Then:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+```
+
+The structure is:
+
+```text
+DELETE /users/123 HTTP/1.1
+│      │          │
+│      │          └── HTTP version
+│      └───────────── target
+└──────────────────── method
+
+Host: localhost:8080
+│
+└── request header
+
+blank line
+│
+└── headers are finished
+
+(no body)
+```
+
+---
+
+# 4. What should the server return?
+
+A very common successful response is:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+Why `204`?
+
+Because we successfully performed the operation, but there is nothing to return.
+
+For example:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+
+HTTP/1.1 204 No Content
+```
+
+There is intentionally no response body.
+
+---
+
+# 5. Let's implement it
+
+Add this to our Python server:
+
+```python
+def do_DELETE(self):
+    parsed = urlparse(self.path)
+    path = parsed.path
+
+    if not path.startswith("/users/"):
+        self.send_response(404)
+        self.end_headers()
+        return
+
+    user_id = path.split("/")[-1]
+
+    print("Deleting user:", user_id)
+
+    self.send_response(204)
+    self.end_headers()
+```
+
+Now:
+
+```bash
+curl -v -X DELETE http://localhost:8080/users/123
+```
+
+You should see something like:
+
+```text
+> DELETE /users/123 HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/...
+> Accept: */*
+
+< HTTP/1.0 204 No Content
+```
+
+Again, our toy server isn't actually storing users yet.
+
+It's simply demonstrating the HTTP interaction.
+
+---
+
+# 6. What if the resource doesn't exist?
+
+Suppose:
+
+```text
+/users/999
+```
+
+doesn't exist.
+
+We might return:
+
+```http
+HTTP/1.1 404 Not Found
+```
+
+For example:
+
+```python
+if user_id not in users:
+    self.send_response(404)
+    self.end_headers()
+    return
+```
+
+So we might get:
+
+### First request
+
+```http
+DELETE /users/123
+```
+
+Response:
+
+```http
+204 No Content
+```
+
+### Second request
+
+```http
+DELETE /users/123
+```
+
+Response:
+
+```http
+404 Not Found
+```
+
+This seems strange at first.
+
+---
+
+# 7. Then how is DELETE idempotent?
+
+This is an **important interview concept**.
+
+Idempotency does **not** mean:
+
+> Repeating the request must produce exactly the same HTTP response.
+
+Instead, it means roughly:
+
+> Repeating the same request should have the same intended effect on the resource state as making it once.
+
+Consider:
+
+```text
+Initial state:
+
+User 123 exists
+```
+
+First:
+
+```text
+DELETE /users/123
+```
+
+State becomes:
+
+```text
+User 123 does not exist
+```
+
+Repeat:
+
+```text
+DELETE /users/123
+```
+
+State remains:
+
+```text
+User 123 does not exist
+```
+
+So:
+
+```text
+DELETE once:
+    exists → doesn't exist
+
+DELETE twice:
+    exists → doesn't exist → doesn't exist
+```
+
+The **final resource state is the same**.
+
+Therefore DELETE is idempotent.
+
+---
+
+# 8. This is different from POST
+
+Consider:
+
+```http
+POST /users
+```
+
+with:
+
+```json
+{
+  "name": "Riyaz"
+}
+```
+
+First request:
+
+```text
+Create user #101
+```
+
+Repeat:
+
+```text
+Create user #102
+```
+
+Now the state is different.
+
+```text
+POST once:
+    0 users → 1 user
+
+POST twice:
+    0 users → 2 users
+```
+
+Therefore POST is generally **not idempotent**.
+
+Compare:
+
+| Method | Example             | Idempotent?    |
+| ------ | ------------------- | -------------- |
+| GET    | `GET /users/123`    | Yes            |
+| POST   | `POST /users`       | No             |
+| PUT    | `PUT /users/123`    | Yes            |
+| PATCH  | `PATCH /users/123`  | Not inherently |
+| DELETE | `DELETE /users/123` | Yes            |
+
+---
+
+# 9. Why does idempotency matter in real systems?
+
+Imagine a client sends:
+
+```http
+DELETE /users/123
+```
+
+The server deletes the user.
+
+But then something goes wrong:
+
+```text
+Server → client response
+              X
+         network failure
+```
+
+The client doesn't know whether the request succeeded.
+
+It can safely retry:
+
+```http
+DELETE /users/123
+```
+
+If the first request succeeded, the second request doesn't recreate or modify the user.
+
+This is one reason idempotent operations are useful when dealing with retries.
+
+---
+
+# 10. Important nuance: side effects
+
+Don't interpret idempotency as:
+
+> Absolutely nothing happens when I repeat DELETE.
+
+Suppose:
+
+```text
+DELETE /users/123
+```
+
+also causes:
+
+```text
+delete database record
+write audit log
+increment metrics
+send event
+invalidate cache
+```
+
+Those surrounding side effects can happen again.
+
+HTTP idempotency is primarily about the **intended effect on the target resource**, not about every observable side effect inside your infrastructure.
+
+---
+
+# 11. DELETE doesn't always mean permanent deletion
+
+This is something you'll encounter frequently in backend systems.
+
+An API might expose:
+
+```http
+DELETE /users/123
+```
+
+but internally do:
+
+```sql
+UPDATE users
+SET deleted_at = CURRENT_TIMESTAMP
+WHERE id = 123;
+```
+
+This is commonly called a **soft delete**.
+
+Instead of:
+
+```text
+Database
+────────────────
+id | name
+123| Riyaz
+```
+
+becoming:
+
+```text
+Database
+────────────────
+(empty)
+```
+
+it becomes:
+
+```text
+id | name  | deleted_at
+123| Riyaz | 2026-09-18...
+```
+
+The API can still treat the resource as deleted.
+
+So:
+
+```text
+HTTP DELETE
+      ↓
+does not necessarily mean
+      ↓
+physical database deletion
+```
+
+Again, HTTP defines the operation's semantics; the implementation is up to the application.
+
+---
+
+# 12. DELETE with a request body?
+
+You may encounter:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{
+    "reason": "requested by user"
+}
+```
+
+HTTP does not make the basic DELETE method equivalent to "DELETE must have no body."
+
+But APIs generally shouldn't invent body semantics casually. If extra information is needed, the API may instead use a dedicated operation/resource design depending on the use case.
+
+For ordinary deletion:
+
+```http
+DELETE /users/123
+```
+
+is the cleanest model.
+
+---
+
+# 13. DELETE and status codes
+
+Common possibilities:
+
+### Successfully deleted
+
+```http
+204 No Content
+```
+
+### Successfully deleted and returning something
+
+```http
+200 OK
+Content-Type: application/json
+
+{
+    "message": "User deleted"
+}
+```
+
+### Resource doesn't exist
+
+```http
+404 Not Found
+```
+
+Whether a repeated DELETE returns `404`, `204`, or another response is an **API design choice**.
+
+The important distinction is:
+
+```text
+HTTP idempotency
+        ≠
+same response every time
+```
+
+---
+
+# 14. One more important distinction
+
+Compare these:
+
+```http
+DELETE /users/123
+```
+
+and:
+
+```http
+POST /users/123/delete
+```
+
+Both could potentially cause deletion.
+
+But they communicate different things.
+
+With:
+
+```http
+DELETE /users/123
+```
+
+the HTTP method itself tells us:
+
+```text
+"This request is asking to delete the target resource."
+```
+
+That's one of the reasons HTTP methods are more than just arbitrary strings.
+
+They provide **standardized semantics** that clients, servers, proxies, caches, documentation tools, and developers can understand.
+
+---
+
+# 15. Your mental model so far
+
+You now have the core HTTP methods:
+
+```text
+                  Resource
+                     │
+       ┌─────────────┼─────────────┐
+       │             │             │
+      GET           PUT          DELETE
+       │             │             │
+    retrieve      replace        remove
+       │
+       └────── POST / PATCH ──────┐
+                                  │
+                              modify/create
+```
+
+More accurately:
+
+```text
+GET
+  → retrieve representation
+
+POST
+  → submit data for processing
+
+PUT
+  → replace representation at known target
+
+PATCH
+  → apply partial modification
+
+DELETE
+  → remove the target resource
+```
+
+---
+
+## 🧪 Exercise
+
+Try these with `curl`:
+
+```bash
+curl -v http://localhost:8080/users/123
+```
+
+```bash
+curl -v -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+```bash
+curl -v -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users/123
+```
+
+```bash
+curl -v -X PATCH \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz Mohammed"}' \
+  http://localhost:8080/users/123
+```
+
+```bash
+curl -v -X DELETE \
+  http://localhost:8080/users/123
+```
+
+And finally, using `nc`:
+
+```bash
+nc localhost 8080
+```
+
+manually send:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: localhost:8080
+
+```
+
+Pay attention to the fact that **you are literally constructing the HTTP request yourself**.
+
+---
+
+# Next: Authentication
+
+We've now covered the basic request/response mechanics and HTTP methods.
+
+The next big question is:
+
+> **How does the server know who is making the request?**
+
+We'll start with:
+
+**Lesson 19 — `Authorization` header**
+
+and build this from the raw HTTP level:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer abc123
+```
+
+Then we'll progressively understand **authentication → tokens → Bearer tokens → cookies → sessions → JWTs**, without jumping straight into framework abstractions.
+
+
+---

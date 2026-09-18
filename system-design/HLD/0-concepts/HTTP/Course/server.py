@@ -253,6 +253,24 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
 
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if not path.startswith("/users/"):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        user_id = path.split("/")[-1]
+
+        print("Deleting User: ", user_id)
+
+        self.send_response(204)
+        self.end_headers()
+        return
+
+
 server = HTTPServer(("localhost",8080),Handler)
 
 print("Server running on http://localhost:8080")
