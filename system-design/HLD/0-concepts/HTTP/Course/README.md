@@ -15965,3 +15965,876 @@ This is the point where authentication starts becoming much easier to reason abo
 
 ---
 
+# Lesson 21 — Sessions vs Tokens
+
+This is one of the most important authentication concepts.
+
+People often casually say:
+
+> "We use sessions."
+
+or:
+
+> "We use tokens."
+
+But **what does that actually mean?**
+
+Let's build it from the original problem.
+
+---
+
+# 1. Start with the original problem
+
+Suppose a user logs in:
+
+```http
+POST /login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+    "username": "riyaz",
+    "password": "secret123"
+}
+```
+
+The server verifies the password.
+
+Now the user makes another request:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+```
+
+Problem:
+
+> HTTP is stateless.
+
+The second request doesn't inherently tell the server:
+
+```text
+"This is the same person who logged in earlier."
+```
+
+Each HTTP request is independent unless we introduce some mechanism for maintaining identity across requests.
+
+---
+
+# 2. The first big solution: Sessions
+
+The server can create a **session** after successful login.
+
+Imagine:
+
+```text
+Login
+  ↓
+user = Riyaz
+  ↓
+create session
+  ↓
+session_id = abc123
+```
+
+The server stores:
+
+```text
+Session Store
+────────────────────────
+abc123 → user_id=123
+```
+
+Then the client receives:
+
+```text
+abc123
+```
+
+Now future requests can identify the user using that session identifier.
+
+---
+
+# 3. The session itself lives on the server
+
+This distinction is crucial.
+
+Suppose:
+
+```text
+Session ID = abc123
+```
+
+The server stores:
+
+```text
+abc123
+    ↓
+user_id = 123
+    ↓
+name = Riyaz
+    ↓
+authenticated = true
+```
+
+The client only needs:
+
+```text
+abc123
+```
+
+So:
+
+```text
+Client                         Server
+─────────────────             ─────────────────
+abc123                         abc123 → user 123
+                              
+                               session data
+                               lives here
+```
+
+That's why we call it **server-side session state**.
+
+---
+
+# 4. But how does the client send the session ID?
+
+This is where **cookies** enter the picture.
+
+The server can respond to login with:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Type: application/json
+
+{
+    "message": "Login successful"
+}
+```
+
+The important header is:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+The server is effectively telling the client:
+
+> "Store this cookie and send it back to me on future requests."
+
+---
+
+# 5. Future request
+
+The client then sends:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+The server receives:
+
+```text
+session_id=abc123
+```
+
+and performs:
+
+```text
+abc123
+   ↓
+Session Store
+   ↓
+user_id = 123
+   ↓
+Riyaz
+```
+
+Now the server knows who is making the request.
+
+---
+
+# 6. The complete session flow
+
+```text
+                LOGIN
+
+Client ── username/password ──→ Server
+                                  │
+                                  ↓
+                             verify password
+                                  │
+                                  ↓
+                            create session
+                                  │
+                                  ↓
+                         session_id = abc123
+                                  │
+Client ←──── Set-Cookie ──────────┘
+
+
+                FUTURE REQUEST
+
+Client ───── Cookie: abc123 ─────→ Server
+                                  │
+                                  ↓
+                           lookup session
+                                  │
+                                  ↓
+                             user = 123
+                                  │
+                                  ↓
+                            process request
+```
+
+This is the classic **session-based authentication** model.
+
+---
+
+# 7. Why use a cookie?
+
+You could theoretically ask the application to send:
+
+```http
+X-Session-Id: abc123
+```
+
+on every request.
+
+But browsers already have a standardized mechanism for storing and automatically sending cookies.
+
+So browser applications commonly use:
+
+```http
+Set-Cookie
+```
+
+from the server and:
+
+```http
+Cookie
+```
+
+from the client.
+
+---
+
+# 8. Let's see it with raw HTTP
+
+### Login response
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Type: application/json
+Content-Length: 29
+
+{"message":"Login success"}
+```
+
+The browser stores:
+
+```text
+Cookie jar
+────────────────────
+session_id=abc123
+```
+
+Then:
+
+### Future request
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+
+```
+
+Notice:
+
+```text
+Server → Client
+
+Set-Cookie
+```
+
+versus:
+
+```text
+Client → Server
+
+Cookie
+```
+
+That's an important distinction.
+
+---
+
+# 9. Session ≠ Cookie
+
+This is another common interview misconception.
+
+They are related, but they aren't the same thing.
+
+### Session
+
+Server-side authentication state:
+
+```text
+abc123 → user 123
+```
+
+### Cookie
+
+A mechanism for storing/sending data between browser and server:
+
+```http
+Cookie: session_id=abc123
+```
+
+So:
+
+```text
+Cookie
+   ↓
+carries session identifier
+   ↓
+server finds session
+```
+
+A cookie doesn't necessarily contain a session.
+
+Cookies can store many kinds of information.
+
+---
+
+# 10. Now compare this with Bearer tokens
+
+Earlier we had:
+
+```http
+Authorization: Bearer abc123
+```
+
+The client explicitly sends the credential in the `Authorization` header.
+
+With sessions, we commonly have:
+
+```http
+Cookie: session_id=abc123
+```
+
+So the transport mechanism differs:
+
+```text
+Session-based
+
+Cookie
+  ↓
+session ID
+  ↓
+server-side lookup
+```
+
+versus:
+
+```text
+Bearer-token-based
+
+Authorization header
+  ↓
+access token
+  ↓
+server validates token
+```
+
+---
+
+# 11. But there's a subtle point
+
+A session ID is itself technically a kind of **token-like credential**.
+
+For example:
+
+```text
+abc123
+```
+
+doesn't inherently have meaning to the client.
+
+The difference we're emphasizing is **where the state lives**.
+
+### Traditional server-side session
+
+```text
+Client
+  │
+  │ session_id=abc123
+  ↓
+Server
+  │
+  └── abc123 → user 123
+```
+
+### Self-contained token such as JWT
+
+```text
+Client
+  │
+  │ JWT containing claims
+  ↓
+Server
+  │
+  └── verify token
+```
+
+This distinction is much more useful than simply saying:
+
+> "Cookies are sessions and Authorization headers are tokens."
+
+Because that's not always true.
+
+---
+
+# 12. Sessions can also be distributed
+
+Suppose we have:
+
+```text
+             Load Balancer
+              /    |    \
+             ↓     ↓     ↓
+          Server A B     C
+```
+
+User logs in through Server A.
+
+Server A creates:
+
+```text
+session_id = abc123
+```
+
+Where does it store it?
+
+If it stores the session only in Server A's memory:
+
+```text
+Server A
+────────────
+abc123 → user 123
+```
+
+then the next request might go to Server B:
+
+```text
+Client
+   ↓
+Load Balancer
+   ↓
+Server B
+```
+
+Server B doesn't know:
+
+```text
+abc123
+```
+
+because its memory doesn't contain the session.
+
+---
+
+# 13. Solution: Shared session store
+
+We can introduce something like Redis:
+
+```text
+              Load Balancer
+             /      |      \
+            ↓       ↓       ↓
+        Server A Server B Server C
+             \       |       /
+              \      |      /
+                Redis
+                  │
+                  ↓
+          abc123 → user 123
+```
+
+Now any application server can validate the session.
+
+This is one reason authentication architecture becomes a **distributed-systems problem** at scale.
+
+---
+
+# 14. What happens during logout?
+
+This is another nice property of server-side sessions.
+
+Suppose:
+
+```text
+abc123 → user 123
+```
+
+User logs out.
+
+Server can invalidate:
+
+```text
+abc123
+```
+
+Now:
+
+```text
+abc123 → invalid
+```
+
+or delete the session entirely.
+
+The browser may also receive:
+
+```http
+Set-Cookie: session_id=; Max-Age=0
+```
+
+Then future requests using the old session ID fail.
+
+---
+
+# 15. Why not just put user ID in the cookie?
+
+You might wonder:
+
+> Why not simply do this?
+
+```http
+Cookie: user_id=123
+```
+
+Because the client controls the cookie.
+
+A malicious client could change:
+
+```text
+user_id=123
+```
+
+to:
+
+```text
+user_id=999
+```
+
+The server must not blindly trust client-controlled identity information.
+
+That's why the session identifier should be an **unguessable credential**, with the actual authentication state stored/validated server-side.
+
+---
+
+# 16. Why should session IDs be random?
+
+Suppose session IDs were:
+
+```text
+1001
+1002
+1003
+1004
+```
+
+An attacker might guess another user's session.
+
+Instead, we want something like:
+
+```text
+8f1a7c9e3d... 
+```
+
+generated using a cryptographically secure random mechanism.
+
+Conceptually:
+
+```text
+Unpredictable session ID
+        ↓
+Attacker can't simply guess
+        ↓
+Possession of ID grants session access
+```
+
+This is especially important because a session ID is effectively a credential.
+
+---
+
+# 17. The "Bearer" property appears again
+
+If someone steals:
+
+```text
+session_id=abc123
+```
+
+they may be able to impersonate the user.
+
+Similarly, if someone steals:
+
+```http
+Authorization: Bearer abc123
+```
+
+they may be able to use that access token.
+
+That's why both session credentials and bearer access tokens must be protected.
+
+---
+
+# 18. Session vs JWT
+
+Now we can make a more meaningful comparison.
+
+|                            | Server-side session                  | JWT                                          |
+| -------------------------- | ------------------------------------ | -------------------------------------------- |
+| Client stores              | Session ID                           | JWT                                          |
+| Main state                 | Server                               | Encoded/signed token                         |
+| Server lookup              | Usually yes                          | Often no session lookup                      |
+| Easy immediate revocation  | Yes                                  | More involved                                |
+| Horizontal scaling         | Shared session store commonly needed | Can reduce session-state dependency          |
+| Credential transport       | Often cookie                         | Often `Authorization: Bearer`                |
+| Token contains user claims | Usually no                           | Usually yes                                  |
+| Stateful server            | Yes                                  | Can be stateless for access-token validation |
+
+One important caveat:
+
+> **JWT does not automatically mean stateless authentication.**
+
+A system can maintain JWT revocation lists, sessions, token state, etc.
+
+"Stateless JWT authentication" is a specific architecture, not a property that magically applies to every JWT system.
+
+---
+
+# 19. Why did JWT become popular?
+
+Imagine an API architecture with many services:
+
+```text
+                 API Gateway
+                      │
+          ┌───────────┼───────────┐
+          ↓           ↓           ↓
+       Orders       Users       Payments
+```
+
+With server-side sessions, each service may need access to shared authentication state.
+
+JWT provides another possibility:
+
+```text
+Client
+  │
+  │ JWT
+  ↓
+Orders ── verify ──→ valid
+Users  ── verify ──→ valid
+Payments ─ verify ─→ valid
+```
+
+Each service can potentially validate the token independently.
+
+That can simplify some distributed architectures.
+
+But it introduces other tradeoffs:
+
+* token size
+* key management
+* expiration
+* revocation
+* stale claims
+* refresh-token architecture
+
+We'll study those rather than treating JWT as automatically "better."
+
+---
+
+# 20. The historical/conceptual progression
+
+The authentication story now looks like:
+
+```text
+Password
+   │
+   ↓
+Login
+   │
+   ↓
+Server creates session
+   │
+   ↓
+Session ID
+   │
+   ↓
+Cookie
+   │
+   ↓
+Future requests
+```
+
+Alternative:
+
+```text
+Password
+   │
+   ↓
+Login
+   │
+   ↓
+Access token
+   │
+   ↓
+Authorization: Bearer <token>
+   │
+   ↓
+Future requests
+```
+
+And the access token could be:
+
+```text
+Opaque token
+```
+
+or:
+
+```text
+JWT
+```
+
+---
+
+# 🧠 The most important mental model
+
+Don't memorize:
+
+```text
+Cookie = session
+JWT = token
+```
+
+Instead think in layers:
+
+```text
+                    Authentication
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+       Server-side state        Self-contained credential
+             │                         │
+          Session                      JWT
+             │
+       Session ID
+             │
+           Cookie
+```
+
+And separately:
+
+```text
+Credential transport
+
+Cookie:
+Cookie: session_id=abc123
+
+Authorization header:
+Authorization: Bearer abc123
+```
+
+These are **different concepts that can be combined in different ways**.
+
+---
+
+# 🧪 Hands-on exercise
+
+Let's manually simulate a session.
+
+Using:
+
+```bash
+nc localhost 8080
+```
+
+Pretend the server responded to login with:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Length: 0
+
+```
+
+Now make the next request manually:
+
+```http
+GET /profile HTTP/1.1
+Host: localhost:8080
+Cookie: session_id=abc123
+
+```
+
+Then change it:
+
+```http
+GET /profile HTTP/1.1
+Host: localhost:8080
+Cookie: session_id=wrong
+
+```
+
+Your server could conceptually do:
+
+```python
+session_id = self.headers.get("Cookie")
+
+if session_id == "session_id=abc123":
+    # authenticated
+else:
+    # 401
+```
+
+It's deliberately simplistic—we're focusing on understanding the protocol flow.
+
+---
+
+# Next → Lesson 22: Cookies
+
+Now we'll slow down and understand **cookies themselves**.
+
+We'll look at raw headers such as:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+```
+
+and answer:
+
+* Who creates the cookie?
+* Who stores it?
+* When does the browser send it?
+* What does `HttpOnly` actually do?
+* What does `Secure` do?
+* What does `SameSite` do?
+* Why are cookies important for authentication?
+* Why can a cookie be dangerous if configured incorrectly?
+
+This will make browser authentication much less mysterious.
+
+
+----
+
