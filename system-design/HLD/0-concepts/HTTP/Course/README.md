@@ -12144,3 +12144,759 @@ and answer the deceptively important question:
 
 That's where **replacement semantics and idempotency** become much clearer.
 
+---
+
+# Lesson 16 — PUT: Replacing a Resource
+
+Now we have:
+
+```text
+GET
+ → retrieve
+
+POST
+ → submit/process, commonly create
+
+PUT
+ → replace/update a resource at a known target
+```
+
+The interesting question is:
+
+> **Why do we need PUT if POST can also send data?**
+
+The answer is mainly about **semantics, resource identity, and idempotency**.
+
+---
+
+# 1. Start with the difference
+
+Suppose we have:
+
+```http
+POST /users
+```
+
+The client says:
+
+> "Process this new user."
+
+The server typically decides the new user's identity:
+
+```text
+POST /users
+      ↓
+server creates ID
+      ↓
+/users/123
+```
+
+But with:
+
+```http
+PUT /users/123
+```
+
+the client is saying:
+
+> "Store this representation at this specific resource."
+
+The resource identity is already known:
+
+```text
+/users/123
+       ↑
+    known target
+```
+
+That's the fundamental difference.
+
+---
+
+# 2. Example
+
+Suppose the current user is:
+
+```json
+{
+  "id": 123,
+  "name": "Riyaz",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+You want to replace it with:
+
+```json
+{
+  "id": 123,
+  "name": "Riyaz Mohammed",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+You could send:
+
+```http
+PUT /users/123 HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{
+  "id": 123,
+  "name": "Riyaz Mohammed",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+Notice:
+
+```text
+PUT
+ ↓
+/users/123
+ ↓
+specific target
+ ↓
+new representation
+```
+
+---
+
+# 3. Why not POST?
+
+Compare:
+
+```http
+POST /users
+```
+
+with:
+
+```http
+PUT /users/123
+```
+
+### POST
+
+```text
+POST /users
+      ↓
+server chooses/assigns identity
+      ↓
+new resource
+```
+
+### PUT
+
+```text
+PUT /users/123
+          ↓
+client specifies target
+          ↓
+replace/create representation at that target
+```
+
+The server isn't choosing which resource the PUT is targeting.
+
+The URL already identifies it.
+
+---
+
+# 4. The most important property: idempotency
+
+PUT is **idempotent**.
+
+Suppose:
+
+```http
+PUT /users/123
+
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+You send it once.
+
+The resource becomes:
+
+```json
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+Send exactly the same request again:
+
+```http
+PUT /users/123
+
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+The intended final state is still:
+
+```json
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+Send it 100 times:
+
+```text
+PUT /users/123
+PUT /users/123
+PUT /users/123
+...
+```
+
+The intended resource state remains the same.
+
+That's idempotency.
+
+---
+
+# 5. Compare that with POST
+
+Suppose:
+
+```http
+POST /users
+
+{
+  "name": "Riyaz"
+}
+```
+
+Server creates:
+
+```text
+/users/123
+```
+
+Send it again:
+
+```http
+POST /users
+
+{
+  "name": "Riyaz"
+}
+```
+
+Server might create:
+
+```text
+/users/124
+```
+
+Again:
+
+```text
+/users/125
+```
+
+So:
+
+```text
+POST
+ ↓
+repeating the request can create additional resources
+```
+
+while:
+
+```text
+PUT /users/123
+ ↓
+repeating the same request targets the same resource
+```
+
+This distinction becomes extremely important when networks fail and clients retry requests.
+
+---
+
+# 6. "Replace" is important
+
+PUT is commonly described as:
+
+> Replace the current representation of the target resource with the supplied representation.
+
+Suppose the current resource is:
+
+```json
+{
+  "name": "Riyaz",
+  "email": "riyaz@example.com",
+  "age": 30
+}
+```
+
+You send:
+
+```http
+PUT /users/123
+
+{
+  "name": "Riyaz",
+  "email": "new@example.com"
+}
+```
+
+Conceptually, PUT says:
+
+> This is the representation I want at `/users/123`.
+
+So after replacement, depending on your API's representation model, `age` may no longer be present.
+
+```json
+{
+  "name": "Riyaz",
+  "email": "new@example.com"
+}
+```
+
+This is why PUT and PATCH should not be casually treated as synonyms.
+
+We'll study PATCH next.
+
+---
+
+# 7. PUT does not necessarily mean "update"
+
+This is a subtle but important point.
+
+PUT can potentially **create** a resource if the target resource doesn't exist and the server permits creation at that URI.
+
+For example:
+
+```http
+PUT /users/123
+
+{
+  "name": "Riyaz"
+}
+```
+
+If `/users/123` doesn't exist, the server could create it.
+
+The response might be:
+
+```http
+201 Created
+```
+
+If it existed and was replaced:
+
+```http
+200 OK
+```
+
+or:
+
+```http
+204 No Content
+```
+
+could be appropriate.
+
+So don't memorize:
+
+```text
+PUT = UPDATE
+```
+
+Instead think:
+
+```text
+PUT = PUT this representation at this target
+```
+
+That's much closer to the actual HTTP semantics.
+
+---
+
+# 8. Let's implement PUT
+
+Add this to our Python server:
+
+```python
+def do_PUT(self):
+
+    parsed = urlparse(self.path)
+    path = parsed.path
+
+    if not path.startswith("/users/"):
+        self.send_response(404)
+        self.end_headers()
+        return
+
+    user_id = path.split("/")[-1]
+
+    content_length = int(
+        self.headers.get("Content-Length", 0)
+    )
+
+    body = self.rfile.read(content_length)
+
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+
+        response = b'{"error":"Invalid JSON"}'
+
+        self.send_response(400)
+        self.send_header(
+            "Content-Type",
+            "application/json"
+        )
+        self.send_header(
+            "Content-Length",
+            str(len(response))
+        )
+        self.end_headers()
+
+        self.wfile.write(response)
+        return
+
+    print("User ID:", user_id)
+    print("Replacement:", data)
+
+    response = json.dumps({
+        "id": user_id,
+        **data
+    }).encode("utf-8")
+
+    self.send_response(200)
+
+    self.send_header(
+        "Content-Type",
+        "application/json"
+    )
+
+    self.send_header(
+        "Content-Length",
+        str(len(response))
+    )
+
+    self.end_headers()
+
+    self.wfile.write(response)
+```
+
+---
+
+# 9. Test it
+
+Run:
+
+```bash
+curl -v \
+  -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz Mohammed","email":"riyaz@example.com"}' \
+  http://localhost:8080/users/123
+```
+
+Conceptually:
+
+```text
+curl
+ ↓
+PUT /users/123
+ ↓
+JSON body
+ ↓
+server
+ ↓
+parse JSON
+ ↓
+identify resource 123
+ ↓
+replace/update representation
+ ↓
+200 OK
+```
+
+---
+
+# 10. PUT vs POST through resource identity
+
+This is perhaps the easiest way to remember the difference.
+
+### POST
+
+```http
+POST /users
+```
+
+The target is:
+
+```text
+/users
+```
+
+The server processes the submission and may create:
+
+```text
+/users/123
+```
+
+The server commonly assigns the identity.
+
+---
+
+### PUT
+
+```http
+PUT /users/123
+```
+
+The target itself is:
+
+```text
+/users/123
+```
+
+The client already knows the resource identity.
+
+---
+
+Visualize:
+
+```text
+POST
+
+/users
+  │
+  │ "create/process this"
+  ▼
+server
+  │
+  └────→ /users/123
+
+
+PUT
+
+/users/123
+     │
+     │ "put this representation here"
+     ▼
+  resource 123
+```
+
+---
+
+# 11. PUT and retries
+
+This is where HTTP semantics become useful in distributed systems.
+
+Imagine:
+
+```text
+Client
+   │
+   │ PUT /users/123
+   ▼
+Server
+   │
+   │ updates user
+   ▼
+response
+```
+
+But the response gets lost:
+
+```text
+Client
+   │
+   │ PUT /users/123
+   ▼
+Server
+   │
+   │ update succeeded
+   │
+   X──── response lost
+```
+
+The client doesn't know whether the operation succeeded.
+
+It can retry:
+
+```text
+Client
+   │
+   │ PUT /users/123
+   ▼
+Server
+```
+
+Because PUT is idempotent, repeating the same intended operation should not create another user or another independent update effect on the resource.
+
+This doesn't mean retries are always free of all side effects—logging, timestamps, counters, notifications, or poorly designed application behavior can complicate things.
+
+But the **HTTP method semantics** provide an idempotent contract for the requested resource state.
+
+---
+
+# 12. PUT does not mean "send only changed fields"
+
+Suppose you only want to change:
+
+```json
+{
+  "name": "New Name"
+}
+```
+
+With PUT, that can be problematic if your API interprets PUT as replacement.
+
+You might accidentally replace:
+
+```json
+{
+  "name": "Old Name",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+with:
+
+```json
+{
+  "name": "New Name"
+}
+```
+
+Now `email` and `active` may disappear.
+
+If your intention is:
+
+> Change only this field.
+
+that's where **PATCH** becomes useful.
+
+---
+
+# 13. GET → POST → PUT
+
+At this point, you should see a progression:
+
+### Retrieve
+
+```http
+GET /users/123
+```
+
+```text
+"Give me user 123."
+```
+
+### Create/process
+
+```http
+POST /users
+```
+
+```text
+"Process this new submission against /users."
+```
+
+### Replace
+
+```http
+PUT /users/123
+```
+
+```text
+"Use this representation for resource 123."
+```
+
+And the important properties:
+
+| Method | Typical API use           | Safe | Idempotent |
+| ------ | ------------------------- | ---: | ---------: |
+| GET    | Retrieve                  |  Yes |        Yes |
+| POST   | Create/process submission |   No |         No |
+| PUT    | Replace target resource   |   No |        Yes |
+
+These properties come from HTTP semantics, not from Spring or REST frameworks.
+
+---
+
+# 14. One final experiment
+
+Send the exact same request twice:
+
+```bash
+curl -v \
+  -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users/123
+```
+
+Run it again.
+
+Then compare with:
+
+```bash
+curl -v \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/users
+```
+
+Run that multiple times too.
+
+The interesting part isn't simply what our toy server prints.
+
+Ask:
+
+> **What resource does each request target, and what should happen if the exact same request arrives again?**
+
+That's the core of understanding PUT.
+
+---
+
+## Next: Lesson 17 — PATCH
+
+We'll answer:
+
+> If PUT replaces the resource, how do I change **only one field**?
+
+We'll build:
+
+```http
+PATCH /users/123
+
+{
+  "name": "New Name"
+}
+```
+
+and then dig into the important difference:
+
+```text
+PUT   → replacement semantics
+PATCH → partial modification semantics
+```
+
+including why **PATCH is not automatically idempotent**.
+
+----
+
