@@ -15153,3 +15153,815 @@ That leads naturally into **opaque tokens, server-side sessions, JWTs, access to
 
 ---
 
+# Lesson 20 — What Happens During Login?
+
+So far we have this:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+Authorization: Bearer abc123
+```
+
+But we haven't answered the most important question:
+
+> **Where did `abc123` come from?**
+
+Let's build the authentication story from scratch.
+
+---
+
+## 1. The problem
+
+A user initially has something like:
+
+```text
+username: riyaz
+password: secret123
+```
+
+They can't send their password with **every API request**:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+Authorization: secret123
+```
+
+That would be a terrible design.
+
+We want:
+
+```text
+Login once
+   ↓
+prove identity
+   ↓
+receive a credential
+   ↓
+use credential for future requests
+```
+
+So we introduce a **login endpoint**.
+
+---
+
+# 2. The login request
+
+Typically:
+
+```http
+POST /login HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{
+    "username": "riyaz",
+    "password": "secret123"
+}
+```
+
+Why `POST`?
+
+Because we're submitting credentials to the server for processing.
+
+The server receives:
+
+```text
+username = riyaz
+password = secret123
+```
+
+and verifies them.
+
+---
+
+# 3. What does the server do?
+
+Conceptually:
+
+```text
+POST /login
+     │
+     ↓
+Extract username/password
+     │
+     ↓
+Find user
+     │
+     ↓
+Verify password
+     │
+   ┌─┴──────────┐
+   │            │
+invalid       valid
+   │            │
+ 401            ↓
+          Create credential
+               │
+               ↓
+        Return credential
+```
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+    "access_token": "abc123"
+}
+```
+
+Now the client has:
+
+```text
+abc123
+```
+
+---
+
+# 4. Future requests
+
+The client doesn't send the password anymore.
+
+Instead:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer abc123
+```
+
+So the overall flow is:
+
+```text
+                  LOGIN
+
+Client ──────── username/password ────────→ Server
+Client ←────────── token ────────────────── Server
+
+
+                 API REQUEST
+
+Client ──────── Bearer token ─────────────→ Server
+Client ←────────── response ──────────────── Server
+```
+
+This is the fundamental idea behind token-based authentication.
+
+---
+
+# 5. But now we have a new problem
+
+We created:
+
+```text
+abc123
+```
+
+The client sends:
+
+```http
+Authorization: Bearer abc123
+```
+
+How does the server know whether:
+
+```text
+abc123
+```
+
+is valid?
+
+There are several possibilities.
+
+The first approach is very simple:
+
+> **Store the token on the server.**
+
+---
+
+# 6. Approach 1 — Server-side token storage
+
+Suppose login creates:
+
+```text
+token = abc123
+user = Riyaz
+```
+
+The server stores:
+
+```text
+Token Store
+────────────────────────
+abc123 → user_id=123
+xyz789 → user_id=456
+```
+
+Then the client sends:
+
+```http
+GET /users/123 HTTP/1.1
+Authorization: Bearer abc123
+```
+
+The server does:
+
+```text
+abc123
+  ↓
+Token Store lookup
+  ↓
+user_id = 123
+  ↓
+Authenticated
+```
+
+This is a very useful model to understand because it leads directly to **sessions and opaque tokens**.
+
+---
+
+# 7. What does an opaque token mean?
+
+Suppose the token is:
+
+```text
+abc123xyz789
+```
+
+Look at it.
+
+Can you tell:
+
+```text
+user ID?
+expiration?
+role?
+email?
+```
+
+No.
+
+It's just an identifier.
+
+That's an **opaque token**.
+
+Conceptually:
+
+```text
+Client:
+    abc123xyz789
+
+Server:
+    "I know what this means."
+```
+
+The client doesn't need to understand its contents.
+
+---
+
+# 8. Why is this useful?
+
+The server can maintain:
+
+```text
+Token
+   ↓
+User
+   ↓
+Permissions
+   ↓
+Expiration
+   ↓
+Session state
+```
+
+For example:
+
+```text
+abc123
+    │
+    ├── user_id: 123
+    ├── expires_at: 14:00
+    ├── role: admin
+    └── revoked: false
+```
+
+Then every request can perform a lookup.
+
+---
+
+# 9. The request lifecycle
+
+Let's make this concrete.
+
+### Step 1 — Login
+
+```http
+POST /login HTTP/1.1
+Content-Type: application/json
+
+{
+    "username": "riyaz",
+    "password": "secret123"
+}
+```
+
+Server:
+
+```text
+Verify credentials
+      ↓
+Generate random token
+      ↓
+Store token → user mapping
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+    "access_token": "abc123"
+}
+```
+
+---
+
+### Step 2 — Client calls API
+
+```http
+GET /orders HTTP/1.1
+Authorization: Bearer abc123
+```
+
+Server:
+
+```text
+abc123
+   ↓
+lookup
+   ↓
+user 123
+   ↓
+check permissions
+   ↓
+return orders
+```
+
+---
+
+# 10. Logout becomes interesting
+
+Suppose the user logs out.
+
+With server-side token storage, we can simply invalidate the token:
+
+```text
+abc123 → user 123
+```
+
+becomes:
+
+```text
+abc123 → revoked
+```
+
+or gets deleted.
+
+Then:
+
+```http
+GET /orders HTTP/1.1
+Authorization: Bearer abc123
+```
+
+produces:
+
+```http
+401 Unauthorized
+```
+
+This is one major advantage of server-side state:
+
+> The server can immediately revoke a credential.
+
+---
+
+# 11. But there's a problem
+
+Imagine we have:
+
+```text
+10 million users
+```
+
+and each user has an active token.
+
+Now every API request might require:
+
+```text
+Request
+   ↓
+Authentication service
+   ↓
+Token database/cache
+   ↓
+User information
+   ↓
+API
+```
+
+That creates infrastructure and latency considerations.
+
+And with multiple servers:
+
+```text
+              Load Balancer
+             /      |      \
+            ↓       ↓       ↓
+         Server A Server B Server C
+            \       |       /
+             \      |      /
+               Token Store
+```
+
+All application servers need access to the shared authentication state.
+
+This isn't necessarily bad—Redis or another shared store can handle this very well—but it introduces **server-side state and an additional lookup**.
+
+This motivates another approach.
+
+---
+
+# 12. Approach 2 — Put information inside the token
+
+Instead of:
+
+```text
+abc123
+```
+
+imagine the credential itself contains information such as:
+
+```text
+user_id = 123
+role = admin
+expires = ...
+```
+
+Now the server can potentially inspect the credential itself rather than looking up a token record for every request.
+
+This leads us toward:
+
+# JWT
+
+**JSON Web Token**
+
+But don't jump there yet.
+
+There's an important distinction.
+
+---
+
+# 13. Opaque token vs JWT
+
+Think of them like this:
+
+### Opaque token
+
+```text
+abc123
+```
+
+Server:
+
+```text
+abc123
+   ↓
+lookup server-side
+   ↓
+user = 123
+```
+
+### JWT
+
+Conceptually:
+
+```text
+<header>.<payload>.<signature>
+```
+
+The token carries claims such as:
+
+```json
+{
+    "sub": "123",
+    "role": "admin",
+    "exp": 1789732800
+}
+```
+
+and is cryptographically signed.
+
+The server can verify the signature and inspect the claims.
+
+We'll learn exactly how this works later.
+
+---
+
+# 14. Don't make this mistake
+
+A common misconception is:
+
+> "JWT is authentication."
+
+Not exactly.
+
+JWT is a **token format**.
+
+Bearer is an **HTTP authentication scheme**.
+
+For example:
+
+```http
+Authorization: Bearer <JWT>
+```
+
+contains:
+
+```text
+Authorization
+      │
+      ↓
+Bearer authentication scheme
+      │
+      ↓
+JWT credential
+```
+
+So these concepts are separate.
+
+---
+
+# 15. Access token
+
+We're now ready for another important term:
+
+**Access token**
+
+An access token is a credential that a client presents when accessing protected resources.
+
+For example:
+
+```http
+GET /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer abc123
+```
+
+Here:
+
+```text
+abc123
+```
+
+is the access token.
+
+It could be:
+
+```text
+opaque token
+```
+
+or:
+
+```text
+JWT
+```
+
+The term **access token** describes its purpose, not necessarily its format.
+
+---
+
+# 16. Why shouldn't the access token live forever?
+
+Suppose:
+
+```text
+Access token = abc123
+```
+
+and it never expires.
+
+Now someone steals it.
+
+They may be able to use it indefinitely.
+
+So we generally introduce expiration:
+
+```text
+Access token
+     │
+     ├── issued: 12:00
+     └── expires: 13:00
+```
+
+After expiration:
+
+```http
+Authorization: Bearer abc123
+```
+
+→ authentication fails.
+
+This gives us another problem:
+
+> What happens when the access token expires while the user is still using the application?
+
+We don't want the user to enter their password every hour.
+
+---
+
+# 17. The next problem leads to Refresh Tokens
+
+We eventually arrive at:
+
+```text
+Username + Password
+       │
+       ↓
+     Login
+       │
+       ├──────────────→ Access Token
+       │
+       └──────────────→ Refresh Token
+```
+
+The access token might be short-lived:
+
+```text
+Access token
+    ↓
+15 minutes
+```
+
+while the refresh token lasts much longer:
+
+```text
+Refresh token
+    ↓
+days/weeks/etc.
+```
+
+When the access token expires:
+
+```text
+Access token expired
+       ↓
+Client sends refresh token
+       ↓
+Authentication server
+       ↓
+New access token
+```
+
+The user doesn't need to log in again.
+
+**But we'll earn this concept rather than memorize it.**
+
+---
+
+# 🧠 Current mental model
+
+We have gone from:
+
+```text
+Username + Password
+        ↓
+       Login
+        ↓
+   Credential/Token
+        ↓
+Authorization: Bearer <token>
+        ↓
+Protected API
+```
+
+And discovered two broad ways to make that token meaningful:
+
+```text
+                    Token
+                      │
+             ┌────────┴────────┐
+             │                 │
+       Opaque token           JWT
+             │                 │
+       Server lookup      Verify signature
+             │                 │
+        Server state       Claims inside token
+```
+
+And one more concept:
+
+```text
+Access Token
+    ↓
+used to access APIs
+    ↓
+usually short-lived
+```
+
+which eventually leads to:
+
+```text
+Refresh Token
+    ↓
+obtain a new access token
+```
+
+---
+
+## 🧪 Hands-on exercise
+
+Modify your Python server to recognize this:
+
+```http
+POST /login HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{"username":"riyaz","password":"secret123"}
+```
+
+and return:
+
+```json
+{
+    "access_token": "abc123"
+}
+```
+
+Then require:
+
+```http
+Authorization: Bearer abc123
+```
+
+for:
+
+```http
+GET /users
+```
+
+You're essentially building a tiny authentication system:
+
+```text
+/login
+   ↓
+creates token
+
+/users
+   ↓
+requires token
+```
+
+Don't worry about securely hashing passwords or generating cryptographically secure tokens yet—we're learning the HTTP/authentication mechanics first.
+
+---
+
+# Next → Lesson 21: Sessions vs Tokens
+
+Before jumping into JWT, we need to understand an extremely important historical progression:
+
+```text
+Password
+   ↓
+Session
+   ↓
+Session ID
+   ↓
+Cookie
+   ↓
+Token
+   ↓
+Access Token
+   ↓
+JWT
+```
+
+We'll answer:
+
+> **What exactly is a session, and how is it different from a token?**
+
+This is the point where authentication starts becoming much easier to reason about.
+
+
+---
+
