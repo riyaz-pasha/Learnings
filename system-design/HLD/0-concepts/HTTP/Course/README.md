@@ -12900,3 +12900,692 @@ including why **PATCH is not automatically idempotent**.
 
 ----
 
+# Lesson 17 — PATCH: Partial Modification
+
+We now have:
+
+```text
+GET    → retrieve
+POST   → submit/create
+PUT    → replace
+PATCH  → partially modify
+```
+
+PATCH exists because sometimes you **don't want to replace the entire resource**.
+
+---
+
+## 1. The problem with PUT
+
+Suppose our user currently looks like:
+
+```json
+{
+  "id": 123,
+  "name": "Riyaz",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+We only want to change the name.
+
+With PUT, we'd typically send the complete replacement representation:
+
+```http
+PUT /users/123
+Content-Type: application/json
+
+{
+  "id": 123,
+  "name": "Riyaz Mohammed",
+  "email": "riyaz@example.com",
+  "active": true
+}
+```
+
+But that's unnecessarily large if all we want to change is:
+
+```text
+name
+```
+
+PATCH provides a way to express a **partial modification**:
+
+```http
+PATCH /users/123
+Content-Type: application/json
+
+{
+  "name": "Riyaz Mohammed"
+}
+```
+
+---
+
+# 2. The mental model
+
+Think about the difference like this:
+
+### PUT
+
+> "Here is the representation I want at this resource."
+
+```text
+Current:
+
+{
+  name: "Riyaz",
+  email: "old@example.com",
+  active: true
+}
+
+        PUT
+
+{
+  name: "Riyaz Mohammed",
+  email: "new@example.com",
+  active: true
+}
+```
+
+The supplied representation represents the desired replacement.
+
+---
+
+### PATCH
+
+> "Apply this modification to the existing resource."
+
+```text
+Current:
+
+{
+  name: "Riyaz",
+  email: "old@example.com",
+  active: true
+}
+
+        PATCH
+
+{
+  name: "Riyaz Mohammed"
+}
+
+        ↓
+
+Result:
+
+{
+  name: "Riyaz Mohammed",
+  email: "old@example.com",
+  active: true
+}
+```
+
+The unspecified fields remain unchanged.
+
+---
+
+# 3. PATCH is not "PUT but smaller"
+
+This is an important distinction.
+
+You shouldn't define PATCH simply as:
+
+> PUT with fewer fields.
+
+PATCH has different semantics.
+
+PUT generally provides a **replacement representation**.
+
+PATCH provides a **set of modifications/instructions** to apply to the target resource.
+
+For example:
+
+```http
+PATCH /users/123
+
+{
+  "name": "Riyaz"
+}
+```
+
+Your application might interpret that as:
+
+```text
+change name → Riyaz
+```
+
+Another PATCH format could represent an explicit operation:
+
+```json
+[
+  {
+    "op": "replace",
+    "path": "/name",
+    "value": "Riyaz"
+  }
+]
+```
+
+This is associated with **JSON Patch**.
+
+So PATCH itself doesn't require one particular JSON structure.
+
+The server and API define what patch document format is accepted.
+
+---
+
+# 4. A simple PATCH API
+
+Let's add PATCH to our Python server.
+
+```python
+def do_PATCH(self):
+
+    parsed = urlparse(self.path)
+    path = parsed.path
+
+    if not path.startswith("/users/"):
+        self.send_response(404)
+        self.end_headers()
+        return
+
+    user_id = path.split("/")[-1]
+
+    content_type = self.headers.get("Content-Type")
+
+    if content_type != "application/json":
+        self.send_response(415)
+        self.end_headers()
+        return
+
+    content_length = int(
+        self.headers.get("Content-Length", 0)
+    )
+
+    body = self.rfile.read(content_length)
+
+    try:
+        patch = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+
+        response = b'{"error":"Invalid JSON"}'
+
+        self.send_response(400)
+        self.send_header(
+            "Content-Type",
+            "application/json"
+        )
+        self.send_header(
+            "Content-Length",
+            str(len(response))
+        )
+        self.end_headers()
+
+        self.wfile.write(response)
+        return
+
+    print("User:", user_id)
+    print("Patch:", patch)
+
+    response = json.dumps({
+        "id": user_id,
+        "message": "User partially updated",
+        "changes": patch
+    }).encode("utf-8")
+
+    self.send_response(200)
+
+    self.send_header(
+        "Content-Type",
+        "application/json"
+    )
+
+    self.send_header(
+        "Content-Length",
+        str(len(response))
+    )
+
+    self.end_headers()
+
+    self.wfile.write(response)
+```
+
+---
+
+# 5. Test it
+
+Run:
+
+```bash
+curl -v \
+  -X PATCH \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz Mohammed"}' \
+  http://localhost:8080/users/123
+```
+
+The request is:
+
+```http
+PATCH /users/123 HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: ...
+
+{"name":"Riyaz Mohammed"}
+```
+
+Notice:
+
+```text
+/users/123
+     ↑
+target resource
+
+{"name":"Riyaz Mohammed"}
+     ↑
+modification
+```
+
+---
+
+# 6. PATCH can modify multiple fields
+
+You aren't limited to one field.
+
+```http
+PATCH /users/123
+Content-Type: application/json
+
+{
+  "name": "Riyaz Mohammed",
+  "active": false
+}
+```
+
+Conceptually:
+
+```text
+existing resource
+       │
+       ▼
+apply name change
+       │
+       ▼
+apply active change
+       │
+       ▼
+updated resource
+```
+
+Fields that aren't included remain unchanged, assuming that's how your patch format is defined.
+
+---
+
+# 7. PATCH and `null`
+
+Here's a subtle API-design question.
+
+Suppose:
+
+```json
+{
+  "name": null
+}
+```
+
+Does that mean:
+
+```text
+set name to null
+```
+
+or:
+
+```text
+remove name
+```
+
+Usually, for a simple JSON merge-style PATCH design:
+
+```text
+field absent
+    → don't change it
+
+field present with null
+    → set it to null
+```
+
+But this is an **API/application convention**, not something you should assume universally.
+
+For example:
+
+```json
+{}
+```
+
+might mean:
+
+> Make no changes.
+
+While:
+
+```json
+{
+  "email": null
+}
+```
+
+might mean:
+
+> Clear the email.
+
+This is one reason patch formats need to be documented precisely.
+
+---
+
+# 8. Is PATCH idempotent?
+
+Here's where things get interesting.
+
+**PATCH is not inherently idempotent.**
+
+That means the HTTP method itself does not guarantee that repeating the same PATCH has the same intended effect.
+
+Consider this PATCH:
+
+```http
+PATCH /users/123
+
+{
+  "loginCountIncrement": 1
+}
+```
+
+If your API interprets it as:
+
+```text
+loginCount = loginCount + 1
+```
+
+then:
+
+```text
+PATCH once
+→ +1
+
+PATCH twice
+→ +2
+
+PATCH three times
+→ +3
+```
+
+Clearly not idempotent.
+
+---
+
+# 9. But PATCH can be idempotent
+
+You could design:
+
+```http
+PATCH /users/123
+
+{
+  "name": "Riyaz Mohammed"
+}
+```
+
+as:
+
+```text
+name = "Riyaz Mohammed"
+```
+
+Repeatedly applying it:
+
+```text
+name = "Riyaz Mohammed"
+name = "Riyaz Mohammed"
+name = "Riyaz Mohammed"
+```
+
+produces the same final state.
+
+So this particular PATCH operation can be idempotent.
+
+But:
+
+> PATCH doesn't guarantee idempotency by definition.
+
+That's different from PUT.
+
+---
+
+# 10. PUT vs PATCH
+
+This table is worth remembering:
+
+|                               | PUT                                        | PATCH                        |
+| ----------------------------- | ------------------------------------------ | ---------------------------- |
+| Target                        | Specific resource                          | Specific resource            |
+| Typical meaning               | Replace representation                     | Apply partial modification   |
+| Body                          | Usually complete representation            | Modification/patch document  |
+| Can create?                   | Potentially, depending on target semantics | Not generally used as create |
+| Idempotent by HTTP semantics? | Yes                                        | Not inherently               |
+| Typical example               | Replace user                               | Change user's email          |
+
+Example PUT:
+
+```http
+PUT /users/123
+
+{
+  "name": "Riyaz",
+  "email": "new@example.com",
+  "active": true
+}
+```
+
+Example PATCH:
+
+```http
+PATCH /users/123
+
+{
+  "email": "new@example.com"
+}
+```
+
+---
+
+# 11. A very common real-world API pattern
+
+Imagine a user profile:
+
+```json
+{
+  "id": 123,
+  "name": "Riyaz",
+  "email": "riyaz@example.com",
+  "phone": "1234567890",
+  "active": true
+}
+```
+
+### Change everything
+
+```http
+PUT /users/123
+```
+
+with the complete representation.
+
+### Change only phone
+
+```http
+PATCH /users/123
+
+{
+  "phone": "9876543210"
+}
+```
+
+### Change only active state
+
+```http
+PATCH /users/123
+
+{
+  "active": false
+}
+```
+
+### Retrieve
+
+```http
+GET /users/123
+```
+
+Now our little API has a coherent set of operations:
+
+```text
+             /users/123
+                  │
+       ┌──────────┼──────────┐
+       │          │          │
+      GET        PUT       PATCH
+       │          │          │
+    retrieve    replace    modify
+```
+
+---
+
+# 12. Where does DELETE fit?
+
+We're almost done with the basic CRUD-style HTTP methods.
+
+The natural next operation is:
+
+```http
+DELETE /users/123
+```
+
+which communicates:
+
+> Delete the resource identified by `/users/123`.
+
+A successful response might be:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+Notice something interesting:
+
+```text
+DELETE /users/123
+```
+
+is also **idempotent**.
+
+If the user is deleted:
+
+```text
+first DELETE
+→ user deleted
+
+second DELETE
+→ user is already gone
+```
+
+The second request doesn't undo the first deletion.
+
+However, the server may return different status codes on subsequent attempts—for example `404`—without violating the method's idempotency.
+
+That's a subtle but very important distinction:
+
+> **Idempotent does not mean every response must be identical.**
+
+It concerns the intended effect on the resource state.
+
+---
+
+# 13. The CRUD mapping you've built
+
+You can now visualize a typical API:
+
+```text
+GET /users
+    ↓
+List users
+
+GET /users/123
+    ↓
+Get user 123
+
+POST /users
+    ↓
+Create a user
+
+PUT /users/123
+    ↓
+Replace user 123
+
+PATCH /users/123
+    ↓
+Partially modify user 123
+
+DELETE /users/123
+    ↓
+Delete user 123
+```
+
+This is the foundation of the REST-style API we'll build.
+
+But remember:
+
+> REST is much broader than simply mapping CRUD operations to HTTP methods.
+
+We're intentionally starting with the HTTP semantics first.
+
+---
+
+## One important interview question
+
+Suppose someone asks:
+
+> **"What's the difference between PUT and PATCH?"**
+
+A strong answer is:
+
+> **PUT is used to replace the representation of a resource at a known target, and it is idempotent. PATCH is used to apply partial modifications to a resource; it is not inherently idempotent because the effect depends on the patch operation.**
+
+That's much better than:
+
+> "PUT updates everything and PATCH updates one field."
+
+The second answer is a useful beginner shortcut, but it isn't the full HTTP semantics.
+
+---
+
+## Next: Lesson 18 — DELETE
+
+We'll implement:
+
+```http
+DELETE /users/123
+```
+
+and explore a surprisingly interesting question:
+
+> **If the resource is already deleted, why can a second DELETE still be considered idempotent?**
+
+Then we'll have covered the core HTTP methods and move into **authentication headers and Bearer tokens**.
+
+---
+
