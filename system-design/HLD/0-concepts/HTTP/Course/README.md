@@ -14304,3 +14304,852 @@ Then we'll progressively understand **authentication → tokens → Bearer token
 
 
 ---
+
+# Lesson 19 — The `Authorization` Header
+
+We've reached an important transition.
+
+So far, our requests have effectively been:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+```
+
+The server knows **what** we want.
+
+But it doesn't know **who** is asking.
+
+---
+
+## 1. The problem
+
+Imagine:
+
+```text
+Alice → GET /users/123
+Bob   → GET /users/123
+```
+
+The HTTP requests could be identical:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+How can the server distinguish them?
+
+We need a way for the client to provide **credentials**.
+
+That's where the `Authorization` header comes in.
+
+```http
+Authorization: <credentials>
+```
+
+For example:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer abc123
+```
+
+---
+
+# 2. What is `Authorization`?
+
+It's an HTTP request header used to provide **authentication credentials** to the server.
+
+The general structure is:
+
+```text
+Authorization: <authentication-scheme> <credentials>
+```
+
+For example:
+
+```http
+Authorization: Bearer abc123
+```
+
+Break it down:
+
+```text
+Authorization
+      │
+      ├── Bearer
+      │     └── authentication scheme
+      │
+      └── abc123
+            └── credentials
+```
+
+The important part is:
+
+> `Bearer` is not the token itself. It is the authentication scheme.
+
+---
+
+# 3. What does "Bearer" mean?
+
+The word **bearer** has a very simple idea behind it:
+
+> Whoever bears/possesses this credential can use it.
+
+Imagine the server gives you:
+
+```text
+abc123
+```
+
+You send:
+
+```http
+Authorization: Bearer abc123
+```
+
+The server verifies the credential.
+
+If it's valid:
+
+```text
+Authenticated ✓
+```
+
+If it's invalid:
+
+```text
+Authentication failed ✗
+```
+
+The token acts somewhat like a **temporary credential**.
+
+---
+
+# 4. Important: HTTP doesn't create the token
+
+This is a common misconception.
+
+HTTP defines the header:
+
+```http
+Authorization: ...
+```
+
+But HTTP doesn't magically generate:
+
+```text
+abc123
+```
+
+Your authentication system might generate it.
+
+For example:
+
+```text
+Login
+  ↓
+Authentication service
+  ↓
+Generate credential
+  ↓
+Client receives credential
+  ↓
+Client sends it in Authorization header
+```
+
+We'll build the login/token story later.
+
+For now, we're only concerned with how the credential travels over HTTP.
+
+---
+
+# 5. Let's manually send one
+
+Start our server:
+
+```bash
+python3 server.py
+```
+
+Then:
+
+```bash
+nc localhost 8080
+```
+
+Send:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer abc123
+
+```
+
+Notice that nothing about the HTTP request structure changed.
+
+We simply added another header:
+
+```text
+Request line
+    ↓
+GET /users/123 HTTP/1.1
+
+Headers
+    ↓
+Host: localhost:8080
+Authorization: Bearer abc123
+
+Blank line
+    ↓
+```
+
+---
+
+# 6. Let's inspect it in Python
+
+Our handler can access it through:
+
+```python
+authorization = self.headers.get("Authorization")
+
+print("Authorization:", authorization)
+```
+
+So:
+
+```http
+Authorization: Bearer abc123
+```
+
+becomes:
+
+```python
+authorization
+```
+
+with value:
+
+```text
+Bearer abc123
+```
+
+Python's `http.server` has already parsed the HTTP headers for us.
+
+---
+
+# 7. Let's create a tiny authentication check
+
+For learning purposes, let's pretend:
+
+```text
+valid token = abc123
+```
+
+Our handler:
+
+```python
+def do_GET(self):
+    authorization = self.headers.get("Authorization")
+
+    if authorization != "Bearer abc123":
+        self.send_response(401)
+        self.end_headers()
+        return
+
+    body = b"Hello authenticated user!"
+
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+    self.wfile.write(body)
+```
+
+Now:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+No authorization header.
+
+Result:
+
+```http
+HTTP/1.0 401 Unauthorized
+```
+
+Now:
+
+```bash
+curl -v \
+  -H "Authorization: Bearer abc123" \
+  http://localhost:8080/
+```
+
+Result:
+
+```http
+HTTP/1.0 200 OK
+```
+
+---
+
+# 8. Why `401`?
+
+Recall the distinction from our status-code lesson:
+
+```text
+401 → authentication problem
+403 → authorization/permission problem
+```
+
+So:
+
+```http
+Authorization: Bearer invalid
+```
+
+might produce:
+
+```http
+401 Unauthorized
+```
+
+because the server cannot authenticate the caller.
+
+But imagine:
+
+```text
+Alice is authenticated
+        ↓
+Alice requests /admin
+        ↓
+Alice isn't allowed to access admin
+```
+
+Then:
+
+```http
+403 Forbidden
+```
+
+could be appropriate.
+
+Mental model:
+
+```text
+Authentication
+    ↓
+"Who are you?"
+
+Authorization
+    ↓
+"What are you allowed to do?"
+```
+
+---
+
+# 9. Authentication vs Authorization
+
+This distinction is extremely important.
+
+Imagine you're entering an office.
+
+### Authentication
+
+You show your employee badge:
+
+```text
+"I am Riyaz."
+```
+
+The security system verifies the badge.
+
+That's:
+
+```text
+Authentication
+```
+
+Then you try to enter the server room.
+
+The system checks:
+
+```text
+"Is Riyaz allowed into the server room?"
+```
+
+That's:
+
+```text
+Authorization
+```
+
+In HTTP:
+
+```http
+Authorization: Bearer abc123
+```
+
+Despite the confusing name, this header is commonly used to **authenticate** the request.
+
+---
+
+# 10. Why isn't the header called `Authentication`?
+
+Good question.
+
+HTTP standardized the header as:
+
+```http
+Authorization
+```
+
+rather than:
+
+```http
+Authentication
+```
+
+The header carries credentials used in an authentication scheme.
+
+The distinction between authentication and authorization is mostly about **what the server does with the verified identity/credentials**.
+
+So don't read:
+
+```http
+Authorization: Bearer abc123
+```
+
+as:
+
+> "This is definitely authorization information."
+
+Think:
+
+> "Here are my credentials according to this authentication scheme."
+
+---
+
+# 11. The Bearer token is opaque to HTTP
+
+Suppose we send:
+
+```http
+Authorization: Bearer abc123
+```
+
+HTTP doesn't know what `abc123` means.
+
+It doesn't know whether it is:
+
+```text
+JWT
+opaque random token
+session identifier
+API key
+something else
+```
+
+The authentication system decides.
+
+HTTP simply transports the header.
+
+This is an important layering concept:
+
+```text
+HTTP
+ │
+ └── transports Authorization header
+              │
+              ↓
+       Authentication system
+              │
+              ↓
+       interprets credential
+```
+
+---
+
+# 12. A real-world request
+
+A typical API request might look like:
+
+```http
+GET /api/orders/123 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+Notice that we have multiple independent headers:
+
+```text
+Accept
+    ↓
+"What response representation can I accept?"
+
+Authorization
+    ↓
+"Here are my credentials."
+
+Host
+    ↓
+"Which host am I addressing?"
+```
+
+Each header has a different responsibility.
+
+---
+
+# 13. Don't confuse `Authorization` with `Cookie`
+
+We'll soon learn cookies, but here's the high-level distinction.
+
+### Authorization header
+
+Client explicitly sends:
+
+```http
+Authorization: Bearer abc123
+```
+
+Common for APIs.
+
+### Cookie
+
+Client sends:
+
+```http
+Cookie: session_id=abc123
+```
+
+Common in browser-based authentication.
+
+Both can carry authentication-related state.
+
+But the mechanisms and browser behavior are different.
+
+We'll get into that later.
+
+---
+
+# 14. What if the token is missing?
+
+Our server might return:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+A more informative response can include:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+```
+
+`WWW-Authenticate` tells the client which authentication challenge/scheme is applicable.
+
+For example:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+Content-Length: 0
+```
+
+This is another example of HTTP providing standardized protocol mechanisms around authentication.
+
+---
+
+# 15. What if the token is wrong?
+
+Request:
+
+```http
+GET /users/123 HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer wrong-token
+
+```
+
+Server:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+Conceptually:
+
+```text
+No credential
+      ↓
+     401
+
+Invalid credential
+      ↓
+     401
+
+Valid credential
+      ↓
+ authenticated
+```
+
+Then authorization checks happen afterward.
+
+---
+
+# 16. The complete request pipeline
+
+We're starting to get an important picture:
+
+```text
+Client
+  │
+  │ HTTP request
+  ↓
+┌──────────────────────────────┐
+│ GET /users/123 HTTP/1.1      │
+│ Host: api.example.com        │
+│ Accept: application/json     │
+│ Authorization: Bearer abc123 │
+│                              │
+│                              │
+└──────────────────────────────┘
+              │
+              ↓
+       HTTP parser
+              │
+              ↓
+       Authentication
+              │
+        ┌─────┴─────┐
+        │           │
+      invalid      valid
+        │           │
+       401          ↓
+              Authorization
+                   │
+             ┌─────┴─────┐
+             │           │
+          forbidden    allowed
+             │           │
+            403          ↓
+                    Application
+                         │
+                         ↓
+                       200
+```
+
+This distinction becomes extremely useful when debugging APIs.
+
+---
+
+# 17. One important security point
+
+Never treat:
+
+```http
+X-User-Id: 123
+```
+
+as proof that the caller is user `123`.
+
+A client can simply send:
+
+```bash
+curl \
+  -H "X-User-Id: 999" \
+  http://localhost:8080/users
+```
+
+Headers supplied by the client are **not inherently trustworthy**.
+
+Authentication credentials need to be verified.
+
+For example:
+
+```text
+Authorization: Bearer abc123
+                    ↓
+              verify token
+                    ↓
+              user_id = 123
+```
+
+Only after verification should the application trust the resulting identity.
+
+---
+
+# 18. One subtle but important point
+
+`Authorization` isn't encryption.
+
+This:
+
+```http
+Authorization: Bearer abc123
+```
+
+is still just data being sent over the HTTP connection.
+
+With plain HTTP:
+
+```text
+http://example.com
+```
+
+the request isn't protected against network observers in the way HTTPS provides.
+
+With HTTPS:
+
+```text
+https://example.com
+```
+
+TLS protects the HTTP traffic while it travels over the network.
+
+We'll study:
+
+```text
+HTTP
+ ↓
+HTTPS
+ ↓
+TLS
+```
+
+later.
+
+For now:
+
+> **A Bearer token should generally be sent over HTTPS, not plain HTTP.**
+
+---
+
+# 🧪 Hands-on exercise
+
+### 1. No token
+
+```bash
+curl -v http://localhost:8080/
+```
+
+### 2. Correct token
+
+```bash
+curl -v \
+  -H "Authorization: Bearer abc123" \
+  http://localhost:8080/
+```
+
+### 3. Wrong token
+
+```bash
+curl -v \
+  -H "Authorization: Bearer wrong" \
+  http://localhost:8080/
+```
+
+### 4. Inspect with `nc`
+
+```bash
+nc localhost 8080
+```
+
+Then:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer abc123
+
+```
+
+Look at your Python server.
+
+You should see:
+
+```text
+Authorization: Bearer abc123
+```
+
+---
+
+# 🧠 The key idea to remember
+
+Don't jump directly to:
+
+```text
+Bearer token = JWT
+```
+
+That's **not true**.
+
+The hierarchy is:
+
+```text
+HTTP
+ │
+ └── Authorization header
+          │
+          └── authentication scheme
+                    │
+                    └── Bearer
+                          │
+                          └── credential/token
+                                │
+                                ├── opaque token
+                                └── JWT
+```
+
+JWT is just **one possible kind of token** that can be carried using the Bearer scheme.
+
+We'll eventually understand why JWT exists and what problem it solves.
+
+---
+
+## Next → Lesson 20: What actually happens during Login?
+
+We'll go from:
+
+```text
+Authorization: Bearer abc123
+```
+
+backward and ask the more important question:
+
+> **Where did `abc123` come from in the first place?**
+
+We'll build the flow:
+
+```text
+POST /login
+      ↓
+username + password
+      ↓
+server verifies credentials
+      ↓
+server creates token
+      ↓
+client stores token
+      ↓
+Authorization: Bearer <token>
+      ↓
+future requests
+```
+
+Then we'll uncover the next problem:
+
+> **If the server creates a token, how does it know whether that token is still valid?**
+
+That leads naturally into **opaque tokens, server-side sessions, JWTs, access tokens, and refresh tokens**.
+
+---
+
