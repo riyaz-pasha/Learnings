@@ -31064,3 +31064,970 @@ head-of-line blocking
 and then see why **HTTP/2** changed the way multiple requests are transported over a single connection.
 
 ---
+
+# Lesson 35 — HTTP Connections: Keep-Alive, Reuse, and HTTP/2
+
+We've been treating HTTP like:
+
+```text
+Client → Request → Server
+Client ← Response ← Server
+```
+
+A natural question is:
+
+> **After the response is received, does the TCP connection close?**
+
+Historically, that could happen. But repeatedly creating TCP connections is expensive.
+
+That led to **persistent connections**.
+
+---
+
+# 1. The problem with one TCP connection per request
+
+Imagine a page needs:
+
+```text
+GET /index.html
+GET /style.css
+GET /app.js
+GET /logo.png
+GET /api/users
+```
+
+If every request creates a new TCP connection:
+
+```text
+TCP connection 1 → HTML → close
+TCP connection 2 → CSS  → close
+TCP connection 3 → JS   → close
+TCP connection 4 → PNG  → close
+TCP connection 5 → API  → close
+```
+
+That's wasteful.
+
+TCP connection establishment itself requires network round trips.
+
+And with HTTPS, there's additional TLS setup.
+
+So we want:
+
+```text
+TCP connection
+      │
+      ├── Request 1
+      ├── Response 1
+      ├── Request 2
+      ├── Response 2
+      ├── Request 3
+      ├── Response 3
+      └── ...
+```
+
+This is **connection reuse**.
+
+---
+
+# 2. HTTP/1.1 persistent connections
+
+HTTP/1.1 made persistent connections the normal behavior.
+
+For example:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Length: 42
+
+...
+```
+
+The server doesn't necessarily close the TCP connection after those 42 bytes.
+
+The client knows exactly where the response ends because of:
+
+```http
+Content-Length: 42
+```
+
+Then it can send another request over the same TCP connection.
+
+---
+
+# 3. Why `Content-Length` suddenly becomes extremely important
+
+Imagine this:
+
+```text
+TCP connection
+─────────────────────────────────────────
+GET /users
+HTTP response
+GET /products
+HTTP response
+```
+
+How does the client know where the first response ends?
+
+TCP itself doesn't know anything about HTTP messages.
+
+TCP just gives us:
+
+```text
+bytes bytes bytes bytes bytes...
+```
+
+HTTP needs a way to frame those bytes.
+
+For example:
+
+```http
+Content-Length: 100
+```
+
+means:
+
+```text
+next 100 bytes = response body
+```
+
+After those 100 bytes:
+
+```text
+response finished
+```
+
+Then another HTTP request can begin.
+
+This is one reason **message framing** is fundamental to HTTP/1.1.
+
+---
+
+# 4. Three ways HTTP/1.1 can determine body boundaries
+
+For a response, broadly speaking, HTTP can determine the message body length through mechanisms such as:
+
+```text
+Content-Length
+Transfer-Encoding: chunked
+connection close
+```
+
+Let's look at them.
+
+---
+
+## Method 1 — Content-Length
+
+```http
+HTTP/1.1 200 OK
+Content-Length: 12
+
+Hello World!
+```
+
+The client knows:
+
+```text
+12 bytes → body
+```
+
+Then the response is complete.
+
+The connection can remain open.
+
+---
+
+# 5. Method 2 — Chunked transfer encoding
+
+Suppose the server doesn't know the final response size upfront.
+
+It can use:
+
+```http
+Transfer-Encoding: chunked
+```
+
+Example:
+
+```http
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+
+5
+Hello
+6
+ World
+0
+```
+
+Remember the structure:
+
+```text
+5
+Hello
+```
+
+means:
+
+```text
+5 bytes
+Hello
+```
+
+Then:
+
+```text
+6
+ World
+```
+
+means:
+
+```text
+6 bytes
+ World
+```
+
+Finally:
+
+```text
+0
+```
+
+means:
+
+> The body is finished.
+
+The connection can remain open after that.
+
+---
+
+# 6. Method 3 — Connection close
+
+Historically, another way to signal:
+
+> "The response body is finished"
+
+was simply:
+
+```text
+TCP connection closes
+```
+
+The client sees:
+
+```text
+bytes
+bytes
+bytes
+connection closed
+```
+
+and knows:
+
+> That's the end of the response.
+
+But now the connection can't be reused.
+
+So:
+
+```text
+connection close
+      ↓
+clear boundary
+      ↓
+but no connection reuse
+```
+
+---
+
+# 7. Why HTTP/1.1 needs message framing
+
+Suppose you receive:
+
+```text
+200 OK
+helloGET /products...
+```
+
+Where does the first response end?
+
+HTTP needs to answer that.
+
+That's why these mechanisms matter:
+
+```text
+Content-Length
+Transfer-Encoding
+connection termination
+```
+
+Without reliable framing, the client wouldn't know where one message ends and the next begins.
+
+---
+
+# 8. Let's inspect connection reuse
+
+Run:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+You may see connection information indicating reuse depending on the server/client.
+
+A particularly useful command is:
+
+```bash
+curl -v http://localhost:8080/ http://localhost:8080/
+```
+
+Curl can make multiple requests.
+
+You may see messages indicating that an existing connection is being reused.
+
+The exact output depends on the HTTP version negotiated and the curl/server implementation.
+
+---
+
+# 9. `Connection: keep-alive`
+
+You may have seen:
+
+```http
+Connection: keep-alive
+```
+
+Historically, HTTP/1.0 commonly needed explicit signaling for persistent connections.
+
+HTTP/1.1 changed the default behavior: connections are persistent unless closed or otherwise specified.
+
+So don't learn:
+
+> "`Connection: keep-alive` is required for HTTP/1.1."
+
+That's not correct.
+
+In HTTP/1.1, persistence is normally the default.
+
+---
+
+# 10. `Connection: close`
+
+The server can explicitly say:
+
+```http
+HTTP/1.1 200 OK
+Connection: close
+```
+
+This means:
+
+> After this response, close the connection.
+
+So:
+
+```text
+Request
+   ↓
+Response
+   ↓
+connection closes
+```
+
+No reuse.
+
+This can still be useful when the server wants to terminate the connection.
+
+---
+
+# 11. Why not simply keep connections forever?
+
+Because connections consume resources.
+
+Imagine:
+
+```text
+100,000 clients
+        ↓
+100,000 open TCP connections
+```
+
+The server has to maintain:
+
+```text
+socket state
+TCP state
+memory
+file descriptors
+TLS state
+```
+
+So servers generally use connection-management policies such as:
+
+```text
+idle timeout
+maximum connection lifetime
+maximum requests
+resource limits
+```
+
+A persistent connection doesn't mean:
+
+> "This TCP connection stays open forever."
+
+It means:
+
+> "The connection can be reused for multiple HTTP exchanges."
+
+---
+
+# 12. Now comes HTTP/1.1 pipelining
+
+Suppose we want:
+
+```text
+GET /a
+GET /b
+GET /c
+```
+
+A naive HTTP/1.1 client might do:
+
+```text
+request /a
+response /a
+
+request /b
+response /b
+
+request /c
+response /c
+```
+
+Even with one TCP connection, each request waits for the previous response.
+
+HTTP/1.1 introduced **pipelining**, which allowed requests to be sent without waiting for each response:
+
+```text
+GET /a
+GET /b
+GET /c
+
+response /a
+response /b
+response /c
+```
+
+Sounds great.
+
+But there was a serious problem.
+
+---
+
+# 13. Head-of-line blocking
+
+Suppose:
+
+```text
+GET /slow
+GET /fast
+```
+
+The server takes:
+
+```text
+/slow → 5 seconds
+/fast → 10 ms
+```
+
+HTTP/1.1 pipelining requires responses to remain ordered.
+
+So:
+
+```text
+Request:
+  /slow
+  /fast
+
+Response:
+  /slow ← 5 seconds
+  /fast ← must wait
+```
+
+Even though `/fast` was ready immediately.
+
+This is **head-of-line blocking**.
+
+The first response blocks later responses.
+
+---
+
+# 14. The browser workaround
+
+Instead of relying heavily on HTTP/1.1 pipelining, browsers historically opened multiple TCP connections to the same server.
+
+Conceptually:
+
+```text
+Connection 1
+  /slow
+
+Connection 2
+  /fast
+
+Connection 3
+  /image1
+
+Connection 4
+  /image2
+```
+
+Now slow work on one connection doesn't necessarily block work on another.
+
+But this creates another problem:
+
+```text
+many TCP connections
+        ↓
+more resources
+more handshakes
+more congestion
+more complexity
+```
+
+We wanted something better.
+
+---
+
+# 15. HTTP/2 changes the model
+
+HTTP/2 introduced **multiplexing**.
+
+Instead of:
+
+```text
+TCP connection
+   ↓
+one HTTP exchange at a time
+```
+
+we can have:
+
+```text
+ONE TCP connection
+       │
+       ├── Stream 1 → /slow
+       ├── Stream 3 → /fast
+       ├── Stream 5 → /image
+       └── Stream 7 → /api
+```
+
+Data from different streams can be interleaved.
+
+Conceptually:
+
+```text
+TCP connection
+──────────────────────────────────────
+
+/slow   → chunk
+/fast   → chunk
+/slow   → chunk
+/image  → chunk
+/fast   → chunk
+/slow   → chunk
+```
+
+The HTTP/2 layer knows which bytes belong to which stream.
+
+---
+
+# 16. HTTP/2 uses binary framing
+
+HTTP/1.1 messages are textual:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+HTTP/2 uses a **binary framing layer**.
+
+Instead of thinking:
+
+```text
+text request
+text headers
+text body
+```
+
+think:
+
+```text
+HTTP/2 frame
+HTTP/2 frame
+HTTP/2 frame
+...
+```
+
+Frames contain information such as:
+
+```text
+stream identifier
+frame type
+flags
+payload length
+payload
+```
+
+This makes multiplexing possible.
+
+---
+
+# 17. Streams
+
+Suppose:
+
+```text
+Stream 1 → GET /users
+Stream 3 → GET /products
+Stream 5 → GET /orders
+```
+
+The server can send frames for all of them over one connection:
+
+```text
+TCP
+ │
+ ├── Stream 1 frame
+ ├── Stream 3 frame
+ ├── Stream 1 frame
+ ├── Stream 5 frame
+ ├── Stream 3 frame
+ └── Stream 1 frame
+```
+
+The client uses the stream ID to reconstruct each response.
+
+That's fundamentally different from HTTP/1.1's ordered text-message approach.
+
+---
+
+# 18. HTTP/2 still uses TCP
+
+This is an important point.
+
+HTTP/2:
+
+```text
+HTTP/2
+   ↓
+TCP
+   ↓
+IP
+```
+
+So HTTP/2 doesn't replace TCP.
+
+It changes how HTTP messages are multiplexed over the connection.
+
+---
+
+# 19. But HTTP/2 still has a TCP-level limitation
+
+Here's the subtle part.
+
+Suppose packet loss occurs.
+
+Because TCP guarantees ordered delivery, later bytes may have to wait for the missing TCP data to be retransmitted.
+
+So even though HTTP/2 multiplexes streams at the HTTP layer:
+
+```text
+Stream A ─┐
+Stream B ─┼── TCP
+Stream C ─┘
+```
+
+TCP can still introduce transport-level head-of-line blocking.
+
+This helped motivate HTTP/3.
+
+---
+
+# 20. HTTP/3
+
+HTTP/3 uses:
+
+```text
+HTTP/3
+   ↓
+QUIC
+   ↓
+UDP
+```
+
+rather than:
+
+```text
+HTTP/2
+   ↓
+TCP
+```
+
+QUIC provides reliable streams while allowing loss in one stream to be handled without necessarily blocking unrelated streams.
+
+Conceptually:
+
+```text
+HTTP/2:
+
+Stream A ─┐
+Stream B ─┼── TCP
+Stream C ─┘
+            ↓
+       packet loss
+            ↓
+       TCP ordering
+            ↓
+    potentially affects all
+```
+
+HTTP/3:
+
+```text
+Stream A ─┐
+Stream B ─┼── QUIC
+Stream C ─┘
+            ↓
+      loss in A
+            ↓
+      A affected
+      B/C can continue
+```
+
+This is one of the major architectural differences.
+
+---
+
+# 21. The evolution
+
+Now you can see why HTTP evolved:
+
+```text
+HTTP/1.0
+   ↓
+new connection frequently
+
+HTTP/1.1
+   ↓
+persistent connections
+   ↓
+connection reuse
+
+HTTP/1.1 pipelining
+   ↓
+head-of-line problems
+   ↓
+multiple TCP connections
+
+HTTP/2
+   ↓
+multiplexed streams
+   ↓
+one TCP connection
+
+HTTP/2
+   ↓
+TCP-level HOL limitation
+
+HTTP/3
+   ↓
+QUIC
+   ↓
+independent streams
+```
+
+---
+
+# 22. A very useful comparison
+
+|                           | HTTP/1.1 | HTTP/2 | HTTP/3 |
+| ------------------------- | -------- | ------ | ------ |
+| Transport                 | TCP      | TCP    | QUIC   |
+| HTTP framing              | Text     | Binary | Binary |
+| Persistent connection     | Yes      | Yes    | Yes    |
+| Multiplexing              | No       | Yes    | Yes    |
+| Streams                   | No       | Yes    | Yes    |
+| TCP head-of-line blocking | Yes      | Yes    | N/A    |
+| QUIC                      | No       | No     | Yes    |
+
+---
+
+# 23. Don't make this mistake
+
+HTTP/2 does **not** mean:
+
+> "HTTP/2 sends everything at once."
+
+It means:
+
+> **Multiple independent HTTP streams can be multiplexed over the same connection.**
+
+The server and client still have flow control, prioritization mechanisms, congestion control at the transport layer, and other constraints.
+
+---
+
+# 24. One more important connection to what we've learned
+
+Remember:
+
+```text
+Content-Length
+Transfer-Encoding
+```
+
+Those are primarily relevant to **HTTP/1.x message framing**.
+
+HTTP/2 and HTTP/3 have their own binary framing mechanisms.
+
+So don't carry every HTTP/1.1 detail directly into HTTP/2.
+
+For example, HTTP/2 does not use HTTP/1.1's `Transfer-Encoding: chunked` mechanism.
+
+---
+
+# 25. Your mental model now
+
+At the lowest level:
+
+```text
+Application
+    ↓
+HTTP
+    ↓
+Transport
+    ↓
+IP
+```
+
+For HTTP/1.1:
+
+```text
+HTTP/1.1
+    ↓
+TCP
+    ↓
+IP
+```
+
+For HTTP/2:
+
+```text
+HTTP/2
+    ↓
+TCP
+    ↓
+IP
+```
+
+For HTTP/3:
+
+```text
+HTTP/3
+    ↓
+QUIC
+    ↓
+UDP
+    ↓
+IP
+```
+
+And the key evolution is:
+
+```text
+HTTP/1.1
+one persistent TCP connection
+      ↓
+multiple sequential requests
+
+
+HTTP/2
+one TCP connection
+      ↓
+multiple multiplexed streams
+
+
+HTTP/3
+one QUIC connection
+      ↓
+multiple independent streams
+```
+
+---
+
+## One final experiment
+
+Run:
+
+```bash
+curl -v --http1.1 https://example.com
+```
+
+Then:
+
+```bash
+curl -v --http2 https://example.com
+```
+
+If your installed `curl` supports HTTP/2, the verbose output will show the negotiated protocol.
+
+You can also check:
+
+```bash
+curl --version
+```
+
+Look for HTTP/2 support in the listed features.
+
+This is a good point to pause and make sure the layers are clear:
+
+```text
+HTTP message
+    ↓
+HTTP connection
+    ↓
+TCP / QUIC
+    ↓
+IP
+```
+
+### Next: Lesson 36 — HTTP/2 Deep Dive
+
+We'll go one level deeper into HTTP/2:
+
+```text
+Frames
+Streams
+HEADERS
+DATA
+HPACK
+Multiplexing
+Flow control
+Stream IDs
+```
+
+and manually understand what actually happens when **three HTTP requests share one TCP connection**.
+
+---
+
