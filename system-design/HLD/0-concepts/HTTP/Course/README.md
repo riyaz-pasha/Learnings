@@ -29052,3 +29052,1059 @@ Cookie: session_id=abc123
 on the next request.
 
 ---
+
+# Lesson 33 — HTTP Cookies in Depth
+
+We already learned the basic idea:
+
+```text
+Server
+   │
+   │ Set-Cookie
+   ▼
+Browser
+   │
+   │ Cookie
+   ▼
+Server
+```
+
+Now let's understand **how cookies actually work at the HTTP level**.
+
+---
+
+# 1. Why were cookies created?
+
+HTTP is fundamentally stateless.
+
+Suppose you make:
+
+```http
+GET /profile
+```
+
+The server receives a request.
+
+Then you make another:
+
+```http
+GET /orders
+```
+
+From HTTP's perspective, these are two independent requests.
+
+The server doesn't automatically know:
+
+> "This is the same person who made the previous request."
+
+We need some mechanism to associate requests with a client/session.
+
+Cookies solve this problem.
+
+---
+
+# 2. The server sets a cookie
+
+Suppose you log in:
+
+```http
+POST /login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"username":"riyaz","password":"secret"}
+```
+
+Server responds:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123
+Content-Type: application/json
+
+{"message":"Login successful"}
+```
+
+The important header is:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+This tells the user agent:
+
+> Store this cookie according to the cookie attributes.
+
+---
+
+# 3. The browser stores it
+
+Conceptually:
+
+```text
+Browser cookie jar
+
+example.com
+└── session_id = abc123
+```
+
+The cookie isn't part of the response body.
+
+It's metadata in the HTTP response:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+---
+
+# 4. Next request
+
+The browser later requests:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+```
+
+Because the cookie matches the request, the browser automatically adds:
+
+```http
+Cookie: session_id=abc123
+```
+
+So the actual request becomes:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+The server can now use:
+
+```text
+session_id=abc123
+        ↓
+lookup session
+        ↓
+user_id = 42
+        ↓
+Riyaz
+```
+
+This is the fundamental cookie mechanism.
+
+---
+
+# 5. `Set-Cookie` vs `Cookie`
+
+This distinction is extremely important.
+
+### Server → Client
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+### Client → Server
+
+```http
+Cookie: session_id=abc123
+```
+
+They are different HTTP headers.
+
+Think:
+
+```text
+Set-Cookie
+     ↓
+"Store this"
+
+Cookie
+     ↓
+"Here are my stored cookies for this request"
+```
+
+---
+
+# 6. Let's see this manually with curl
+
+Start your local server.
+
+Add:
+
+```python
+def do_GET(self):
+    if self.path == "/login":
+        self.send_response(200)
+        self.send_header("Set-Cookie", "session_id=abc123")
+        self.end_headers()
+        self.wfile.write(b"Logged in")
+```
+
+Now:
+
+```bash
+curl -v http://localhost:8080/login
+```
+
+You'll see:
+
+```http
+< HTTP/1.0 200 OK
+< Set-Cookie: session_id=abc123
+```
+
+But here's an important point:
+
+> **curl doesn't necessarily maintain cookies between independent requests unless you tell it to.**
+
+Use a cookie jar:
+
+```bash
+curl -c cookies.txt http://localhost:8080/login
+```
+
+`-c` means:
+
+> Write received cookies to this file.
+
+Look at it:
+
+```bash
+cat cookies.txt
+```
+
+You should see information representing:
+
+```text
+session_id
+abc123
+```
+
+Now send the stored cookies:
+
+```bash
+curl -b cookies.txt http://localhost:8080/profile
+```
+
+Conceptually:
+
+```text
+/login
+   ↓
+Set-Cookie
+   ↓
+cookies.txt
+   ↓
+/profile
+   ↓
+Cookie: session_id=abc123
+```
+
+This is a great way to learn cookies without relying on browser DevTools.
+
+---
+
+# 7. Cookie attributes
+
+The simplest cookie is:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+But production cookies usually look more like:
+
+```http
+Set-Cookie: session_id=abc123; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+Each attribute controls something different.
+
+Let's take them one at a time.
+
+---
+
+# 8. `Path`
+
+Suppose:
+
+```http
+Set-Cookie: session_id=abc123; Path=/
+```
+
+The cookie can be sent for paths under `/`.
+
+For example:
+
+```text
+/
+ /profile
+ /orders
+ /settings
+```
+
+Now consider:
+
+```http
+Set-Cookie: admin_session=xyz; Path=/admin
+```
+
+That cookie is intended for:
+
+```text
+/admin
+/admin/users
+/admin/settings
+```
+
+but not ordinary:
+
+```text
+/profile
+/orders
+```
+
+Conceptually:
+
+```text
+Path=/
+   ↓
+almost entire site
+
+Path=/admin
+   ↓
+admin area
+```
+
+---
+
+# 9. `Domain`
+
+Suppose:
+
+```http
+Set-Cookie: session_id=abc123; Domain=example.com
+```
+
+This controls which hosts the cookie can be sent to.
+
+For example:
+
+```text
+example.com
+api.example.com
+www.example.com
+```
+
+depending on cookie/domain matching rules.
+
+A useful security principle is:
+
+> Don't make cookie scope broader than necessary.
+
+A cookie intended only for `app.example.com` should not casually be exposed to every subdomain.
+
+---
+
+# 10. `Secure`
+
+Consider:
+
+```http
+Set-Cookie: session_id=abc123; Secure
+```
+
+`Secure` means:
+
+> Send this cookie only over secure connections, normally HTTPS.
+
+So:
+
+```text
+https://example.com
+       ↓
+Cookie sent
+
+
+http://example.com
+       ↓
+Cookie not sent
+```
+
+This protects against sending the cookie over an unencrypted HTTP connection.
+
+But remember:
+
+> `Secure` does **not** mean the cookie cannot be stolen by XSS.
+
+It addresses transport security, not JavaScript access.
+
+---
+
+# 11. `HttpOnly`
+
+Now:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly
+```
+
+This tells the browser:
+
+> Don't expose this cookie to normal JavaScript cookie APIs.
+
+So:
+
+```javascript
+document.cookie
+```
+
+won't directly expose the `HttpOnly` cookie.
+
+This is useful for authentication/session cookies.
+
+But there's an important nuance.
+
+Suppose an attacker manages to execute JavaScript on your site through XSS.
+
+Even though they can't read:
+
+```text
+session_id
+```
+
+the browser may still automatically attach the cookie when that JavaScript makes a request to your site.
+
+So:
+
+```text
+HttpOnly
+   ↓
+prevents direct cookie reading
+```
+
+It does **not** mean:
+
+```text
+XSS is harmless
+```
+
+An attacker-controlled script may still perform authenticated actions.
+
+---
+
+# 12. `SameSite`
+
+This is one of the most important modern cookie attributes.
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Lax
+```
+
+`SameSite` controls when cookies are sent in cross-site contexts.
+
+The main values are:
+
+```text
+Strict
+Lax
+None
+```
+
+---
+
+# 13. `SameSite=Strict`
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Strict
+```
+
+This is the strictest option.
+
+The browser generally avoids sending the cookie in cross-site contexts.
+
+Conceptually:
+
+```text
+same-site request
+    ↓
+cookie sent
+
+
+cross-site request
+    ↓
+cookie generally withheld
+```
+
+This provides strong protection against some CSRF scenarios.
+
+But it can affect legitimate cross-site flows.
+
+---
+
+# 14. `SameSite=Lax`
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Lax
+```
+
+This allows more legitimate navigation behavior while still restricting many cross-site request contexts.
+
+`Lax` is a common choice for ordinary authentication/session cookies.
+
+Think:
+
+```text
+Strict
+  ↑
+more restrictive
+
+Lax
+  ↑
+more permissive
+```
+
+The exact browser behavior has specific rules, so don't reduce SameSite to simply "same-site vs cross-site."
+
+---
+
+# 15. `SameSite=None`
+
+```http
+Set-Cookie: session_id=abc123; SameSite=None; Secure
+```
+
+This explicitly permits the cookie to be used in cross-site contexts, subject to other browser rules.
+
+Modern browsers require:
+
+```text
+SameSite=None
+        +
+Secure
+```
+
+So:
+
+```http
+Set-Cookie: session_id=abc123; SameSite=None; Secure
+```
+
+is valid.
+
+---
+
+# 16. Why does SameSite matter?
+
+Remember our earlier CSRF example.
+
+Suppose you're logged into:
+
+```text
+bank.example
+```
+
+with:
+
+```text
+session_id=abc123
+```
+
+You visit:
+
+```text
+evil.example
+```
+
+The malicious site tries to cause:
+
+```http
+POST https://bank.example/transfer
+```
+
+If the browser automatically attaches:
+
+```http
+Cookie: session_id=abc123
+```
+
+the bank may see an authenticated request.
+
+That's the CSRF problem.
+
+SameSite cookies can reduce this risk by controlling whether the authentication cookie accompanies cross-site requests.
+
+But don't think:
+
+> "SameSite means CSRF is impossible."
+
+Applications can have legitimate cross-site requirements and browsers have detailed cookie rules. CSRF tokens and appropriate origin checks can still be valuable defenses.
+
+---
+
+# 17. `Expires` and `Max-Age`
+
+Cookies can be temporary or persistent.
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; Max-Age=3600
+```
+
+means approximately:
+
+```text
+store for 3600 seconds
+```
+
+Another option:
+
+```http
+Set-Cookie: session_id=abc123; Expires=...
+```
+
+specifies an expiration date/time.
+
+Conceptually:
+
+```text
+Session cookie
+    ↓
+lives according to browser session rules
+
+
+Persistent cookie
+    ↓
+has Expires / Max-Age
+```
+
+`Max-Age` specifies a duration and is generally easier to reason about than an absolute expiration timestamp.
+
+---
+
+# 18. Deleting a cookie
+
+Suppose we have:
+
+```http
+Set-Cookie: session_id=abc123; Path=/
+```
+
+To delete it, the server can send another cookie with the same relevant scope and an immediate expiration, for example:
+
+```http
+Set-Cookie: session_id=; Max-Age=0; Path=/
+```
+
+The browser removes/invalidates the stored cookie.
+
+Notice something subtle:
+
+> Cookie deletion needs to match the relevant cookie scope.
+
+If the original cookie had:
+
+```text
+Path=/
+```
+
+but you try to delete:
+
+```text
+Path=/admin
+```
+
+you may not be deleting the same cookie.
+
+---
+
+# 19. Multiple cookies
+
+A response can contain multiple `Set-Cookie` headers:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123; HttpOnly; Secure
+Set-Cookie: theme=dark; Max-Age=86400
+```
+
+The browser stores both:
+
+```text
+session_id = abc123
+theme      = dark
+```
+
+Later:
+
+```http
+Cookie: session_id=abc123; theme=dark
+```
+
+Notice the difference:
+
+### Response
+
+Multiple `Set-Cookie` headers:
+
+```http
+Set-Cookie: ...
+Set-Cookie: ...
+```
+
+### Request
+
+Usually one `Cookie` header containing multiple cookie pairs:
+
+```http
+Cookie: a=1; b=2
+```
+
+---
+
+# 20. Cookie ≠ Session
+
+This is worth reinforcing.
+
+Suppose:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+The cookie is:
+
+```text
+session_id=abc123
+```
+
+But the actual session might live on the server:
+
+```text
+Redis / database
+
+abc123 → user_id=42
+```
+
+So:
+
+```text
+Cookie
+  ↓
+session identifier
+  ↓
+server-side session
+  ↓
+user
+```
+
+The cookie itself isn't necessarily the session.
+
+This distinction is important in interviews.
+
+---
+
+# 21. Cookie vs JWT
+
+Compare:
+
+### Session cookie
+
+```text
+Browser
+   │
+   │ session_id=abc123
+   ▼
+Server
+   │
+   │ lookup abc123
+   ▼
+Session store
+   │
+   ▼
+User
+```
+
+### JWT
+
+```text
+Browser
+   │
+   │ Authorization: Bearer <JWT>
+   ▼
+API
+   │
+   │ verify signature
+   ▼
+claims
+```
+
+But JWTs can also be stored in cookies.
+
+So:
+
+> **Cookie and JWT are not competing concepts.**
+
+They answer different questions.
+
+```text
+Cookie
+→ how browser stores/sends data
+
+JWT
+→ a token format
+```
+
+---
+
+# 22. A realistic authentication cookie
+
+A common session-cookie response might look like:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: session_id=abc123; Path=/; Secure; HttpOnly; SameSite=Lax
+Content-Type: application/json
+
+{"message":"Logged in"}
+```
+
+Then:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+Server:
+
+```text
+session_id
+    ↓
+lookup session
+    ↓
+user_id = 42
+    ↓
+authorize request
+    ↓
+return profile
+```
+
+---
+
+# 23. One subtle HTTP detail: cookies aren't authentication by themselves
+
+This:
+
+```http
+Cookie: user_id=42
+```
+
+doesn't inherently prove:
+
+> "I am user 42."
+
+A malicious client can send:
+
+```http
+Cookie: user_id=999
+```
+
+The server must decide whether the cookie represents a valid authenticated credential.
+
+A secure session cookie is usually an unpredictable random identifier:
+
+```text
+session_id = long-random-value
+```
+
+not:
+
+```text
+user_id = 42
+```
+
+The server maps the random identifier to authenticated session state.
+
+---
+
+# 24. Cookie security checklist
+
+For a sensitive authentication/session cookie, you'll commonly see:
+
+```http
+Set-Cookie: session_id=<random>;
+    Path=/;
+    Secure;
+    HttpOnly;
+    SameSite=Lax
+```
+
+Think:
+
+```text
+Secure
+  ↓
+HTTPS only
+
+HttpOnly
+  ↓
+not directly readable by JS
+
+SameSite
+  ↓
+control cross-site sending
+
+Random session ID
+  ↓
+hard to guess
+
+Server-side session
+  ↓
+actual authentication state
+```
+
+---
+
+# 25. Hands-on exercise
+
+Modify your local server so:
+
+```text
+GET /login
+```
+
+returns:
+
+```http
+Set-Cookie: session_id=abc123; Path=/; HttpOnly
+```
+
+Then make:
+
+```text
+GET /profile
+```
+
+check:
+
+```python
+cookie = self.headers.get("Cookie")
+print(cookie)
+```
+
+Run:
+
+```bash
+curl -c cookies.txt http://localhost:8080/login
+```
+
+Then:
+
+```bash
+curl -b cookies.txt http://localhost:8080/profile
+```
+
+Your server should receive:
+
+```http
+Cookie: session_id=abc123
+```
+
+Now try without the cookie:
+
+```bash
+curl http://localhost:8080/profile
+```
+
+You'll see the difference.
+
+---
+
+# The complete picture
+
+We've now gone from:
+
+```text
+HTTP
+ │
+ ├── Request
+ ├── Response
+ ├── Headers
+ ├── Body
+ │
+ ├── Authentication
+ │    ├── Authorization
+ │    ├── Sessions
+ │    ├── Cookies
+ │    └── JWT
+ │
+ ├── Security
+ │    ├── CSRF
+ │    ├── CORS
+ │    └── SameSite
+ │
+ ├── Caching
+ │
+ └── Redirects
+```
+
+And cookies fit into authentication like this:
+
+```text
+                 LOGIN
+                   │
+                   ▼
+          POST /login
+                   │
+                   ▼
+              Server
+                   │
+          create session
+                   │
+                   ▼
+        Set-Cookie: session_id=...
+                   │
+                   ▼
+                Browser
+                   │
+             stores cookie
+                   │
+                   ▼
+        GET /profile
+        Cookie: session_id=...
+                   │
+                   ▼
+                Server
+                   │
+            lookup session
+                   │
+                   ▼
+              User = 42
+```
+
+### Next: Lesson 34 — HTTP Compression
+
+We'll look at what actually happens when you see:
+
+```http
+Content-Encoding: gzip
+```
+
+and:
+
+```http
+Accept-Encoding: gzip, br
+```
+
+You'll learn the difference between **`Content-Encoding` and `Transfer-Encoding`**, why `Vary: Accept-Encoding` matters for caches, and we'll inspect compressed HTTP responses with `curl -v`.
+
+
+---
+
