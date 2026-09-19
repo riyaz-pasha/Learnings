@@ -674,3 +674,768 @@ Next, we'll do **Diffie-Hellman by hand with tiny numbers first**, then use Open
 
 ---
 
+# Lesson 3 — The Key Exchange Problem → Diffie-Hellman
+
+We ended with the biggest question:
+
+> **How can two computers create the same secret key when an attacker can see everything they exchange?**
+
+Let's solve that problem.
+
+---
+
+## 1. The naive approach doesn't work
+
+Alice and Bob want to communicate securely.
+
+They need:
+
+```text
+Alice 🔑 ───────── 🔑 Bob
+```
+
+Suppose Alice generates:
+
+```text
+SECRET = 123456
+```
+
+and sends it:
+
+```text
+Alice ──── 123456 ────> Bob
+                 👀
+              Attacker
+```
+
+The attacker now knows the secret.
+
+So we need something clever.
+
+---
+
+# 2. Diffie-Hellman: the idea
+
+Diffie-Hellman allows:
+
+```text
+Alice                         Bob
+  │                             │
+  │                             │
+  │──── public information ────>│
+  │<─── public information ─────│
+  │                             │
+  │                             │
+  └────── 🔑 same secret ───────┘
+```
+
+The important part:
+
+```text
+Attacker sees the communication
+            ↓
+       👀 👀 👀
+            ↓
+But cannot practically calculate
+the shared secret
+```
+
+**The secret itself is never transmitted.**
+
+That's the key idea.
+
+---
+
+# 3. Let's use tiny numbers
+
+Real Diffie-Hellman uses enormous numbers and sophisticated mathematics.
+
+We'll use tiny numbers so we can understand the mechanism.
+
+Alice and Bob publicly agree on two numbers:
+
+```text
+p = 23
+g = 5
+```
+
+These aren't secrets.
+
+Everyone can know them.
+
+```text
+             PUBLIC
+          p = 23
+          g = 5
+
+Alice 👩                 Bob 👨
+        \               /
+         \             /
+          👀 Attacker
+```
+
+---
+
+# 4. Alice chooses a private number
+
+Alice secretly chooses:
+
+```text
+a = 6
+```
+
+She does **not** send `6`.
+
+```text
+Alice
+
+private:
+a = 6 🔒
+```
+
+She calculates:
+
+```text
+A = g^a mod p
+```
+
+So:
+
+```text
+A = 5^6 mod 23
+```
+
+That gives:
+
+```text
+A = 8
+```
+
+Alice sends:
+
+```text
+8
+```
+
+to Bob.
+
+---
+
+# 5. Bob does the same thing
+
+Bob secretly chooses:
+
+```text
+b = 15
+```
+
+Again:
+
+```text
+b = 15
+```
+
+is private.
+
+Bob calculates:
+
+```text
+B = g^b mod p
+```
+
+So:
+
+```text
+B = 5^15 mod 23
+```
+
+which gives:
+
+```text
+B = 19
+```
+
+Bob sends:
+
+```text
+19
+```
+
+to Alice.
+
+---
+
+# 6. Look at what the attacker sees
+
+The attacker can see:
+
+```text
+p = 23
+g = 5
+
+Alice → 8
+
+Bob → 19
+```
+
+So the attacker knows:
+
+```text
+23
+5
+8
+19
+```
+
+But does **not** know:
+
+```text
+Alice's private a = 6
+Bob's private b = 15
+```
+
+---
+
+# 7. Now Alice calculates the shared secret
+
+Alice received:
+
+```text
+B = 19
+```
+
+She has her private value:
+
+```text
+a = 6
+```
+
+She calculates:
+
+```text
+secret = B^a mod p
+```
+
+Therefore:
+
+```text
+secret = 19^6 mod 23
+```
+
+Result:
+
+```text
+secret = 2
+```
+
+---
+
+# 8. Bob calculates the shared secret
+
+Bob received:
+
+```text
+A = 8
+```
+
+He has his private value:
+
+```text
+b = 15
+```
+
+He calculates:
+
+```text
+secret = A^b mod p
+```
+
+Therefore:
+
+```text
+secret = 8^15 mod 23
+```
+
+Result:
+
+```text
+secret = 2
+```
+
+Both have:
+
+```text
+🔑 2
+```
+
+without ever sending `2`.
+
+---
+
+# 9. The magic
+
+The mathematics gives us:
+
+```text
+(B^a) mod p
+=
+(A^b) mod p
+```
+
+because:
+
+```text
+B = g^b
+A = g^a
+```
+
+Therefore:
+
+```text
+B^a
+= (g^b)^a
+= g^(ab)
+
+A^b
+= (g^a)^b
+= g^(ab)
+```
+
+So both sides arrive at the same result.
+
+---
+
+# 10. What does the attacker need to do?
+
+The attacker sees:
+
+```text
+g = 5
+p = 23
+A = 8
+B = 19
+```
+
+They want:
+
+```text
+🔑 shared secret
+```
+
+They would need to recover something like:
+
+```text
+a from:
+
+A = g^a mod p
+```
+
+or:
+
+```text
+b from:
+
+B = g^b mod p
+```
+
+This is related to the **discrete logarithm problem**.
+
+With our tiny numbers:
+
+```text
+5^6 mod 23 = 8
+```
+
+an attacker could simply try:
+
+```text
+5^1 mod 23
+5^2 mod 23
+5^3 mod 23
+...
+```
+
+and discover:
+
+```text
+a = 6
+```
+
+So our example is obviously insecure.
+
+Real cryptography uses parameters large enough that this computational problem becomes infeasible.
+
+---
+
+# 11. The important distinction
+
+Notice something fascinating.
+
+Diffie-Hellman doesn't actually encrypt our HTTP request.
+
+It does this:
+
+```text
+Alice
+  │
+  │ DH exchange
+  ▼
+🔑 shared secret
+```
+
+Then we can use that secret to derive symmetric encryption keys:
+
+```text
+🔑 shared secret
+       │
+       ▼
+   key derivation
+       │
+       ├── encryption key
+       ├── authentication key
+       └── other TLS secrets
+```
+
+Then:
+
+```text
+HTTP
+ │
+ ▼
+Symmetric encryption
+ │
+ ▼
+Encrypted bytes
+```
+
+So TLS combines different cryptographic techniques.
+
+---
+
+# 12. This gives us an important architecture
+
+Eventually we'll have:
+
+```text
+             TLS HANDSHAKE
+                   │
+                   ▼
+        Establish shared secrets
+                   │
+                   ▼
+              🔑 Session Keys
+                   │
+                   ▼
+       ┌─────────────────────┐
+       │   TLS Record Layer  │
+       └─────────────────────┘
+                   │
+                   ▼
+            Encrypted HTTP
+```
+
+This is why you shouldn't think:
+
+> "HTTPS = RSA encryption."
+
+Modern TLS is much more interesting than that.
+
+---
+
+# 13. But we've discovered another problem 😈
+
+Suppose an attacker sits between Alice and Bob.
+
+Instead of simply observing:
+
+```text
+Alice ─────────────── Bob
+          👀
+       Attacker
+```
+
+the attacker actively interferes:
+
+```text
+Alice
+  │
+  ▼
+Attacker
+  │
+  ▼
+Bob
+```
+
+Alice thinks she's establishing a secret with Bob.
+
+But perhaps she's actually establishing:
+
+```text
+Alice 🔑A Attacker 🔑B Bob
+```
+
+Let's see how.
+
+Alice sends:
+
+```text
+Alice → A → Attacker
+```
+
+The attacker intercepts it.
+
+The attacker sends **their own** DH value to Bob:
+
+```text
+Attacker → X → Bob
+```
+
+Bob responds:
+
+```text
+Bob → B → Attacker
+```
+
+The attacker sends another value to Alice:
+
+```text
+Attacker → Y → Alice
+```
+
+Now we have:
+
+```text
+Alice
+  │
+  │ 🔑 secret #1
+  ▼
+Attacker
+  │
+  │ 🔑 secret #2
+  ▼
+Bob
+```
+
+Alice thinks:
+
+```text
+🔑
+```
+
+is shared with Bob.
+
+Bob thinks:
+
+```text
+🔑
+```
+
+is shared with Alice.
+
+But the attacker sits in the middle and can potentially decrypt and re-encrypt traffic.
+
+This is the **Man-in-the-Middle (MITM) problem**.
+
+---
+
+# 14. Diffie-Hellman solved one problem but created another
+
+This is an important learning pattern.
+
+### Before DH
+
+Problem:
+
+> How do Alice and Bob establish a shared secret?
+
+DH:
+
+> They can establish one without sending the secret.
+
+But now:
+
+> How does Alice know that the DH exchange is actually with Bob?
+
+So:
+
+```text
+Key exchange
+     │
+     ▼
+Solved ✅
+     │
+     ▼
+Authentication
+     │
+     ▼
+Still a problem ❌
+```
+
+And **this is where certificates and Certificate Authorities enter the story.**
+
+---
+
+# Hands-on #2 — Let's see DH with OpenSSL
+
+First check OpenSSL:
+
+```bash
+openssl version
+```
+
+Now generate DH parameters:
+
+```bash
+openssl genpkey \
+  -genparam \
+  -algorithm DH \
+  -out dhparams.pem
+```
+
+You can inspect them:
+
+```bash
+openssl pkeyparam \
+  -in dhparams.pem \
+  -text
+```
+
+Depending on your OpenSSL version, the output will show the DH parameters.
+
+Now generate Alice's private/public key pair:
+
+```bash
+openssl genpkey \
+  -paramfile dhparams.pem \
+  -out alice-private.pem
+```
+
+Extract Alice's public key:
+
+```bash
+openssl pkey \
+  -in alice-private.pem \
+  -pubout \
+  -out alice-public.pem
+```
+
+Bob:
+
+```bash
+openssl genpkey \
+  -paramfile dhparams.pem \
+  -out bob-private.pem
+```
+
+and:
+
+```bash
+openssl pkey \
+  -in bob-private.pem \
+  -pubout \
+  -out bob-public.pem
+```
+
+Conceptually:
+
+```text
+Alice
+
+alice-private.pem 🔒
+alice-public.pem  📢
+```
+
+and:
+
+```text
+Bob
+
+bob-private.pem 🔒
+bob-public.pem  📢
+```
+
+The private keys must remain private.
+
+---
+
+# One terminology improvement
+
+You'll see several terms:
+
+```text
+Private key
+Public key
+Secret
+Session key
+Shared secret
+```
+
+They aren't interchangeable.
+
+A simplified mental model for now:
+
+```text
+Private key
+     │
+     │ cryptographic operation
+     ▼
+Public key
+
+DH private value
+     +
+Other party's public value
+     ↓
+Shared secret
+     ↓
+Key derivation
+     ↓
+Session keys
+```
+
+We'll make these distinctions much sharper when we reach TLS 1.3.
+
+---
+
+# Where we are now
+
+Our story has evolved:
+
+```text
+HTTP
+ │
+ ├── Anyone can read
+ │       ↓
+ │    Encryption
+ │
+ ├── Anyone can modify
+ │       ↓
+ │    Integrity
+ │
+ ├── Don't know who we're talking to
+ │       ↓
+ │    Authentication
+ │
+ └── How establish encryption key?
+         │
+         ▼
+    Diffie-Hellman
+         │
+         ▼
+   Shared secret ✅
+         │
+         ▼
+   BUT...
+         │
+         ▼
+   MITM attack ❌
+```
+
+So the next question is the crucial one:
+
+> **How can Alice prove that a public key really belongs to Bob?**
+
+That question leads directly to:
+
+**public/private keys → digital signatures → certificates → Certificate Authorities → certificate chains.**
+
+---
