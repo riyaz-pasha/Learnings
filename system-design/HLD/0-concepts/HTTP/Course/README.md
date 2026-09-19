@@ -32031,3 +32031,1260 @@ and manually understand what actually happens when **three HTTP requests share o
 
 ---
 
+# Lesson 36 — HTTP/2 Deep Dive
+
+In the previous lesson, we saw the big idea:
+
+> **HTTP/2 allows multiple HTTP requests/responses to share one TCP connection at the same time.**
+
+Now let's understand **how HTTP/2 actually does that**.
+
+The key concepts are:
+
+1. Frames
+2. Streams
+3. HTTP/2 pseudo-headers
+4. Multiplexing
+5. HPACK header compression
+6. Flow control
+7. Connection-level vs stream-level behavior
+
+---
+
+## 1. First: Why did HTTP/2 need Frames?
+
+In HTTP/1.1, we have a textual structure:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+
+```
+
+Then the response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 27
+
+{"id":1,"name":"Riyaz"}
+```
+
+This is convenient for humans to read.
+
+But HTTP/1.1 has a fundamental limitation:
+
+> The protocol is essentially organized around a sequence of textual messages on a connection.
+
+HTTP/2 wanted to be able to do this:
+
+```text
+                    One TCP connection
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+     Request A          Request B          Request C
+     /users             /products           /orders
+        │                  │                  │
+        └────────────── interleaved ──────────┘
+```
+
+So HTTP/2 introduced a **binary framing layer**.
+
+Instead of thinking:
+
+```text
+Request
+Response
+Request
+Response
+```
+
+think:
+
+```text
+Frame
+Frame
+Frame
+Frame
+Frame
+Frame
+...
+```
+
+Each frame tells HTTP/2:
+
+> "This piece of data belongs to stream X and has type Y."
+
+---
+
+# 2. What is an HTTP/2 Frame?
+
+Conceptually:
+
+```text
+┌─────────────────────────────────────────────┐
+│ Length                                      │
+├─────────────────────────────────────────────┤
+│ Type                                        │
+├─────────────────────────────────────────────┤
+│ Flags                                       │
+├─────────────────────────────────────────────┤
+│ Stream Identifier                           │
+├─────────────────────────────────────────────┤
+│ Payload                                     │
+└─────────────────────────────────────────────┘
+```
+
+The actual HTTP/2 frame header is **9 bytes**:
+
+```text
+24 bits   Length
+8 bits    Type
+8 bits    Flags
+1 bit     Reserved
+31 bits   Stream Identifier
+```
+
+Then comes the payload.
+
+For example, conceptually:
+
+```text
+HEADERS
+stream = 1
+payload = encoded request headers
+```
+
+or:
+
+```text
+DATA
+stream = 1
+payload = {"id":1,"name":"Riyaz"}
+```
+
+---
+
+# 3. Important HTTP/2 Frame Types
+
+You don't need to memorize every frame type yet.
+
+These are the important ones:
+
+| Frame           | Purpose                          |
+| --------------- | -------------------------------- |
+| `HEADERS`       | Carries HTTP headers             |
+| `DATA`          | Carries request/response body    |
+| `SETTINGS`      | Negotiates connection settings   |
+| `WINDOW_UPDATE` | Controls flow                    |
+| `RST_STREAM`    | Terminates one stream            |
+| `PING`          | Connection health/latency check  |
+| `GOAWAY`        | Gracefully shuts down connection |
+
+The two most important initially are:
+
+```text
+HEADERS
+DATA
+```
+
+---
+
+# 4. Streams
+
+Now we get to the most important HTTP/2 concept.
+
+A **stream** is a logical, independent sequence of frames within one HTTP/2 connection.
+
+Suppose the browser makes:
+
+```http
+GET /users
+GET /products
+GET /orders
+```
+
+HTTP/2 can create:
+
+```text
+TCP Connection
+│
+├── Stream 1 → /users
+├── Stream 3 → /products
+└── Stream 5 → /orders
+```
+
+Notice:
+
+```text
+1
+3
+5
+```
+
+Client-created streams use **odd numbers**.
+
+Server-created streams use **even numbers**.
+
+And:
+
+```text
+Stream 0
+```
+
+is reserved for connection-level operations.
+
+---
+
+# 5. One Request = One Stream
+
+Suppose:
+
+```http
+GET /users
+```
+
+is assigned:
+
+```text
+Stream 1
+```
+
+The request might conceptually become:
+
+```text
+HEADERS
+stream=1
+
+DATA
+stream=1
+```
+
+The response also belongs to:
+
+```text
+stream=1
+```
+
+So:
+
+```text
+Stream 1
+──────────────────────────────
+Request headers
+Request body
+Response headers
+Response body
+```
+
+A stream can therefore represent the lifecycle of one HTTP exchange.
+
+---
+
+# 6. Three Requests on One Connection
+
+Now let's see where HTTP/2 becomes interesting.
+
+Suppose we request:
+
+```text
+/users
+/products
+/orders
+```
+
+We could have:
+
+```text
+Stream 1 → /users
+Stream 3 → /products
+Stream 5 → /orders
+```
+
+Frames might arrive like this:
+
+```text
+HEADERS  stream=1    /users
+HEADERS  stream=3    /products
+HEADERS  stream=5    /orders
+
+DATA     stream=3    product data
+DATA     stream=1    user data
+DATA     stream=5    order data
+DATA     stream=3    more product data
+```
+
+Notice something important.
+
+They are **interleaved**.
+
+```text
+1
+3
+5
+3
+1
+5
+3
+```
+
+There is no requirement that stream 1 completely finish before stream 3 starts.
+
+That's multiplexing.
+
+---
+
+# 7. Why This Is Better Than HTTP/1.1 Pipelining
+
+Imagine:
+
+```text
+Request A → very slow
+Request B → very fast
+```
+
+HTTP/1.1 pipelining could produce:
+
+```text
+Request A
+Request B
+
+Response A
+Response B
+```
+
+If A takes 5 seconds:
+
+```text
+A ────────────────────── 5 sec
+                         ↓
+B ── could have finished ──
+                         ↓
+                    Response B
+```
+
+But B's response may have to wait behind A.
+
+That's **head-of-line blocking at the HTTP/1.1 request/response ordering level**.
+
+HTTP/2 can instead do:
+
+```text
+A frame
+B frame
+B frame
+B response
+A frame
+A frame
+A response
+```
+
+So the fast request can make progress independently.
+
+---
+
+# 8. HTTP/2 Doesn't Have the HTTP/1.1 Request Line
+
+This is a particularly interesting connection to your earlier question.
+
+In HTTP/1.1:
+
+```http
+GET /users HTTP/1.1
+```
+
+We have:
+
+```text
+METHOD
+PATH
+VERSION
+```
+
+HTTP/2 does **not** send that textual request line.
+
+Instead, it uses special headers called **pseudo-headers**.
+
+For example:
+
+```text
+:method = GET
+:scheme = https
+:authority = example.com
+:path = /users
+```
+
+These are called pseudo-headers because their names start with:
+
+```text
+:
+```
+
+So conceptually:
+
+### HTTP/1.1
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+### HTTP/2
+
+```text
+:method: GET
+:scheme: https
+:authority: example.com
+:path: /users
+```
+
+The semantics are largely the same.
+
+The **wire representation changed**.
+
+---
+
+# 9. HTTP/2 Response
+
+HTTP/1.1:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+HTTP/2 conceptually uses:
+
+```text
+:status = 200
+content-type = application/json
+```
+
+Notice:
+
+```text
+:status
+```
+
+instead of:
+
+```text
+HTTP/1.1 200 OK
+```
+
+There is no textual status line in HTTP/2.
+
+This is an important distinction:
+
+> HTTP/2 keeps the HTTP concepts but changes how they are framed and represented on the wire.
+
+---
+
+# 10. HEADERS and DATA
+
+A typical HTTP/2 request might look conceptually like:
+
+```text
+HEADERS stream=1
+    :method: POST
+    :scheme: https
+    :authority: example.com
+    :path: /users
+    content-type: application/json
+
+DATA stream=1
+    {"name":"Riyaz"}
+```
+
+The response:
+
+```text
+HEADERS stream=1
+    :status: 201
+    content-type: application/json
+
+DATA stream=1
+    {"id":123,"name":"Riyaz"}
+```
+
+So:
+
+```text
+HEADERS
+   ↓
+DATA
+```
+
+is a common pattern.
+
+---
+
+# 11. END_HEADERS and END_STREAM
+
+Frames have flags.
+
+Two important flags are:
+
+```text
+END_HEADERS
+END_STREAM
+```
+
+### END_HEADERS
+
+Means:
+
+> The header block is complete.
+
+For example:
+
+```text
+HEADERS stream=1
+END_HEADERS
+```
+
+### END_STREAM
+
+Means:
+
+> This endpoint has finished sending data on this stream.
+
+For example:
+
+```text
+DATA stream=1
+END_STREAM
+```
+
+So:
+
+```text
+HEADERS
+END_HEADERS
+
+DATA
+DATA
+DATA
+END_STREAM
+```
+
+means:
+
+```text
+headers finished
+body chunks...
+body finished
+```
+
+---
+
+# 12. What About Large Bodies?
+
+Suppose the response is 10 MB.
+
+HTTP/2 doesn't need to put the entire thing into one DATA frame.
+
+It can split it:
+
+```text
+DATA stream=1
+chunk 1
+
+DATA stream=1
+chunk 2
+
+DATA stream=1
+chunk 3
+
+DATA stream=1
+chunk 4
+END_STREAM
+```
+
+And these frames can be interleaved with other streams:
+
+```text
+DATA stream=1
+DATA stream=3
+DATA stream=1
+DATA stream=5
+DATA stream=3
+DATA stream=1
+```
+
+This is one of the fundamental reasons HTTP/2 multiplexing works.
+
+---
+
+# 13. HPACK — Header Compression
+
+Now another HTTP/2 problem.
+
+Imagine every request contains:
+
+```http
+Host: example.com
+User-Agent: ...
+Accept: application/json
+Authorization: Bearer ...
+Cookie: session=...
+```
+
+If the browser makes 100 requests:
+
+```text
+/users
+/products
+/orders
+/images
+...
+```
+
+many headers are repeated.
+
+Sending all of them repeatedly wastes bandwidth.
+
+HTTP/2 introduced **HPACK**.
+
+HPACK compresses HTTP headers.
+
+Conceptually:
+
+```text
+Request 1:
+
+Host: example.com
+Accept: application/json
+User-Agent: Chrome
+```
+
+The next request doesn't necessarily need to transmit all those strings again.
+
+It can refer to entries in a shared compression table.
+
+---
+
+# 14. HPACK Static and Dynamic Tables
+
+HPACK has two important concepts.
+
+### Static table
+
+Predefined entries known to both sides.
+
+Conceptually:
+
+```text
+1 → :authority
+2 → :method GET
+3 → :method POST
+...
+```
+
+Both sides already know this table.
+
+### Dynamic table
+
+Entries learned during the connection.
+
+For example:
+
+```text
+authorization: Bearer abc...
+cookie: session=xyz...
+```
+
+can potentially be added to the dynamic table.
+
+Then subsequent headers can refer to them more efficiently.
+
+---
+
+# 15. Important Security Point About HPACK
+
+HPACK compression does **not** encrypt headers.
+
+Compression and encryption are separate concepts.
+
+Typically:
+
+```text
+HTTP/2
+   ↓
+TLS
+   ↓
+TCP
+```
+
+So:
+
+```text
+HPACK
+```
+
+is compression/representation.
+
+```text
+TLS
+```
+
+provides encryption and authentication.
+
+---
+
+# 16. HTTP/3 Uses QPACK
+
+HTTP/2:
+
+```text
+HPACK
+```
+
+HTTP/3:
+
+```text
+QPACK
+```
+
+Why?
+
+Because HTTP/3 runs over QUIC, which has different stream behavior.
+
+You don't need to dive into QPACK yet.
+
+Just remember:
+
+```text
+HTTP/2 → HPACK
+HTTP/3 → QPACK
+```
+
+---
+
+# 17. Flow Control
+
+Now imagine one client is downloading a huge file:
+
+```text
+1 GB
+```
+
+The server might send data extremely quickly.
+
+But the client may not be able to process it that quickly.
+
+HTTP/2 therefore has **flow control**.
+
+The receiver essentially tells the sender:
+
+> "You can send up to N more bytes."
+
+This is controlled using:
+
+```text
+WINDOW_UPDATE
+```
+
+---
+
+# 18. Two Levels of Flow Control
+
+HTTP/2 has:
+
+### Stream-level flow control
+
+Controls one stream.
+
+```text
+Stream 1
+Window = 64 KB
+```
+
+### Connection-level flow control
+
+Controls the entire connection.
+
+```text
+Connection
+Window = 1 MB
+```
+
+So:
+
+```text
+TCP Connection
+│
+├── Stream 1
+│    └── flow-control window
+│
+├── Stream 3
+│    └── flow-control window
+│
+└── Stream 5
+     └── flow-control window
+```
+
+This gives HTTP/2 finer control over data transmission.
+
+---
+
+# 19. WINDOW_UPDATE
+
+Suppose:
+
+```text
+Stream 1 window = 64 KB
+```
+
+Server sends:
+
+```text
+60 KB
+```
+
+The available window becomes roughly:
+
+```text
+4 KB
+```
+
+The receiver processes the data and sends:
+
+```text
+WINDOW_UPDATE
+stream=1
+increment=60KB
+```
+
+Now the sender can send more.
+
+There can also be a connection-level:
+
+```text
+WINDOW_UPDATE
+stream=0
+```
+
+because stream `0` represents connection-level operations.
+
+---
+
+# 20. Connection-Level vs Stream-Level
+
+This distinction is important.
+
+Some HTTP/2 operations belong to:
+
+```text
+the entire connection
+```
+
+Others belong to:
+
+```text
+one particular stream
+```
+
+For example:
+
+```text
+PING
+```
+
+is connection-level.
+
+While:
+
+```text
+RST_STREAM
+```
+
+is stream-level.
+
+Think:
+
+```text
+Connection
+│
+├── Stream 1
+├── Stream 3
+└── Stream 5
+```
+
+If Stream 3 is broken:
+
+```text
+RST_STREAM 3
+```
+
+You don't necessarily need to destroy the entire connection.
+
+That's a major advantage.
+
+---
+
+# 21. RST_STREAM
+
+Suppose:
+
+```text
+GET /large-file
+```
+
+is downloading a huge file.
+
+The user clicks:
+
+```text
+Cancel
+```
+
+HTTP/2 can send:
+
+```text
+RST_STREAM
+stream=7
+```
+
+This terminates that stream.
+
+Other streams can continue:
+
+```text
+Stream 1 → still working
+Stream 3 → still working
+Stream 7 → cancelled
+Stream 9 → still working
+```
+
+The TCP connection itself remains alive.
+
+---
+
+# 22. PING
+
+HTTP/2 also has:
+
+```text
+PING
+```
+
+It's useful for checking whether the connection is alive and for measuring round-trip behavior.
+
+Conceptually:
+
+```text
+Client
+  │
+  │ PING
+  ↓
+Server
+  │
+  │ PING ACK
+  ↓
+Client
+```
+
+It operates at the connection level.
+
+---
+
+# 23. GOAWAY
+
+Eventually a server may want to stop accepting new streams on a connection.
+
+For example:
+
+```text
+Server is shutting down
+```
+
+Instead of immediately killing the TCP connection, it can send:
+
+```text
+GOAWAY
+```
+
+Meaning roughly:
+
+> "Don't create new streams on this connection. Existing work can finish."
+
+This supports graceful connection shutdown.
+
+---
+
+# 24. Putting Everything Together
+
+Let's imagine:
+
+```text
+Browser
+   │
+   │ One TCP connection
+   │
+   ▼
+HTTP/2 Server
+```
+
+The browser requests:
+
+```text
+GET /users
+GET /products
+GET /orders
+```
+
+HTTP/2 creates:
+
+```text
+Stream 1 → /users
+Stream 3 → /products
+Stream 5 → /orders
+```
+
+Frames might look like:
+
+```text
+HEADERS  stream=1
+HEADERS  stream=3
+HEADERS  stream=5
+
+DATA     stream=3
+DATA     stream=1
+DATA     stream=3
+DATA     stream=5
+DATA     stream=1
+DATA     stream=5
+```
+
+Meanwhile:
+
+```text
+HPACK
+```
+
+compresses headers.
+
+And:
+
+```text
+WINDOW_UPDATE
+```
+
+controls how much data can be sent.
+
+And:
+
+```text
+RST_STREAM
+```
+
+can cancel one stream.
+
+And:
+
+```text
+PING
+```
+
+can check the connection.
+
+And:
+
+```text
+GOAWAY
+```
+
+can gracefully shut it down.
+
+---
+
+# 25. The Big Picture
+
+You can now visualize HTTP/2 as:
+
+```text
+                     HTTP/2 Connection
+                            │
+                    ┌───────┴────────┐
+                    │                │
+                  TCP             Connection
+                    │              management
+                    │                │
+             ┌──────┴──────┐    SETTINGS
+             │             │    PING
+          Stream 1      Stream 3  GOAWAY
+             │             │
+          HEADERS        HEADERS
+          DATA           DATA
+          DATA           DATA
+```
+
+The critical innovation is:
+
+> **One TCP connection contains multiple logical HTTP streams, and frames from those streams can be interleaved.**
+
+---
+
+# 26. HTTP/1.1 vs HTTP/2 — Much Deeper Comparison
+
+| Concept                    | HTTP/1.1                     | HTTP/2                     |
+| -------------------------- | ---------------------------- | -------------------------- |
+| Connection                 | TCP                          | TCP                        |
+| Basic representation       | Text                         | Binary framing             |
+| Request line               | Yes                          | No                         |
+| Status line                | Yes                          | No                         |
+| Headers                    | Text                         | Header blocks              |
+| Request body               | Message body                 | DATA frames                |
+| Multiplexing               | No                           | Yes                        |
+| Streams                    | No                           | Yes                        |
+| Header compression         | No                           | HPACK                      |
+| Flow control               | TCP-level                    | HTTP/2 stream + connection |
+| Cancel individual exchange | Connection/request semantics | `RST_STREAM`               |
+| Connection health          | TCP/TLS/etc.                 | `PING`                     |
+| Graceful shutdown          | Connection close             | `GOAWAY`                   |
+
+---
+
+# 27. One Very Important Mental Model
+
+Don't think:
+
+```text
+HTTP/2 = faster HTTP/1.1
+```
+
+Think:
+
+```text
+HTTP/1.1
+    ↓
+textual HTTP messages
+    ↓
+one ordered sequence
+```
+
+versus:
+
+```text
+HTTP/2
+    ↓
+binary frames
+    ↓
+streams
+    ↓
+interleaved frames
+    ↓
+multiplexed HTTP exchanges
+```
+
+The **HTTP semantics** remain familiar:
+
+```text
+GET
+POST
+PUT
+DELETE
+
+200
+201
+404
+500
+
+headers
+body
+```
+
+But their **wire representation and transport behavior** changed significantly.
+
+---
+
+# 28. One Last Connection to What We've Learned
+
+We've now built a pretty complete picture:
+
+```text
+Application
+    │
+    │ HTTP semantics
+    │
+    ▼
+HTTP/2
+    │
+    ├── Streams
+    ├── Frames
+    ├── HPACK
+    ├── Flow control
+    └── Multiplexing
+    │
+    ▼
+TLS
+    │
+    ▼
+TCP
+    │
+    ▼
+IP
+```
+
+And for HTTP/3:
+
+```text
+Application
+    │
+    ▼
+HTTP/3
+    │
+    ├── Streams
+    ├── Frames
+    └── QPACK
+    │
+    ▼
+QUIC
+    │
+    ▼
+UDP
+    │
+    ▼
+IP
+```
+
+That gives us the foundation to understand **why HTTP/3 exists**, rather than just memorizing that it uses UDP.
+
+---
+
+## Next — Lesson 37
+
+We'll go one level deeper into the **actual HTTP/2 connection lifecycle**:
+
+```text
+TCP connection
+      ↓
+TLS handshake
+      ↓
+ALPN negotiation
+      ↓
+HTTP/2 connection preface
+      ↓
+SETTINGS
+      ↓
+stream creation
+      ↓
+HEADERS
+      ↓
+DATA
+      ↓
+multiple streams
+      ↓
+GOAWAY / connection shutdown
+```
+
+We'll also connect this to something you already learned:
+
+**HTTP/1.1 request line → HTTP/2 pseudo-headers → HTTP/3 frames**, and see what actually happens when you type a URL into a browser.
+
+
+---
