@@ -22408,3 +22408,855 @@ and you'll see exactly **how the browser can send an authenticated cookie withou
 
 ---
 
+# Lesson 28 — CSRF in Depth
+
+We’ve reached an important point in authentication.
+
+You now know:
+
+```text
+Cookie
+   ↓
+Browser automatically sends it
+   ↓
+Server authenticates the request
+```
+
+That automatic behavior is useful for sessions, but it creates a security problem:
+
+> **CSRF — Cross-Site Request Forgery**
+
+---
+
+## 1. The problem
+
+Suppose you are logged into your bank.
+
+Your browser has:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly
+```
+
+Later, you visit:
+
+```text
+https://evil.example
+```
+
+The malicious website contains:
+
+```html
+<form action="https://bank.example/transfer" method="POST">
+    <input type="hidden" name="to" value="attacker">
+    <input type="hidden" name="amount" value="10000">
+</form>
+
+<script>
+    document.forms[0].submit();
+</script>
+```
+
+The browser sends:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=attacker&amount=10000
+```
+
+The important part:
+
+**The malicious website doesn't need to know `abc123`.**
+
+The browser already knows the cookie and may automatically attach it when making a request to `bank.example`.
+
+---
+
+# 2. Why doesn't the browser just block this?
+
+Because cookies were designed to work this way.
+
+Imagine:
+
+```text
+Browser
+   │
+   ├── bank.example
+   │      Cookie: session_id=abc123
+   │
+   └── evil.example
+```
+
+When JavaScript on `evil.example` submits a form to `bank.example`, the browser knows:
+
+> "This request is going to bank.example, and I have a cookie belonging to bank.example."
+
+So historically, it sends the cookie.
+
+The browser isn't necessarily asking:
+
+> "Did the user intentionally initiate this request?"
+
+That's the fundamental CSRF problem.
+
+---
+
+# 3. Why can't evil.example simply read the response?
+
+This is where CSRF and CORS are different.
+
+The attacker may be able to cause:
+
+```text
+evil.example
+     │
+     │ POST /transfer
+     ↓
+bank.example
+```
+
+But the browser's same-origin policy generally prevents `evil.example` from reading the bank's response.
+
+So:
+
+```text
+Can attacker cause request?
+        YES, potentially
+
+Can attacker read bank response?
+        NO, generally
+```
+
+And CSRF doesn't necessarily require reading the response.
+
+If the request itself performs:
+
+```text
+transfer $10,000
+change email
+delete account
+change password
+create order
+```
+
+the damage has already happened.
+
+---
+
+# 4. CSRF is primarily a cookie-authentication problem
+
+Compare these two designs.
+
+### Cookie authentication
+
+```http
+POST /transfer
+
+Cookie: session_id=abc123
+```
+
+Browser automatically attaches the cookie.
+
+Potential CSRF risk.
+
+---
+
+### Authorization header
+
+```http
+POST /transfer
+
+Authorization: Bearer eyJ...
+```
+
+A malicious website cannot simply tell the browser:
+
+```html
+<form>
+```
+
+to add an arbitrary `Authorization` header.
+
+The attacker would need access to the token.
+
+So:
+
+```text
+Cookie
+   ↓
+automatically attached
+   ↓
+CSRF concern
+```
+
+versus:
+
+```text
+Authorization header
+   ↓
+application explicitly supplies credential
+   ↓
+different CSRF characteristics
+```
+
+This is one reason the choice between cookies and bearer tokens matters.
+
+---
+
+# 5. First defense — SameSite cookies
+
+Modern cookies support:
+
+```http
+Set-Cookie: session_id=abc123; SameSite=Lax
+```
+
+`SameSite` tells the browser about cross-site cookie sending.
+
+The important modes are:
+
+```text
+Strict
+Lax
+None
+```
+
+Conceptually:
+
+### Strict
+
+Very restrictive cross-site cookie behavior.
+
+```text
+bank.example
+     ↑
+     │
+evil.example
+
+Cookie generally not sent cross-site
+```
+
+### Lax
+
+Allows some cross-site navigation scenarios while restricting many cross-site state-changing requests.
+
+This is a common practical default.
+
+### None
+
+Allows cross-site cookie sending.
+
+It must be combined with:
+
+```text
+Secure
+```
+
+in modern browsers.
+
+---
+
+# 6. Why SameSite helps
+
+Suppose:
+
+```text
+User logged into bank
+        ↓
+session cookie exists
+        ↓
+User visits evil.example
+        ↓
+evil.example attempts POST /transfer
+        ↓
+Browser sees cross-site request
+        ↓
+SameSite policy
+        ↓
+Cookie may NOT be attached
+```
+
+Then the bank receives:
+
+```http
+POST /transfer
+
+(no valid session cookie)
+```
+
+and responds:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+Attack stopped.
+
+---
+
+# 7. But SameSite isn't the only defense
+
+A traditional defense is a **CSRF token**.
+
+The idea is surprisingly simple.
+
+Instead of relying only on:
+
+```http
+Cookie: session_id=abc123
+```
+
+the server gives the legitimate application a secret value:
+
+```text
+csrf_token = xyz789
+```
+
+The client sends it with state-changing requests.
+
+For example:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=attacker&amount=10000&csrf_token=xyz789
+```
+
+The server checks:
+
+```text
+Is session valid?
+        ↓
+YES
+
+Is CSRF token valid?
+        ↓
+YES
+
+Perform transfer
+```
+
+---
+
+# 8. Why does this stop the attacker?
+
+The attacker knows:
+
+```text
+bank.example
+/transfer
+```
+
+and may cause the browser to send:
+
+```text
+Cookie: session_id=abc123
+```
+
+But the attacker does **not** know:
+
+```text
+csrf_token=xyz789
+```
+
+because the token is not automatically attached like a cookie.
+
+So the attack becomes:
+
+```http
+POST /transfer
+
+Cookie: session_id=abc123
+
+to=attacker
+amount=10000
+```
+
+Server:
+
+```text
+CSRF token missing
+       ↓
+403 Forbidden
+```
+
+---
+
+# 9. The important security property
+
+The session cookie is:
+
+```text
+automatically sent
+```
+
+The CSRF token is:
+
+```text
+not automatically sent cross-site
+```
+
+Therefore the attacker needs something they shouldn't possess.
+
+This gives us:
+
+```text
+Authentication
+      +
+Proof that request came from legitimate application
+```
+
+---
+
+# 10. A simple implementation
+
+Imagine our server creates a session:
+
+```python
+sessions = {
+    "abc123": {
+        "user_id": 42,
+        "csrf_token": "xyz789"
+    }
+}
+```
+
+The browser has:
+
+```http
+Cookie: session_id=abc123
+```
+
+The legitimate application gets:
+
+```text
+xyz789
+```
+
+Then:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=123&amount=100&csrf_token=xyz789
+```
+
+Server:
+
+```python
+session = sessions.get(session_id)
+
+if not session:
+    return 401
+
+if csrf_token != session["csrf_token"]:
+    return 403
+
+perform_transfer()
+```
+
+---
+
+# 11. Important distinction: authentication vs CSRF
+
+This is a common interview question.
+
+Suppose:
+
+```http
+Cookie: session_id=abc123
+```
+
+is valid.
+
+That answers:
+
+> **Who is making this request?**
+
+But it doesn't necessarily answer:
+
+> **Did this request come from the legitimate application?**
+
+CSRF protection adds another check.
+
+```text
+Session cookie
+      ↓
+Who are you?
+
+CSRF token
+      ↓
+Was this request intentionally generated by the legitimate application?
+```
+
+Not literally a cryptographic proof of intent, but it provides a secret that an ordinary cross-site attacker cannot obtain.
+
+---
+
+# 12. CSRF token vs JWT signature
+
+Don't confuse these.
+
+JWT:
+
+```text
+header.payload.signature
+```
+
+protects the integrity/authenticity of the token.
+
+CSRF token:
+
+```text
+csrf_token=xyz789
+```
+
+protects cookie-authenticated state-changing requests from cross-site request forgery.
+
+They solve different problems.
+
+---
+
+# 13. What about HttpOnly?
+
+You might think:
+
+> "But we already made the cookie HttpOnly!"
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly
+```
+
+`HttpOnly` prevents JavaScript from doing:
+
+```javascript
+document.cookie
+```
+
+to directly read the cookie.
+
+That's useful against cookie theft through JavaScript.
+
+But it does **not** stop CSRF.
+
+Why?
+
+Because the browser can still automatically attach:
+
+```http
+Cookie: session_id=abc123
+```
+
+to a request.
+
+So:
+
+```text
+HttpOnly
+   ↓
+Protects cookie from direct JS access
+
+SameSite / CSRF token
+   ↓
+Helps protect against CSRF
+```
+
+Different defenses.
+
+---
+
+# 14. XSS vs CSRF
+
+These two are often confused.
+
+### XSS
+
+Attacker gets JavaScript executed inside your application's origin.
+
+```text
+attacker JavaScript
+       ↓
+bank.example
+       ↓
+runs as bank.example
+```
+
+Potentially severe.
+
+### CSRF
+
+Attacker causes the victim's browser to make a request to your application.
+
+```text
+evil.example
+      ↓
+victim's browser
+      ↓
+bank.example
+```
+
+The attacker doesn't necessarily execute JavaScript inside `bank.example`.
+
+Mental model:
+
+```text
+XSS
+"Make my code run in your origin."
+
+CSRF
+"Make your browser send a request to my target."
+```
+
+---
+
+# 15. Practical architecture
+
+A modern application might use:
+
+```text
+Browser
+   │
+   │ Login
+   ↓
+Auth Server
+   │
+   ├── access token → memory
+   │
+   └── refresh token → HttpOnly cookie
+```
+
+Then:
+
+```text
+API request
+    ↓
+Authorization: Bearer <access-token>
+```
+
+The refresh endpoint might use:
+
+```http
+POST /refresh
+Cookie: refresh_token=...
+```
+
+Because the refresh token is cookie-based, the refresh endpoint itself should be designed with appropriate CSRF protection.
+
+For example:
+
+```text
+SameSite cookie
+       +
+CSRF protection where appropriate
+       +
+Origin/Referer validation where appropriate
+```
+
+Security is layered.
+
+---
+
+# 16. One subtle point about our local demo
+
+You may remember the earlier idea:
+
+```text
+localhost:8000 → bank
+localhost:9000 → evil
+```
+
+That is **not a good real cross-site CSRF demonstration**.
+
+Why?
+
+Because cookies are primarily scoped by **domain**, not port.
+
+Also, `localhost:8000` and `localhost:9000` are the same host:
+
+```text
+localhost
+```
+
+and browser "site" calculations don't treat the port as the key distinction.
+
+So don't think:
+
+```text
+localhost:8000
+      ≠
+localhost:9000
+```
+
+means two different sites.
+
+For conceptual testing, you can instead use different hostnames such as:
+
+```text
+bank.test
+evil.test
+```
+
+mapped to your local machine.
+
+But modern browser SameSite defaults can prevent the simplest CSRF attack anyway, which is actually a useful demonstration of why browser defaults have evolved.
+
+---
+
+# 17. Let's see the raw HTTP difference
+
+### Legitimate request
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=123&amount=100
+```
+
+The server sees a valid authenticated session.
+
+Now with CSRF protection:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=123&amount=100&csrf_token=xyz789
+```
+
+The server accepts it.
+
+Attacker-generated request:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.example
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=attacker&amount=10000
+```
+
+Server:
+
+```text
+session → valid
+csrf_token → missing
+```
+
+Response:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+That's the entire basic mechanism.
+
+---
+
+# 18. The complete mental model
+
+You now have several layers:
+
+```text
+                    HTTP
+                     │
+              ┌──────┴──────┐
+              │             │
+          Authentication  Authorization
+              │             │
+       "Who are you?"   "What can you do?"
+              │
+       ┌──────┴──────┐
+       │             │
+    Session         JWT
+       │
+     Cookie
+       │
+       ├── HttpOnly
+       ├── Secure
+       └── SameSite
+              │
+              ↓
+             CSRF
+              │
+       ┌──────┴──────┐
+       │             │
+   SameSite      CSRF token
+```
+
+And remember:
+
+```text
+HttpOnly ≠ CSRF protection
+
+Secure ≠ CSRF protection
+
+JWT ≠ automatically CSRF-safe
+
+Cookie ≠ Session
+
+JWT ≠ Bearer
+
+Authentication ≠ Authorization
+```
+
+These distinctions are extremely useful in backend interviews.
+
+---
+
+## Mini exercise
+
+Consider:
+
+```http
+POST /change-email HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+Content-Type: application/json
+
+{
+  "email": "attacker@example.com"
+}
+```
+
+Answer these mentally:
+
+1. Why can CSRF potentially happen here?
+2. Does `HttpOnly` prevent it?
+3. Does `Secure` prevent it?
+4. How does `SameSite` help?
+5. How would a CSRF token change the request?
+6. Why doesn't the attacker need to know `session_id`?
+
+Once those are clear, the next step is **Lesson 29 — CORS**, where we'll connect CSRF, Same-Origin Policy, browser security, and the confusing difference between:
+
+```text
+"Can the browser send the request?"
+```
+
+and
+
+```text
+"Can JavaScript read the response?"
+```
+
+
+---
+
