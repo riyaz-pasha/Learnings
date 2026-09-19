@@ -34524,3 +34524,2044 @@ We'll also answer a very important question:
 
 ---
 
+# Lesson 38 — HTTP/2 Hands-On
+
+Now let's move from theory to actually **seeing HTTP/2 in action**.
+
+Our goal is not to build an HTTP/2 server yet. Your Python `http.server` is useful for learning HTTP/1.x, but it doesn't natively give us an HTTP/2 server.
+
+Instead, we'll use `curl` to inspect a real HTTPS connection.
+
+---
+
+## 1. First, Check Your curl
+
+Run:
+
+```bash
+curl --version
+```
+
+Look for something like:
+
+```text
+curl 8.x.x ...
+Protocols: ... http https ...
+Features: ... HTTP2 ...
+```
+
+If you see:
+
+```text
+HTTP2
+```
+
+your curl supports HTTP/2.
+
+---
+
+# 2. Force HTTP/1.1
+
+Run:
+
+```bash
+curl -v --http1.1 https://example.com
+```
+
+You'll see a lot of output.
+
+The important part is to look for something similar to:
+
+```text
+* ALPN: curl offers http/1.1
+```
+
+and eventually:
+
+```text
+* ALPN: server accepted http/1.1
+```
+
+Then curl sends something conceptually like:
+
+```http
+GET / HTTP/1.1
+Host: example.com
+Accept: */*
+```
+
+Notice:
+
+```text
+HTTP/1.1
+```
+
+---
+
+# 3. Force HTTP/2
+
+Now:
+
+```bash
+curl -v --http2 https://example.com
+```
+
+You should see something similar to:
+
+```text
+* ALPN: curl offers h2,http/1.1
+```
+
+and:
+
+```text
+* ALPN: server accepted h2
+```
+
+The important line is:
+
+```text
+server accepted h2
+```
+
+That means:
+
+```text
+ALPN
+ ↓
+h2
+ ↓
+HTTP/2
+```
+
+was negotiated.
+
+---
+
+# 4. Compare the Two
+
+Think about these two commands:
+
+```bash
+curl -v --http1.1 https://example.com
+```
+
+versus:
+
+```bash
+curl -v --http2 https://example.com
+```
+
+The underlying connection is still roughly:
+
+```text
+DNS
+ ↓
+TCP
+ ↓
+TLS
+```
+
+But the application protocol changes:
+
+```text
+HTTP/1.1
+```
+
+versus:
+
+```text
+HTTP/2
+```
+
+This is a very important lesson:
+
+> **HTTP version is an application-layer protocol choice. It isn't the same thing as TCP or TLS version.**
+
+---
+
+# 5. What Does curl Actually Show?
+
+For HTTP/1.1, you'll see something similar to:
+
+```text
+> GET / HTTP/1.1
+> Host: example.com
+> User-Agent: curl/...
+> Accept: */*
+```
+
+This is familiar.
+
+For HTTP/2, curl may show:
+
+```text
+> GET / HTTP/2
+> Host: example.com
+> User-Agent: curl/...
+> Accept: */*
+```
+
+This output is intentionally human-friendly.
+
+But don't make the mistake of thinking the network literally contains:
+
+```text
+GET / HTTP/2
+```
+
+as plain text.
+
+Remember:
+
+> curl is presenting HTTP/2 semantics in a readable form.
+
+The actual wire representation uses binary HTTP/2 frames and compressed header blocks.
+
+---
+
+# 6. The Important `*` vs `>` vs `<`
+
+When using:
+
+```bash
+curl -v
+```
+
+you'll see symbols.
+
+For example:
+
+```text
+* Connected to example.com
+> GET / HTTP/1.1
+> Host: example.com
+>
+< HTTP/1.1 200 OK
+< Content-Type: text/html
+<
+```
+
+The rough meaning is:
+
+```text
+*  curl's connection/debug information
+>  data sent by client
+<  data received from server
+```
+
+So:
+
+```text
+> GET
+```
+
+means:
+
+> Client → Server
+
+and:
+
+```text
+< HTTP/1.1 200
+```
+
+means:
+
+> Server → Client
+
+---
+
+# 7. Find the TLS Negotiation
+
+In verbose output you'll often see:
+
+```text
+* TLSv1.3 ...
+```
+
+and:
+
+```text
+* ALPN: ...
+```
+
+Remember our stack:
+
+```text
+HTTP/2
+  ↓
+TLS
+  ↓
+TCP
+```
+
+So if curl shows:
+
+```text
+TLSv1.3
+```
+
+that's TLS.
+
+If it shows:
+
+```text
+ALPN
+```
+
+that's protocol negotiation.
+
+If it shows:
+
+```text
+h2
+```
+
+that's HTTP/2 being selected.
+
+---
+
+# 8. What Does `h2` Mean?
+
+This is a small but important detail.
+
+HTTP/2's ALPN protocol identifier is:
+
+```text
+h2
+```
+
+HTTP/1.1's is:
+
+```text
+http/1.1
+```
+
+So a client can effectively say:
+
+```text
+I support:
+
+h2
+http/1.1
+```
+
+and the server chooses one.
+
+Conceptually:
+
+```text
+Client                    Server
+
+h2 ──────────────────────>
+http/1.1 ────────────────>
+
+        <──────────────── h2
+```
+
+Now both sides use HTTP/2.
+
+---
+
+# 9. Try HTTP/2 Without TLS?
+
+You might now think:
+
+> "Can I just run HTTP/2 against my local Python server?"
+
+Normally, not with the standard library server we've been using.
+
+Our server:
+
+```python
+from http.server import HTTPServer
+```
+
+speaks HTTP/1.x.
+
+It doesn't understand HTTP/2's binary framing.
+
+So:
+
+```bash
+curl http://localhost:8080
+```
+
+is our HTTP/1.x playground.
+
+And:
+
+```bash
+curl --http2 https://example.com
+```
+
+lets us inspect HTTP/2.
+
+This distinction is useful.
+
+---
+
+# 10. Why Can't an HTTP/1.1 Server Understand HTTP/2?
+
+Imagine the HTTP/1.1 server receives binary HTTP/2 frame bytes.
+
+It expects something like:
+
+```text
+GET / HTTP/1.1
+```
+
+Instead, it gets HTTP/2 protocol bytes.
+
+The server doesn't know how to interpret them.
+
+This is not simply:
+
+```text
+HTTP/1.1 but faster
+```
+
+HTTP/2 changes the wire format substantially.
+
+---
+
+# 11. HTTP/2 Is Still HTTP
+
+This is an important conceptual point.
+
+Suppose your application code says:
+
+```text
+GET /users
+```
+
+The application doesn't fundamentally care whether the connection underneath is:
+
+```text
+HTTP/1.1
+```
+
+or:
+
+```text
+HTTP/2
+```
+
+The semantics are still:
+
+```text
+method = GET
+target = /users
+```
+
+The HTTP server translates the wire representation into something the application understands.
+
+---
+
+# 12. Think About a Spring Application
+
+Suppose you have:
+
+```java
+@GetMapping("/users")
+public List<User> users() {
+    ...
+}
+```
+
+The controller doesn't receive:
+
+```text
+HEADERS frame
+DATA frame
+stream ID = 7
+```
+
+Instead, the framework exposes something like:
+
+```text
+method = GET
+path = /users
+headers = ...
+```
+
+The HTTP server/framework handles the protocol details.
+
+Conceptually:
+
+```text
+                 HTTP/2
+                   │
+                   ▼
+             HTTP server
+                   │
+           decode frames
+                   │
+          reconstruct request
+                   │
+                   ▼
+            Application
+                   │
+                   ▼
+        GET /users handler
+```
+
+This is one reason abstraction layers are useful.
+
+---
+
+# 13. HTTP/2 Request Without a Request Line
+
+Let's revisit the earlier lesson.
+
+HTTP/1.1:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+HTTP/2 conceptually:
+
+```text
+HEADERS frame
+stream = 1
+
+:method = GET
+:scheme = https
+:authority = example.com
+:path = /users
+
+accept = application/json
+```
+
+So the HTTP/1.1:
+
+```text
+GET /users HTTP/1.1
+```
+
+is represented in HTTP/2 using:
+
+```text
+:method
+:path
+```
+
+plus other pseudo-headers.
+
+---
+
+# 14. Response Too
+
+HTTP/1.1:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+HTTP/2 conceptually:
+
+```text
+HEADERS frame
+stream = 1
+
+:status = 200
+content-type = application/json
+```
+
+then:
+
+```text
+DATA frame
+stream = 1
+
+{"name":"Riyaz"}
+```
+
+So:
+
+```text
+HTTP/1.1:
+
+status line
+headers
+body
+```
+
+becomes roughly:
+
+```text
+HTTP/2:
+
+HEADERS frame
+DATA frames
+```
+
+---
+
+# 15. Now Let's See Multiplexing Conceptually
+
+Suppose the browser needs:
+
+```text
+/users
+/products
+/orders
+```
+
+HTTP/2 might have:
+
+```text
+Stream 1
+    HEADERS /users
+    DATA ...
+
+Stream 3
+    HEADERS /products
+    DATA ...
+
+Stream 5
+    HEADERS /orders
+    DATA ...
+```
+
+But the actual connection can carry:
+
+```text
+HEADERS 1
+HEADERS 3
+HEADERS 5
+DATA 3
+DATA 1
+DATA 5
+DATA 3
+DATA 1
+```
+
+One TCP connection.
+
+That's the magic.
+
+---
+
+# 16. Can curl Demonstrate This Easily?
+
+A single curl command doesn't make multiplexing visually obvious.
+
+But browsers do this constantly.
+
+A browser can have:
+
+```text
+one HTTP/2 connection
+```
+
+and many streams:
+
+```text
+HTML
+CSS
+JavaScript
+images
+API calls
+fonts
+```
+
+For example:
+
+```text
+TCP connection
+│
+├── Stream 1 → HTML
+├── Stream 3 → CSS
+├── Stream 5 → JS
+├── Stream 7 → image
+├── Stream 9 → API
+└── Stream 11 → font
+```
+
+This is why HTTP/2 was particularly useful for modern web pages.
+
+---
+
+# 17. Why HTTP/2 Helps Web Pages
+
+Old web pages might need:
+
+```text
+HTML
+ ↓
+CSS
+ ↓
+JS
+ ↓
+images
+ ↓
+fonts
+ ↓
+API calls
+```
+
+With HTTP/1.1, multiple TCP connections were commonly used to improve concurrency.
+
+HTTP/2 allows:
+
+```text
+ONE TCP connection
+
+├── HTML
+├── CSS
+├── JS
+├── image
+├── font
+└── API
+```
+
+with multiplexing.
+
+This reduces the need to open many parallel TCP connections.
+
+---
+
+# 18. A Subtle Point: One HTTP/2 Connection ≠ One HTTP Request
+
+This distinction is extremely important.
+
+You might have:
+
+```text
+1 TCP connection
+```
+
+containing:
+
+```text
+100 HTTP/2 streams
+```
+
+So:
+
+```text
+Connection ≠ Request
+```
+
+Instead:
+
+```text
+Connection
+    │
+    ├── Stream 1
+    ├── Stream 3
+    ├── Stream 5
+    ├── Stream 7
+    └── ...
+```
+
+Each stream represents an independent logical HTTP exchange.
+
+---
+
+# 19. Connection Reuse
+
+Suppose you request:
+
+```text
+https://example.com/users
+```
+
+Then:
+
+```text
+https://example.com/products
+```
+
+If the browser can reuse the same HTTP/2 connection:
+
+```text
+TCP connection
+│
+├── Stream 1 → /users
+└── Stream 3 → /products
+```
+
+It doesn't need:
+
+```text
+TCP handshake
+TLS handshake
+```
+
+again for the second request.
+
+This saves latency and connection overhead.
+
+---
+
+# 20. HTTP/1.1 Can Also Reuse Connections
+
+Don't accidentally conclude:
+
+> "Connection reuse is an HTTP/2 feature."
+
+It isn't.
+
+HTTP/1.1 supports persistent connections too.
+
+For example:
+
+```text
+TCP connection
+│
+├── HTTP request 1
+├── HTTP response 1
+├── HTTP request 2
+└── HTTP response 2
+```
+
+HTTP/2 takes the idea further:
+
+```text
+TCP connection
+│
+├── Stream 1
+├── Stream 3
+├── Stream 5
+└── Stream 7
+```
+
+with interleaving.
+
+So the evolution is:
+
+```text
+HTTP/1.0
+  ↓
+connection reuse
+  ↓
+HTTP/1.1
+  ↓
+multiplexed streams
+  ↓
+HTTP/2
+```
+
+---
+
+# 21. Let's Look at the Whole Journey Again
+
+When you run:
+
+```bash
+curl --http2 https://example.com
+```
+
+conceptually:
+
+```text
+1. Parse URL
+       ↓
+2. DNS lookup
+       ↓
+3. Connect to IP:443
+       ↓
+4. TCP handshake
+       ↓
+5. TLS handshake
+       ↓
+6. ALPN negotiates h2
+       ↓
+7. HTTP/2 connection established
+       ↓
+8. SETTINGS exchanged
+       ↓
+9. Stream created
+       ↓
+10. HEADERS frame
+       ↓
+11. DATA frame(s)
+       ↓
+12. Response reconstructed
+       ↓
+13. Application receives HTTP response
+```
+
+That's the complete journey.
+
+---
+
+# 22. One Important Correction to a Common Mental Model
+
+Don't think:
+
+```text
+Browser
+ ↓
+HTTP request
+ ↓
+TCP
+```
+
+as though HTTP itself creates TCP.
+
+Think in layers:
+
+```text
+HTTP
+ ↓
+transport
+ ↓
+network
+```
+
+And the exact transport depends on HTTP version:
+
+```text
+HTTP/1.1 → TCP
+HTTP/2   → TCP
+HTTP/3   → QUIC → UDP
+```
+
+---
+
+# 23. What We Have Learned So Far
+
+At this point you understand:
+
+### HTTP fundamentals
+
+```text
+request line
+headers
+body
+status line
+status code
+Content-Length
+Content-Type
+```
+
+### HTTP semantics
+
+```text
+GET
+POST
+PUT
+PATCH
+DELETE
+
+safe
+idempotent
+cacheable
+```
+
+### Authentication
+
+```text
+Authorization
+Bearer
+cookies
+sessions
+JWT
+access tokens
+refresh tokens
+CSRF
+CORS
+```
+
+### Caching
+
+```text
+Cache-Control
+ETag
+304
+Vary
+CDN
+```
+
+### Connection behavior
+
+```text
+TCP
+keep-alive
+connection reuse
+HTTP/1.1 pipelining
+HTTP/2 multiplexing
+HTTP/3 QUIC
+```
+
+### HTTP/2 internals
+
+```text
+frames
+streams
+HEADERS
+DATA
+SETTINGS
+WINDOW_UPDATE
+RST_STREAM
+PING
+GOAWAY
+HPACK
+```
+
+That's a substantial HTTP foundation.
+
+---
+
+# 24. Next: Lesson 39 — HTTP/2 vs HTTP/3 Deep Dive
+
+The next lesson is where we'll tackle one of the most commonly misunderstood topics:
+
+> **Why does HTTP/3 need QUIC if HTTP/2 already has multiplexing?**
+
+We'll follow one concrete packet-loss example:
+
+```text
+HTTP/2:
+
+Stream 1 ── X lost
+Stream 3 ── waiting because TCP is ordered
+Stream 5 ── waiting because TCP is ordered
+
+
+HTTP/3:
+
+Stream 1 ── X lost
+Stream 3 ── continues
+Stream 5 ── continues
+```
+
+Then we'll break down **TCP vs QUIC**, connection migration, why QUIC uses UDP, and how HTTP/3 handles streams differently.
+
+---
+
+# Lesson 39 — HTTP/2 vs HTTP/3: Why QUIC Exists
+
+We already know:
+
+```text
+HTTP/1.1 → TCP
+HTTP/2   → TCP
+HTTP/3   → QUIC → UDP
+```
+
+The obvious question is:
+
+> **If HTTP/2 already solved HTTP-level head-of-line blocking with multiplexing, why did we need HTTP/3?**
+
+The answer is mostly about **where the remaining blocking happens**.
+
+---
+
+# 1. First, Remember HTTP/1.1
+
+Imagine two requests:
+
+```text
+Request A → /large-file
+Request B → /small-file
+```
+
+With HTTP/1.1, things can effectively become:
+
+```text
+A ────────────────────────>
+B
+```
+
+There are limitations around concurrent exchanges on a connection.
+
+HTTP/2 improved this dramatically.
+
+---
+
+# 2. HTTP/2 Introduced Streams
+
+HTTP/2 can do:
+
+```text
+One TCP connection
+│
+├── Stream 1 → /large-file
+├── Stream 3 → /small-file
+└── Stream 5 → /image
+```
+
+And frames can be interleaved:
+
+```text
+HEADERS 1
+HEADERS 3
+HEADERS 5
+DATA 3
+DATA 1
+DATA 3
+DATA 5
+DATA 1
+```
+
+So if Stream 1 is slow:
+
+```text
+Stream 1 → slow
+Stream 3 → fast
+Stream 5 → fast
+```
+
+Streams 3 and 5 can still make progress.
+
+Great.
+
+So what's the problem?
+
+---
+
+# 3. TCP Doesn't Know About HTTP/2 Streams
+
+This is the key insight.
+
+HTTP/2 sees:
+
+```text
+Stream 1
+Stream 3
+Stream 5
+```
+
+But TCP sees:
+
+```text
+ONE ORDERED BYTE STREAM
+```
+
+TCP doesn't understand:
+
+```text
+Stream 1
+Stream 3
+Stream 5
+```
+
+From TCP's perspective, everything is simply:
+
+```text
+byte 1
+byte 2
+byte 3
+byte 4
+byte 5
+...
+```
+
+So:
+
+```text
+HTTP/2
+  ↓
+Streams
+  ↓
+TCP
+  ↓
+One ordered byte stream
+```
+
+---
+
+# 4. Let's Create a Packet-Loss Example
+
+Suppose HTTP/2 sends:
+
+```text
+Stream 1 → large video
+Stream 3 → small API response
+```
+
+At the HTTP/2 layer:
+
+```text
+Stream 1 ────────────────
+Stream 3 ────────────────
+```
+
+Now imagine TCP packets:
+
+```text
+Packet 1 → Stream 1 data
+Packet 2 → Stream 3 data
+Packet 3 → Stream 1 data
+Packet 4 → Stream 3 data
+Packet 5 → Stream 1 data
+```
+
+Everything is fine.
+
+---
+
+# 5. Now Packet 3 Gets Lost
+
+Imagine:
+
+```text
+Packet 1 ✓
+Packet 2 ✓
+Packet 3 ✗
+Packet 4 ✓
+Packet 5 ✓
+```
+
+TCP guarantees ordered delivery to the application.
+
+So it cannot simply hand later bytes to HTTP/2 while a missing earlier byte remains unresolved.
+
+Conceptually:
+
+```text
+TCP receive buffer:
+
+Packet 1 ✓
+Packet 2 ✓
+Packet 3 ✗
+Packet 4 ✓
+Packet 5 ✓
+```
+
+TCP waits for:
+
+```text
+Packet 3
+```
+
+to be retransmitted.
+
+---
+
+# 6. Why Does This Affect Stream 3?
+
+Because TCP doesn't know that:
+
+```text
+Packet 3
+```
+
+belonged to:
+
+```text
+Stream 1
+```
+
+while:
+
+```text
+Packet 4
+```
+
+belonged to:
+
+```text
+Stream 3
+```
+
+TCP only sees:
+
+```text
+ordered bytes
+```
+
+So HTTP/2 can conceptually be stuck behind TCP.
+
+This is **transport-level head-of-line blocking**.
+
+---
+
+# 7. The Important Distinction
+
+There are two different problems.
+
+### HTTP/1.1-level HOL
+
+```text
+HTTP/1.1
+   ↓
+request/response ordering limitations
+```
+
+HTTP/2 largely improves this through:
+
+```text
+multiplexing
+```
+
+### TCP-level HOL
+
+```text
+HTTP/2
+   ↓
+TCP
+   ↓
+ordered byte stream
+```
+
+Packet loss can still block delivery.
+
+This is the problem HTTP/3/QUIC addresses.
+
+---
+
+# 8. Why Can't HTTP/2 Just Fix TCP?
+
+Because TCP is already a standardized transport protocol with a specific contract.
+
+TCP says:
+
+> I provide an ordered reliable byte stream.
+
+HTTP/2 says:
+
+> I provide multiple logical streams above that.
+
+The HTTP/2 layer can't simply tell TCP:
+
+> "Please ignore this missing byte because it belongs to Stream 1."
+
+TCP doesn't expose that kind of stream-aware behavior.
+
+You would need a different transport.
+
+Enter:
+
+# QUIC
+
+---
+
+# 9. What Is QUIC?
+
+QUIC is a modern transport protocol.
+
+Conceptually:
+
+```text
+HTTP/3
+   ↓
+QUIC
+   ↓
+UDP
+```
+
+Don't think:
+
+> QUIC = UDP.
+
+That's incorrect.
+
+Think:
+
+```text
+UDP
+ ↓
+basic datagram transport
+ ↓
+QUIC builds a complete transport protocol
+```
+
+QUIC provides things such as:
+
+* reliable delivery
+* congestion control
+* flow control
+* independent streams
+* connection management
+* encryption integration
+
+---
+
+# 10. TCP vs QUIC
+
+Conceptually:
+
+```text
+TCP
+│
+├── reliable
+├── ordered
+├── byte stream
+├── congestion control
+└── flow control
+```
+
+QUIC:
+
+```text
+QUIC
+│
+├── reliable
+├── congestion control
+├── flow control
+├── multiple independent streams
+├── connection IDs
+└── TLS 1.3 integration
+```
+
+The critical difference for our discussion:
+
+```text
+TCP → one ordered byte stream
+QUIC → multiple independent streams
+```
+
+---
+
+# 11. Same Packet-Loss Example with QUIC
+
+Suppose:
+
+```text
+QUIC connection
+│
+├── Stream 1 → large resource
+├── Stream 3 → API
+└── Stream 5 → image
+```
+
+Packets:
+
+```text
+Packet 1 → Stream 1
+Packet 2 → Stream 3
+Packet 3 → Stream 1
+Packet 4 → Stream 3
+Packet 5 → Stream 5
+```
+
+Now:
+
+```text
+Packet 3 ✗
+```
+
+QUIC knows the data belongs to:
+
+```text
+Stream 1
+```
+
+So:
+
+```text
+Stream 1 → wait for retransmission
+```
+
+but:
+
+```text
+Stream 3 → continue
+Stream 5 → continue
+```
+
+That's the major difference.
+
+---
+
+# 12. Visual Comparison
+
+### HTTP/2
+
+```text
+HTTP/2
+│
+├── Stream 1 ──┐
+├── Stream 3 ──┼── TCP
+└── Stream 5 ──┘
+                 │
+                 ▼
+           ONE ordered
+            byte stream
+```
+
+Packet loss:
+
+```text
+       Packet lost
+            ↓
+     ┌─────────────┐
+     │     TCP     │
+     │    waits    │
+     └─────────────┘
+            ↓
+   HTTP/2 streams affected
+```
+
+---
+
+### HTTP/3
+
+```text
+HTTP/3
+│
+├── Stream 1 ──┐
+├── Stream 3 ──┼── QUIC
+└── Stream 5 ──┘
+                 │
+                 ▼
+            UDP packets
+```
+
+Packet loss:
+
+```text
+Stream 1 → affected
+
+Stream 3 → continues
+Stream 5 → continues
+```
+
+---
+
+# 13. Why UDP?
+
+Now you might ask:
+
+> Why not build QUIC on top of TCP?
+
+Because then QUIC would inherit TCP's ordered byte-stream behavior.
+
+QUIC needs control over:
+
+* packetization
+* retransmission
+* stream multiplexing
+* connection IDs
+* delivery behavior
+
+UDP provides a minimal datagram transport:
+
+```text
+Application
+    ↓
+QUIC
+    ↓
+UDP
+    ↓
+IP
+```
+
+QUIC builds the transport semantics it needs itself.
+
+---
+
+# 14. QUIC Is Reliable
+
+This is one of the biggest misconceptions.
+
+People often think:
+
+```text
+UDP = unreliable
+therefore
+HTTP/3 = unreliable
+```
+
+No.
+
+HTTP/3 uses:
+
+```text
+HTTP/3
+   ↓
+QUIC
+   ↓
+UDP
+```
+
+QUIC implements reliable delivery for the streams that require it.
+
+So:
+
+```text
+HTTP/3
+```
+
+is not simply "HTTP over raw UDP."
+
+---
+
+# 15. QUIC Also Integrates TLS
+
+With HTTP/2:
+
+```text
+HTTP/2
+   ↓
+TLS
+   ↓
+TCP
+```
+
+With HTTP/3:
+
+```text
+HTTP/3
+   ↓
+QUIC
+   ↓
+UDP
+```
+
+QUIC incorporates TLS 1.3 into its connection establishment.
+
+So conceptually:
+
+```text
+HTTP/2:
+
+HTTP
+ ↓
+TLS
+ ↓
+TCP
+```
+
+versus:
+
+```text
+HTTP/3:
+
+HTTP
+ ↓
+QUIC + TLS
+ ↓
+UDP
+```
+
+This is an architectural difference worth remembering.
+
+---
+
+# 16. Another QUIC Feature: Connection IDs
+
+This solves another interesting problem.
+
+Imagine you're using Wi-Fi:
+
+```text
+Phone
+  ↓
+Wi-Fi
+```
+
+Your network changes.
+
+You move to cellular:
+
+```text
+Phone
+  ↓
+4G/5G
+```
+
+Your IP address may change.
+
+With traditional TCP connections, an established connection is tied to the connection's IP/port tuple.
+
+A network change can therefore break the connection.
+
+QUIC uses **connection IDs** so that a connection can survive certain network-path changes.
+
+Conceptually:
+
+```text
+Before:
+
+Client
+IP A
+  │
+  │ QUIC connection ID = X
+  ▼
+Server
+
+
+Network changes
+
+
+After:
+
+Client
+IP B
+  │
+  │ QUIC connection ID = X
+  ▼
+Server
+```
+
+The connection can potentially continue.
+
+This is called **connection migration**.
+
+---
+
+# 17. Why Is This Useful?
+
+Think about a phone:
+
+```text
+Wi-Fi
+   ↓
+walking outside
+   ↓
+cellular
+```
+
+Without connection migration:
+
+```text
+Wi-Fi connection dies
+       ↓
+new connection
+       ↓
+new handshake
+       ↓
+resume application
+```
+
+QUIC can potentially avoid tearing down the logical connection.
+
+This is especially useful for mobile clients.
+
+---
+
+# 18. Does HTTP/3 Eliminate All Head-of-Line Blocking?
+
+No.
+
+Be careful with this.
+
+HTTP/3 removes the **TCP-level cross-stream head-of-line blocking** problem.
+
+But if:
+
+```text
+Stream 1
+```
+
+loses data, Stream 1 itself still needs that missing data.
+
+So:
+
+```text
+Stream 1
+   ↓
+missing data
+   ↓
+wait for retransmission
+```
+
+is still possible.
+
+What changes is that:
+
+```text
+Stream 3
+Stream 5
+```
+
+don't have to wait for Stream 1's missing data merely because they share the same QUIC connection.
+
+---
+
+# 19. HTTP/2 vs HTTP/3
+
+Here's the comparison to remember:
+
+|                               | HTTP/2             | HTTP/3               |
+| ----------------------------- | ------------------ | -------------------- |
+| Transport                     | TCP                | QUIC                 |
+| Underlying network protocol   | IP                 | IP                   |
+| UDP                           | No                 | Yes                  |
+| Multiplexing                  | Yes                | Yes                  |
+| Streams                       | Yes                | Yes                  |
+| Binary framing                | Yes                | Yes                  |
+| Header compression            | HPACK              | QPACK                |
+| TCP-level HOL                 | Yes                | N/A                  |
+| Independent transport streams | No                 | Yes                  |
+| Connection migration          | Limited by TCP     | Supported by QUIC    |
+| TLS                           | Separate TLS layer | Integrated into QUIC |
+
+---
+
+# 20. Notice Something Important
+
+HTTP/3 did **not** reinvent HTTP semantics.
+
+You still have:
+
+```text
+GET
+POST
+PUT
+PATCH
+DELETE
+```
+
+You still have:
+
+```text
+200
+201
+301
+404
+500
+```
+
+You still have:
+
+```text
+Content-Type
+Cache-Control
+Authorization
+Cookie
+```
+
+The big changes are underneath:
+
+```text
+HTTP/2:
+
+HTTP
+ ↓
+binary framing
+ ↓
+TCP
+
+
+HTTP/3:
+
+HTTP
+ ↓
+binary framing
+ ↓
+QUIC
+ ↓
+UDP
+```
+
+---
+
+# 21. The Evolution Makes More Sense Now
+
+You can now tell the story properly.
+
+### HTTP/1.0
+
+```text
+HTTP
+ ↓
+TCP
+```
+
+Connection management was relatively expensive.
+
+### HTTP/1.1
+
+```text
+HTTP
+ ↓
+TCP
+```
+
+Improved connection persistence and other features.
+
+Still limited concurrency.
+
+### HTTP/2
+
+```text
+HTTP
+ ↓
+Frames
+ ↓
+Streams
+ ↓
+TCP
+```
+
+Solved HTTP-level multiplexing.
+
+But:
+
+```text
+TCP
+ ↓
+ordered byte stream
+```
+
+remained.
+
+### HTTP/3
+
+```text
+HTTP
+ ↓
+Frames
+ ↓
+Streams
+ ↓
+QUIC
+ ↓
+UDP
+```
+
+QUIC provides transport-level streams and avoids TCP's cross-stream HOL behavior.
+
+---
+
+# 22. A Very Useful Mental Model
+
+Remember this:
+
+```text
+HTTP/1.1
+"Let's reuse the connection."
+
+
+HTTP/2
+"Let's multiplex many requests
+over the same connection."
+
+
+HTTP/3
+"Let's multiplex many requests,
+but use a transport that understands
+independent streams."
+```
+
+That's a much better mental model than:
+
+```text
+HTTP/1 = old
+HTTP/2 = faster
+HTTP/3 = fastest
+```
+
+---
+
+# 23. One More Important Detail: QUIC Packets ≠ HTTP/3 Frames
+
+Don't mix these up.
+
+At the HTTP layer:
+
+```text
+HTTP/3
+ └── HTTP/3 frames
+```
+
+At the transport layer:
+
+```text
+QUIC
+ └── QUIC packets
+```
+
+Conceptually:
+
+```text
+HTTP/3 frame
+      ↓
+QUIC
+      ↓
+QUIC packet
+      ↓
+UDP datagram
+      ↓
+IP packet
+```
+
+Similarly for HTTP/2:
+
+```text
+HTTP/2 frame
+      ↓
+TLS record
+      ↓
+TCP segment
+      ↓
+IP packet
+```
+
+Different layers, different concepts.
+
+---
+
+# 24. One Last Picture
+
+This is probably the most useful diagram from this lesson:
+
+```text
+                 HTTP semantics
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+       HTTP/2                    HTTP/3
+          │                         │
+       Frames                    Frames
+       Streams                   Streams
+       HPACK                     QPACK
+          │                         │
+         TCP                      QUIC
+          │                         │
+      ordered                  independent
+      byte stream                 streams
+          │                         │
+          │                        UDP
+          │                         │
+          └─────────── IP ──────────┘
+```
+
+---
+
+## Next — Lesson 40: HTTP/2 & HTTP/3 Frame-Level Thinking
+
+Next we'll go **one layer lower** and actually reason about what is traveling across the network.
+
+We'll take:
+
+```http
+GET /users
+```
+
+and follow it through:
+
+```text
+HTTP request
+    ↓
+HTTP/2 HEADERS
+    ↓
+HPACK
+    ↓
+TLS record
+    ↓
+TCP segments
+    ↓
+IP packets
+```
+
+Then we'll compare it with:
+
+```text
+HTTP/3 HEADERS
+    ↓
+QPACK
+    ↓
+QUIC packet
+    ↓
+UDP datagram
+    ↓
+IP packet
+```
+
+This will tie together almost everything we've learned so far.
+
