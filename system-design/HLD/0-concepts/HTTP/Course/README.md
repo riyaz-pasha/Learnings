@@ -23260,3 +23260,2932 @@ and
 
 ---
 
+# Lesson 29 — CORS + Same-Origin Policy
+
+CSRF introduced an important browser-security question:
+
+> If `evil.com` can cause a request to `bank.com`, why can't it simply read the response too?
+
+The answer leads us to **Same-Origin Policy (SOP)** and **CORS**.
+
+---
+
+## 1. The problem CORS solves
+
+Imagine your frontend is:
+
+```text
+https://app.example.com
+```
+
+and your API is:
+
+```text
+https://api.example.com
+```
+
+Your frontend JavaScript wants:
+
+```javascript
+fetch("https://api.example.com/users");
+```
+
+But these are different **origins**.
+
+The browser needs a security mechanism that says:
+
+> "Is JavaScript running on `app.example.com` allowed to read responses from `api.example.com`?"
+
+That's what **CORS** helps control.
+
+---
+
+# 2. First: what is an origin?
+
+An origin consists of:
+
+```text
+scheme + host + port
+```
+
+For example:
+
+```text
+https://example.com:443
+│       │           │
+scheme  host        port
+```
+
+These are different origins:
+
+```text
+https://example.com
+http://example.com
+https://api.example.com
+https://example.com:8080
+```
+
+Even though some of them may belong to the same broader organization/site.
+
+---
+
+## 3. Same-origin policy
+
+Suppose JavaScript is running on:
+
+```text
+https://evil.com
+```
+
+and tries:
+
+```javascript
+fetch("https://bank.com/account");
+```
+
+The browser can potentially send the request depending on the request and credentials.
+
+But the browser prevents the JavaScript from freely reading the response unless the target server permits it.
+
+Conceptually:
+
+```text
+evil.com JavaScript
+       │
+       │ request
+       ↓
+   bank.com
+       │
+       │ response
+       ↓
+    Browser
+       │
+       X
+       │
+evil.com JavaScript
+```
+
+This is a core browser security boundary.
+
+---
+
+# 4. SOP existed before CORS
+
+The browser's default security model is essentially:
+
+> JavaScript from one origin shouldn't automatically be able to read arbitrary data from another origin.
+
+Otherwise imagine visiting:
+
+```text
+evil.com
+```
+
+and its JavaScript doing:
+
+```javascript
+fetch("https://mybank.com/account");
+```
+
+If JavaScript could freely read the response, it could potentially access:
+
+```json
+{
+  "balance": 500000
+}
+```
+
+or:
+
+```json
+{
+  "email": "riyaz@example.com",
+  "transactions": [...]
+}
+```
+
+That would be disastrous.
+
+So browsers enforce cross-origin restrictions.
+
+---
+
+# 5. Then why do we need CORS?
+
+Because legitimate applications frequently need cross-origin requests.
+
+For example:
+
+```text
+Frontend
+https://app.example.com
+
+API
+https://api.example.com
+```
+
+The API owner can explicitly say:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+```
+
+Meaning:
+
+> JavaScript from this origin is allowed to read the response.
+
+So:
+
+```text
+SOP
+ ↓
+Default browser restriction
+
+CORS
+ ↓
+Server explicitly grants cross-origin access
+```
+
+---
+
+# 6. Let's see a simple request
+
+Frontend:
+
+```javascript
+fetch("https://api.example.com/users");
+```
+
+Browser sends something like:
+
+```http
+GET /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+```
+
+Notice:
+
+```http
+Origin: https://app.example.com
+```
+
+The browser tells the server:
+
+> "This request originated from this origin."
+
+The API can respond:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Access-Control-Allow-Origin: https://app.example.com
+
+{"users":[]}
+```
+
+Now the browser allows the frontend JavaScript to read the response.
+
+---
+
+# 7. `Origin` is extremely important
+
+You have already seen:
+
+```http
+Host: api.example.com
+```
+
+Now we introduce:
+
+```http
+Origin: https://app.example.com
+```
+
+They mean different things.
+
+### Host
+
+The destination server:
+
+```http
+Host: api.example.com
+```
+
+### Origin
+
+The origin from which the browser initiated the request:
+
+```http
+Origin: https://app.example.com
+```
+
+For example:
+
+```text
+Browser
+  │
+  │ JavaScript running on app.example.com
+  │
+  └──────→ api.example.com
+```
+
+Request:
+
+```http
+Host: api.example.com
+Origin: https://app.example.com
+```
+
+---
+
+# 8. CORS is primarily enforced by the browser
+
+This is a very important point.
+
+Suppose you run:
+
+```bash
+curl https://api.example.com/users
+```
+
+The API might return:
+
+```json
+{"users":[]}
+```
+
+even if CORS isn't configured.
+
+Why?
+
+Because:
+
+> **CORS is a browser security mechanism.**
+
+`curl` doesn't enforce browser SOP.
+
+Similarly:
+
+```bash
+curl -H "Origin: https://evil.com" https://api.example.com/users
+```
+
+doesn't make curl behave like a browser.
+
+The server may return the response anyway.
+
+The browser is the component that decides whether JavaScript is allowed to access it.
+
+---
+
+# 9. CORS does NOT mean "block the request"
+
+This is one of the biggest misconceptions.
+
+People often say:
+
+> "CORS blocks cross-origin requests."
+
+That's an oversimplification.
+
+The important distinction is:
+
+```text
+Request sent
+      ≠
+JavaScript allowed to read response
+```
+
+For some requests, the browser may send the request and then block JavaScript from accessing the response.
+
+For other requests, the browser performs a **preflight** first.
+
+We'll get there.
+
+---
+
+# 10. Simple cross-origin request
+
+Suppose:
+
+```javascript
+fetch("https://api.example.com/users");
+```
+
+The browser might send:
+
+```http
+GET /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+```
+
+Server:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Access-Control-Allow-Origin: https://app.example.com
+
+{"users":[]}
+```
+
+Browser sees:
+
+```text
+Origin matches
+      ↓
+CORS permission granted
+      ↓
+JavaScript gets response
+```
+
+---
+
+# 11. What if the server doesn't send CORS headers?
+
+Server:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"users":[]}
+```
+
+The network request may have reached the server.
+
+But browser JavaScript gets something like:
+
+```text
+CORS error
+```
+
+The important mental model:
+
+```text
+Server may have processed request
+             ↓
+Browser receives response
+             ↓
+Browser checks CORS
+             ↓
+JavaScript may be denied access
+```
+
+This is why CORS errors can be confusing.
+
+You can see the request in server logs even though your frontend says:
+
+```text
+CORS error
+```
+
+---
+
+# 12. Preflight
+
+Now imagine your frontend sends:
+
+```http
+POST /users
+Content-Type: application/json
+```
+
+The browser may first send an **OPTIONS** request.
+
+This is called a **preflight request**.
+
+Example:
+
+```http
+OPTIONS /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: content-type
+```
+
+The browser is asking:
+
+> "If I send a POST with the Content-Type header, will you allow this origin?"
+
+---
+
+# 13. Server responds to preflight
+
+Server:
+
+```http
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: POST
+Access-Control-Allow-Headers: Content-Type
+```
+
+Browser thinks:
+
+```text
+Origin allowed?       YES
+POST allowed?         YES
+Content-Type allowed? YES
+
+Proceed.
+```
+
+Then:
+
+```http
+POST /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+---
+
+# 14. Why does preflight exist?
+
+Imagine an API:
+
+```text
+DELETE /account
+```
+
+A random website shouldn't be able to make arbitrary cross-origin requests with arbitrary headers and methods without the server having an opportunity to opt in.
+
+So the browser asks first:
+
+```text
+OPTIONS
+   ↓
+"May I do this?"
+   ↓
+Server says yes
+   ↓
+Actual request
+```
+
+---
+
+# 15. OPTIONS is an HTTP method
+
+You already learned:
+
+```text
+GET
+POST
+PUT
+PATCH
+DELETE
+```
+
+Now add:
+
+```text
+OPTIONS
+```
+
+OPTIONS asks about the communication options for a target resource.
+
+CORS uses OPTIONS for preflight.
+
+Example:
+
+```http
+OPTIONS /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+```
+
+---
+
+# 16. Important CORS headers
+
+### `Access-Control-Allow-Origin`
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+```
+
+Specifies allowed origin(s).
+
+---
+
+### `Access-Control-Allow-Methods`
+
+```http
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+```
+
+Methods allowed for cross-origin requests.
+
+---
+
+### `Access-Control-Allow-Headers`
+
+```http
+Access-Control-Allow-Headers: Content-Type, Authorization
+```
+
+Headers the browser may send in the cross-origin request.
+
+---
+
+### `Access-Control-Allow-Credentials`
+
+This becomes important when cookies are involved:
+
+```http
+Access-Control-Allow-Credentials: true
+```
+
+We'll connect this to authentication shortly.
+
+---
+
+# 17. CORS + cookies
+
+Suppose:
+
+```text
+Frontend
+https://app.example.com
+
+API
+https://api.example.com
+```
+
+The API uses:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+The frontend wants:
+
+```javascript
+fetch("https://api.example.com/profile", {
+    credentials: "include"
+});
+```
+
+Now there are additional requirements.
+
+Server might return:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+```
+
+The browser can then allow credentialed cross-origin access, subject to cookie rules such as `SameSite`.
+
+---
+
+# 18. Why can't we use `*` with credentials?
+
+You might see:
+
+```http
+Access-Control-Allow-Origin: *
+```
+
+That's useful for public APIs.
+
+But credentialed CORS cannot simply say:
+
+```http
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+```
+
+The browser requires an explicit origin for credentialed access.
+
+So instead:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+```
+
+---
+
+# 19. CORS vs CSRF
+
+This distinction is extremely important.
+
+### CSRF
+
+Question:
+
+> Can another site cause an authenticated state-changing request?
+
+Example:
+
+```text
+evil.com
+   ↓
+POST /transfer
+   ↓
+bank.com
+```
+
+---
+
+### CORS
+
+Question:
+
+> Can JavaScript from another origin read the response?
+
+Example:
+
+```text
+evil.com JavaScript
+       ↓
+GET /account
+       ↓
+bank.com
+       ↓
+Can evil.com JS read response?
+```
+
+So:
+
+```text
+CSRF
+→ unauthorized action
+
+CORS
+→ cross-origin response access
+```
+
+They are related to browser security, but they solve different problems.
+
+---
+
+# 20. A crucial example
+
+Suppose:
+
+```text
+evil.com
+```
+
+causes:
+
+```http
+POST /transfer
+Cookie: session_id=abc123
+```
+
+and the bank processes it.
+
+Even if CORS is completely disabled:
+
+```text
+CSRF can still happen.
+```
+
+Why?
+
+Because CSRF doesn't require reading the response.
+
+Therefore:
+
+> **CORS is not a CSRF defense.**
+
+You still need appropriate CSRF protection for cookie-authenticated state-changing requests.
+
+---
+
+# 21. Another common misconception
+
+Someone says:
+
+> "Our API has CORS configured, so we're safe from CSRF."
+
+Not necessarily.
+
+CORS might prevent:
+
+```text
+evil.com JavaScript
+       ↓
+reading bank response
+```
+
+But it doesn't automatically prevent:
+
+```text
+evil.com
+       ↓
+causing browser request
+       ↓
+bank.com
+```
+
+That's why:
+
+```text
+CORS ≠ CSRF protection
+```
+
+---
+
+# 22. Let's connect everything we've learned
+
+We now have:
+
+```text
+                 Browser
+                    │
+       ┌────────────┴─────────────┐
+       │                          │
+Same-Origin Policy             Cookies
+       │                          │
+       ↓                          ↓
+ Cross-origin                 Automatic
+ restrictions                 credentials
+       │                          │
+       ↓                          ↓
+      CORS                       CSRF
+       │
+       ↓
+"Can JS read the response?"
+```
+
+And authentication:
+
+```text
+Cookie authentication
+        │
+        ├── HttpOnly
+        ├── Secure
+        ├── SameSite
+        └── CSRF protection
+
+Bearer authentication
+        │
+        └── Authorization header
+```
+
+---
+
+# 23. Hands-on: see the Origin header
+
+Let's return to our Python HTTP server.
+
+Add:
+
+```python
+def do_GET(self):
+    print("Origin:", self.headers.get("Origin"))
+
+    body = b"Hello"
+
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+
+    self.wfile.write(body)
+```
+
+Run:
+
+```bash
+python3 server.py
+```
+
+Now:
+
+```bash
+curl \
+  -H "Origin: https://app.example.com" \
+  http://localhost:8080/
+```
+
+Your server receives:
+
+```http
+GET / HTTP/1.1
+Host: localhost:8080
+Origin: https://app.example.com
+```
+
+Notice that `curl` lets you manually construct the header.
+
+The server doesn't automatically know that the request came from a browser.
+
+---
+
+# 24. Add a CORS response
+
+Try:
+
+```python
+self.send_header(
+    "Access-Control-Allow-Origin",
+    "https://app.example.com"
+)
+```
+
+Now response:
+
+```http
+HTTP/1.0 200 OK
+Content-Type: text/plain
+Access-Control-Allow-Origin: https://app.example.com
+Content-Length: 5
+
+Hello
+```
+
+That response header is the server telling a browser:
+
+> "JavaScript from this origin may read this response."
+
+---
+
+# 25. The complete request lifecycle
+
+This is the mental model I want you to remember:
+
+```text
+JavaScript
+   │
+   │ fetch()
+   ↓
+Browser
+   │
+   │ determines cross-origin?
+   ↓
+Same-Origin Policy / CORS rules
+   │
+   ├── simple request
+   │       ↓
+   │    actual request
+   │
+   └── needs preflight
+           ↓
+        OPTIONS
+           ↓
+      server permission
+           ↓
+       actual request
+   │
+   ↓
+Server
+   │
+   ↓
+Response
+   │
+   ↓
+Browser checks CORS
+   │
+   ├── allowed → JS gets response
+   │
+   └── denied  → JS cannot access response
+```
+
+---
+
+## One final distinction
+
+You now have three very different browser-security questions:
+
+| Mechanism              | Main question                                                  |
+| ---------------------- | -------------------------------------------------------------- |
+| **Same-Origin Policy** | Can one origin freely access another origin's data?            |
+| **CORS**               | Has the target server explicitly allowed cross-origin access?  |
+| **CSRF protection**    | Can an attacker cause an authenticated state-changing request? |
+
+And three cookie attributes you've learned:
+
+| Attribute  | Main purpose                             |
+| ---------- | ---------------------------------------- |
+| `HttpOnly` | Prevent JS from directly reading cookie  |
+| `Secure`   | Send cookie only over secure connections |
+| `SameSite` | Control cross-site cookie sending        |
+
+These are **not interchangeable**.
+
+---
+
+### Next: Lesson 30 — HTTP Caching
+
+We'll move from browser security into another major HTTP capability:
+
+```text
+Cache-Control
+ETag
+Last-Modified
+If-None-Match
+If-Modified-Since
+304 Not Modified
+```
+
+We'll build a tiny server and see how the browser can avoid downloading the same resource repeatedly.
+
+
+---
+
+Absolutely. This is one of the **most important distinctions in web security**, and the confusion usually comes from treating these two questions as the same:
+
+> **"Can another website send a request to my API?"**
+
+vs.
+
+> **"Can another website read the response from my API?"**
+
+They are different.
+
+---
+
+# 1. Start with a concrete example
+
+Suppose you have a banking application:
+
+```text
+https://bank.com
+```
+
+You log in.
+
+The bank gives your browser a session cookie:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure
+```
+
+Your browser now stores:
+
+```text
+bank.com
+    ↓
+session_id=abc123
+```
+
+Whenever your browser makes a request to `bank.com`, it can automatically include:
+
+```http
+Cookie: session_id=abc123
+```
+
+The bank uses this cookie to identify you.
+
+---
+
+# 2. Now you visit evil.com
+
+You are logged into:
+
+```text
+bank.com
+```
+
+Then you visit:
+
+```text
+evil.com
+```
+
+The malicious site contains:
+
+```html
+<form action="https://bank.com/transfer" method="POST">
+    <input type="hidden" name="to" value="attacker">
+    <input type="hidden" name="amount" value="10000">
+</form>
+
+<script>
+    document.forms[0].submit();
+</script>
+```
+
+The browser is now being instructed to make:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Cookie: session_id=abc123
+
+to=attacker&amount=10000
+```
+
+Notice something extremely important:
+
+### The malicious website does NOT need to know `abc123`.
+
+The browser already has the cookie.
+
+The browser may attach it automatically according to cookie rules.
+
+---
+
+# 3. This is CSRF
+
+The bank sees:
+
+```http
+POST /transfer
+Cookie: session_id=abc123
+```
+
+From the bank's perspective:
+
+```text
+session_id=abc123
+        ↓
+User #123
+        ↓
+Authenticated
+        ↓
+Transfer $10,000
+```
+
+The bank doesn't necessarily know that the request was initiated by:
+
+```text
+bank.com
+```
+
+rather than:
+
+```text
+evil.com
+```
+
+That's the fundamental CSRF problem.
+
+---
+
+# 4. Now where does CORS enter?
+
+CORS primarily addresses a **different problem**.
+
+Suppose evil.com does:
+
+```javascript
+fetch("https://bank.com/account")
+```
+
+The browser sees:
+
+```text
+JavaScript origin:
+https://evil.com
+
+Target:
+https://bank.com
+```
+
+That's cross-origin.
+
+The browser uses the CORS rules to determine whether JavaScript running on `evil.com` is allowed to **read the response**.
+
+---
+
+# 5. Imagine there is NO CORS permission
+
+Bank responds:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+    "balance": 500000
+}
+```
+
+But bank does not say:
+
+```http
+Access-Control-Allow-Origin: https://evil.com
+```
+
+The browser says:
+
+```text
+Response arrived
+       ↓
+CORS check
+       ↓
+evil.com is not allowed
+       ↓
+Do NOT expose response to evil.com JavaScript
+```
+
+So this JavaScript:
+
+```javascript
+fetch("https://bank.com/account")
+    .then(response => response.json())
+    .then(data => {
+        console.log(data);
+    });
+```
+
+cannot simply read the bank's response.
+
+That's good.
+
+---
+
+# 6. But here's the critical part
+
+CORS preventing **response reading** does not necessarily mean the **request never happened**.
+
+Conceptually:
+
+```text
+             evil.com
+                │
+                │ request
+                ↓
+             bank.com
+                │
+                │ response
+                ↓
+             Browser
+                │
+                X
+                │
+        evil.com JavaScript
+```
+
+The browser can enforce:
+
+```text
+"evil.com cannot read this response."
+```
+
+without that meaning:
+
+```text
+"bank.com never received the request."
+```
+
+That's why CORS isn't a CSRF defense.
+
+---
+
+# 7. Let's compare two attacks
+
+## Attack A — Stealing data
+
+Attacker wants:
+
+```text
+Your bank balance
+```
+
+They try:
+
+```javascript
+fetch("https://bank.com/account")
+```
+
+They want:
+
+```json
+{
+    "balance": 500000
+}
+```
+
+CORS can prevent their JavaScript from reading that response.
+
+So:
+
+```text
+CORS
+ ↓
+controls cross-origin response access
+```
+
+---
+
+## Attack B — Performing an action
+
+Attacker wants:
+
+```text
+Transfer $10,000
+```
+
+They don't care about the response.
+
+They only need:
+
+```http
+POST /transfer
+Cookie: session_id=abc123
+```
+
+If the bank processes the request, the damage is done.
+
+It doesn't matter whether evil.com sees:
+
+```http
+HTTP/1.1 200 OK
+```
+
+or:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+The important thing was the state-changing request.
+
+So:
+
+```text
+CSRF
+ ↓
+protects state-changing actions
+```
+
+---
+
+# 8. This is the key distinction
+
+Think about these two questions:
+
+### Question A
+
+```text
+Can evil.com READ bank.com's response?
+```
+
+CORS is relevant.
+
+### Question B
+
+```text
+Can evil.com CAUSE the browser to send a request to bank.com?
+```
+
+CORS is **not the primary defense**.
+
+CSRF defenses are relevant.
+
+---
+
+# 9. Why this is especially dangerous with cookies
+
+Cookies have an important behavior:
+
+```text
+Cookie
+    ↓
+browser-managed
+    ↓
+automatically attached to matching requests
+```
+
+Suppose:
+
+```http
+Cookie: session_id=abc123
+```
+
+The attacker doesn't need:
+
+```javascript
+const cookie = ...
+```
+
+They don't need to read it.
+
+The browser does the work.
+
+That's why:
+
+```text
+Cookie-based authentication
+        +
+state-changing requests
+        +
+missing CSRF protection
+```
+
+can create CSRF vulnerabilities.
+
+---
+
+# 10. Compare this with Authorization headers
+
+Consider a bearer-token API:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Authorization: Bearer eyJhbGci...
+```
+
+Now evil.com creates:
+
+```html
+<form action="https://bank.com/transfer" method="POST">
+```
+
+The browser doesn't automatically add:
+
+```http
+Authorization: Bearer eyJ...
+```
+
+because that's not a normal browser cookie.
+
+The attacker doesn't know the token.
+
+So the request reaches the server as something like:
+
+```http
+POST /transfer
+Host: bank.com
+
+to=attacker&amount=10000
+```
+
+The server says:
+
+```text
+No Authorization header
+        ↓
+401 Unauthorized
+```
+
+This is one reason bearer tokens sent explicitly in the `Authorization` header have different CSRF characteristics from cookie-based authentication.
+
+---
+
+# 11. But be careful: JWT doesn't magically solve everything
+
+Suppose you store a JWT in:
+
+```text
+localStorage
+```
+
+and your application does:
+
+```javascript
+fetch("/transfer", {
+    headers: {
+        Authorization: `Bearer ${token}`
+    }
+});
+```
+
+CSRF is different because the browser doesn't automatically attach that `Authorization` header to an attacker's request.
+
+However, now you have another major concern:
+
+```text
+XSS
+```
+
+If malicious JavaScript executes in your application's origin, it may be able to access the token.
+
+So you're trading one class of risk for another.
+
+This is why security architecture isn't:
+
+```text
+JWT = secure
+Cookie = insecure
+```
+
+It's more nuanced.
+
+---
+
+# 12. Let's look at CORS more precisely
+
+Suppose your API says:
+
+```http
+Access-Control-Allow-Origin: https://app.bank.com
+```
+
+This means:
+
+```text
+JavaScript from app.bank.com
+        ↓
+allowed to read response
+```
+
+It does **not** mean:
+
+```text
+Only app.bank.com can send requests.
+```
+
+That's the misconception.
+
+A better interpretation is:
+
+> **CORS tells the browser which origins may access the response from JavaScript.**
+
+It is not an authentication mechanism.
+
+---
+
+# 13. CORS does not prove who made the request
+
+Imagine the bank receives:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Cookie: session_id=abc123
+Origin: https://evil.com
+```
+
+The bank should be thinking:
+
+```text
+Who is this?
+       ↓
+session_id
+
+Is this user authorized?
+       ↓
+authorization checks
+
+Is this request protected against CSRF?
+       ↓
+CSRF checks
+```
+
+CORS isn't the thing that should decide whether the transfer is legitimate.
+
+---
+
+# 14. `Origin` can actually help with CSRF defense
+
+Here's an interesting connection.
+
+Browsers can send:
+
+```http
+Origin: https://evil.com
+```
+
+The server can inspect it.
+
+For example:
+
+```text
+Allowed origins:
+https://bank.com
+https://app.bank.com
+```
+
+Request:
+
+```http
+Origin: https://evil.com
+```
+
+Server:
+
+```text
+Origin isn't trusted
+       ↓
+Reject request
+       ↓
+403 Forbidden
+```
+
+This can be part of a CSRF defense strategy.
+
+But notice:
+
+```text
+Origin checking
+        ≠
+CORS
+```
+
+The same `Origin` header participates in the browser's CORS protocol, but the server can independently use it as part of its security checks.
+
+---
+
+# 15. CSRF token makes the difference very obvious
+
+Suppose the bank gives your legitimate application:
+
+```text
+CSRF token:
+
+7f92a1c8...
+```
+
+The legitimate frontend sends:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Cookie: session_id=abc123
+Content-Type: application/json
+
+{
+    "to": "123",
+    "amount": 100,
+    "csrf_token": "7f92a1c8..."
+}
+```
+
+The attacker can potentially cause:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Cookie: session_id=abc123
+
+{
+    "to": "attacker",
+    "amount": 100
+}
+```
+
+But they don't have:
+
+```text
+csrf_token
+```
+
+So:
+
+```text
+Session valid
+     ↓
+YES
+
+CSRF token valid
+     ↓
+NO
+
+Reject
+```
+
+That's CSRF protection.
+
+---
+
+# 16. Why can't evil.com just fetch the CSRF token?
+
+Excellent question.
+
+Suppose the bank has:
+
+```http
+GET /transfer-page
+```
+
+which returns:
+
+```html
+<input type="hidden"
+       name="csrf_token"
+       value="7f92a1c8...">
+```
+
+If evil.com could freely read that response, it could simply do:
+
+```text
+GET /transfer-page
+       ↓
+read CSRF token
+       ↓
+POST /transfer
+       ↓
+CSRF token included
+```
+
+But the browser's same-origin policy/CORS restrictions prevent arbitrary evil.com JavaScript from reading protected cross-origin responses unless the bank explicitly allows it.
+
+So the defenses work together:
+
+```text
+Same-Origin Policy / CORS
+        ↓
+attacker can't freely read protected data/token
+
+CSRF token
+        ↓
+attacker can't forge state-changing request
+
+Cookie
+        ↓
+authenticates legitimate user
+```
+
+This is a much better mental model.
+
+---
+
+# 17. A complete attack
+
+Without CSRF protection:
+
+```text
+User logs into bank
+        ↓
+Cookie stored
+        ↓
+User visits evil.com
+        ↓
+evil.com creates POST /transfer
+        ↓
+Browser sends bank cookie
+        ↓
+Bank authenticates request
+        ↓
+Transfer happens
+```
+
+CORS doesn't necessarily stop this.
+
+---
+
+# 18. With CSRF protection
+
+```text
+User logs into bank
+        ↓
+Cookie stored
+        ↓
+User visits evil.com
+        ↓
+evil.com creates POST /transfer
+        ↓
+Browser may send cookie
+        ↓
+Bank authenticates user
+        ↓
+CSRF token missing
+        ↓
+403 Forbidden
+        ↓
+Transfer doesn't happen
+```
+
+Notice something very important:
+
+**The cookie can still be present.**
+
+Authentication succeeded.
+
+But the request still fails because the application requires another security property.
+
+---
+
+# 19. So what exactly does each mechanism protect?
+
+Here's the table I'd remember for interviews:
+
+| Mechanism            | Protects against / controls                                 |
+| -------------------- | ----------------------------------------------------------- |
+| Same-Origin Policy   | Cross-origin access by browser JavaScript                   |
+| CORS                 | Server-declared permission for cross-origin response access |
+| CSRF token           | Forged state-changing requests                              |
+| SameSite cookie      | Cross-site cookie sending                                   |
+| HttpOnly             | Direct JavaScript access to cookies                         |
+| Secure               | Cookie transmission over insecure HTTP                      |
+| Authorization header | Explicitly supplied bearer credentials                      |
+| Authentication       | Who is the user?                                            |
+| Authorization        | What is the user allowed to do?                             |
+
+---
+
+# 20. The simplest mental model
+
+Think of a bank.
+
+### CORS asks:
+
+> **"Can this other website see what the bank told the browser?"**
+
+### CSRF asks:
+
+> **"Can this other website trick the bank into doing something using the victim's identity?"**
+
+That's the distinction.
+
+Or even shorter:
+
+```text
+CORS
+→ Can I READ the response?
+
+CSRF
+→ Can I MAKE an authenticated action happen?
+```
+
+That's not a perfect specification-level definition, but it's an excellent mental model.
+
+---
+
+# 21. One final subtlety
+
+Don't interpret:
+
+```text
+CORS blocks evil.com
+```
+
+as:
+
+```text
+evil.com cannot communicate with my API.
+```
+
+Instead think:
+
+```text
+Browser
+   │
+   ├── Can request be sent?
+   │
+   └── Can JavaScript access response?
+```
+
+These are separate questions.
+
+For a given request, you need to consider:
+
+```text
+┌──────────────────────────────┐
+│       Browser Security       │
+├──────────────────────────────┤
+│ Same-Origin Policy           │
+│ CORS                         │
+│ Cookies / SameSite           │
+│ CSRF                         │
+│ Credential rules             │
+└──────────────────────────────┘
+```
+
+Once you separate **sending**, **reading**, and **authentication**, CORS becomes much less confusing.
+
+### The one sentence to remember
+
+> **CORS controls whether cross-origin JavaScript can access a response; CSRF protection controls whether an attacker can successfully cause an authenticated state-changing action.**
+
+And that's why:
+
+```text
+CORS ≠ CSRF protection
+```
+
+even though both involve cross-origin browser requests.
+
+---
+
+Yes — **sometimes**, but this is the subtle part.
+
+Your reasoning is correct for **requests that trigger a CORS preflight**. But **not all cross-origin requests require a preflight**.
+
+That's exactly why CORS is not a general CSRF defense.
+
+---
+
+## 1. Your reasoning
+
+Suppose `evil.com` tries:
+
+```javascript
+fetch("https://bank.com/transfer", {
+    method: "POST",
+    headers: {
+        "X-CSRF-Attack": "true"
+    },
+    body: "..."
+});
+```
+
+Because of the custom header, the browser may first send:
+
+```http
+OPTIONS /transfer HTTP/1.1
+Host: bank.com
+Origin: https://evil.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: x-csrf-attack
+```
+
+Bank responds:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+or simply doesn't grant permission.
+
+Then:
+
+```text
+OPTIONS
+   ↓
+CORS permission denied
+   ↓
+Actual POST is NOT sent
+```
+
+So **in this particular case, yes, CORS preflight prevents the attack from reaching the actual POST.**
+
+---
+
+# 2. But here's the important exception
+
+There are requests that **don't require preflight**.
+
+For example, a normal HTML form can submit:
+
+```html
+<form action="https://bank.com/transfer" method="POST">
+    <input name="to" value="attacker">
+    <input name="amount" value="10000">
+</form>
+```
+
+The browser can send the POST directly:
+
+```http
+POST /transfer HTTP/1.1
+Host: bank.com
+Cookie: session_id=abc123
+Content-Type: application/x-www-form-urlencoded
+
+to=attacker&amount=10000
+```
+
+There was no:
+
+```http
+OPTIONS /transfer
+```
+
+first.
+
+Therefore:
+
+```text
+evil.com
+   ↓
+HTML form
+   ↓
+POST /transfer
+   ↓
+bank.com
+   ↓
+cookie attached
+```
+
+Potential CSRF.
+
+---
+
+# 3. Why does the browser allow this?
+
+Because HTML forms have historically been allowed to submit cross-origin requests.
+
+Otherwise normal web functionality would break.
+
+For example, websites have always been able to submit forms to other sites.
+
+CORS was designed primarily around controlling **cross-origin programmatic access**, such as JavaScript `fetch()`/XHR, not as a universal "nothing may ever be sent cross-origin" mechanism.
+
+---
+
+# 4. This is the key distinction
+
+Think about these two requests.
+
+### Case A — JavaScript with non-simple request
+
+```javascript
+fetch("https://bank.com/transfer", {
+    method: "POST",
+    headers: {
+        "X-Custom-Header": "foo"
+    }
+});
+```
+
+Browser:
+
+```text
+fetch()
+   ↓
+preflight OPTIONS
+   ↓
+CORS check
+   ↓
+if rejected → actual request doesn't happen
+```
+
+So CORS can prevent this particular attack.
+
+---
+
+### Case B — HTML form
+
+```html
+<form action="https://bank.com/transfer" method="POST">
+```
+
+Browser:
+
+```text
+form submission
+   ↓
+POST directly
+   ↓
+Cookie may be attached
+   ↓
+bank.com processes request
+```
+
+No CORS preflight is required.
+
+So:
+
+```text
+CORS preflight
+      ↓
+doesn't happen
+      ↓
+CSRF can still happen
+```
+
+---
+
+# 5. "But can't we force the attacker to use a custom header?"
+
+No.
+
+That's the clever part.
+
+The attacker controls `evil.com`, but they don't control how the victim's browser implements HTML forms.
+
+They can simply use:
+
+```html
+<form>
+```
+
+instead of:
+
+```javascript
+fetch()
+```
+
+And forms don't need arbitrary custom headers.
+
+---
+
+# 6. What about JSON?
+
+This is another important detail.
+
+Your API might say:
+
+```text
+I only accept JSON.
+```
+
+For example:
+
+```http
+Content-Type: application/json
+```
+
+A JavaScript `fetch()` with JSON generally triggers CORS preflight because `application/json` isn't a CORS-safelisted content type.
+
+So:
+
+```text
+evil.com
+   ↓
+fetch()
+   ↓
+POST application/json
+   ↓
+OPTIONS preflight
+   ↓
+CORS rejection
+```
+
+This can make CSRF harder through that particular mechanism.
+
+But you should **not use CORS as your CSRF protection**.
+
+Your security boundary shouldn't be:
+
+> "Our endpoint happens to require JSON, therefore CSRF is impossible."
+
+Instead explicitly protect state-changing requests.
+
+---
+
+# 7. Another important distinction: CORS doesn't know whether the user is authenticated
+
+Imagine:
+
+```http
+OPTIONS /transfer HTTP/1.1
+Origin: https://evil.com
+```
+
+The bank says:
+
+```text
+CORS denied.
+```
+
+Great.
+
+But an attacker can potentially use another mechanism that doesn't involve a preflight:
+
+```text
+<form>
+<img>
+<a>
+navigation
+etc.
+```
+
+depending on the endpoint and browser behavior.
+
+The fundamental problem remains:
+
+```text
+Browser automatically sends credentials
+        +
+Server accepts state-changing request
+        =
+potential CSRF
+```
+
+---
+
+# 8. This is why CSRF defenses exist separately
+
+For example:
+
+```text
+POST /transfer
+```
+
+requires:
+
+```text
+session cookie
++
+CSRF token
+```
+
+So even if an attacker gets the browser to send:
+
+```http
+POST /transfer
+Cookie: session_id=abc123
+```
+
+the server checks:
+
+```text
+CSRF token?
+```
+
+Missing:
+
+```text
+403 Forbidden
+```
+
+Now the security doesn't depend on whether the request happened to trigger CORS preflight.
+
+---
+
+# 9. Think of preflight as a permission check for certain requests
+
+This mental model is better:
+
+```text
+Cross-origin request
+        │
+        ├── "Simple" request
+        │       ↓
+        │   No preflight
+        │       ↓
+        │   Request may be sent
+        │
+        └── Non-simple request
+                ↓
+            Preflight
+                ↓
+        CORS permission check
+                ↓
+          allowed?
+           /     \
+         yes      no
+          ↓       ↓
+       request   blocked
+```
+
+Therefore:
+
+> **Preflight protects certain cross-origin requests from being sent without permission. It does not guarantee that every cross-origin state-changing request will be preflighted.**
+
+---
+
+# 10. And this explains the famous statement
+
+When someone says:
+
+> "Our API has CORS configured, so we're safe from CSRF."
+
+The response is:
+
+**Not necessarily.**
+
+Because:
+
+```text
+CORS
+ │
+ ├── controls cross-origin JavaScript access
+ │
+ └── preflight protects certain non-simple requests
+```
+
+while:
+
+```text
+CSRF protection
+ │
+ └── protects state-changing authenticated operations
+     regardless of whether the request came through
+     a preflighted fetch or another browser mechanism
+```
+
+---
+
+## The interview-level answer
+
+If someone asks you:
+
+> **"If CORS preflight rejects evil.com's request, how can CSRF happen?"**
+
+A strong answer is:
+
+> **"Preflight can prevent CSRF through requests that require preflight, but not all cross-origin requests require preflight. For example, an HTML form can submit a cross-origin POST without a CORS preflight, and browser-managed cookies may still be attached. Therefore CORS cannot be relied upon as the application's CSRF defense. State-changing cookie-authenticated endpoints should use defenses such as SameSite cookies, CSRF tokens, and/or appropriate Origin validation."**
+
+That's the distinction I would keep in your mental model:
+
+```text
+             CORS
+              │
+       "Do I need permission
+        for this cross-origin
+        programmatic request?"
+              │
+              ↓
+          Preflight
+              │
+        ┌─────┴─────┐
+        │           │
+      allow       reject
+        │           │
+     request     no request
+                  (for that
+                   fetch)
+
+              CSRF
+                │
+                ↓
+      "If an authenticated
+       state-changing request
+       reaches me, can I prove
+       it is legitimate?"
+```
+
+That separation makes the whole topic click.
+
+
+---
+
+Exactly. Let's make this very concrete.
+
+A **CORS preflight happens when the browser decides that a cross-origin request is not a "CORS-safelisted" request**.
+
+The preflight is an `OPTIONS` request sent **before the actual request**.
+
+---
+
+# 1. The basic flow
+
+Suppose:
+
+```text
+Frontend:
+https://app.example.com
+
+API:
+https://api.example.com
+```
+
+JavaScript does:
+
+```javascript
+fetch("https://api.example.com/users", ...)
+```
+
+The browser first asks:
+
+> "Is this cross-origin?"
+
+If no:
+
+```text
+same-origin
+   ↓
+no CORS preflight
+```
+
+If yes:
+
+```text
+cross-origin
+   ↓
+Is this request CORS-safelisted?
+   │
+   ├── YES → usually send actual request directly
+   │
+   └── NO  → send OPTIONS preflight first
+```
+
+---
+
+# 2. What makes a request "simple"?
+
+For practical purposes, think about **three things**:
+
+### ① HTTP method
+
+The method must be one of:
+
+```text
+GET
+HEAD
+POST
+```
+
+These are CORS-safelisted methods.
+
+So:
+
+```text
+GET     → potentially simple
+HEAD    → potentially simple
+POST    → potentially simple
+
+PUT     → preflight
+PATCH   → preflight
+DELETE  → preflight
+```
+
+Important: `POST` doesn't automatically mean "no preflight." The headers/content type also matter.
+
+---
+
+# 3. Request headers
+
+The browser allows only certain request headers without preflight.
+
+Common safelisted ones include:
+
+```text
+Accept
+Accept-Language
+Content-Language
+Content-Type
+Range
+```
+
+But `Content-Type` itself has restrictions.
+
+For example:
+
+```javascript
+fetch(url, {
+    method: "POST",
+    headers: {
+        "Authorization": "Bearer abc123"
+    }
+});
+```
+
+`Authorization` is **not** a CORS-safelisted request header.
+
+Therefore:
+
+```text
+POST
++
+Authorization
+        ↓
+cross-origin
+        ↓
+preflight
+```
+
+Browser sends something like:
+
+```http
+OPTIONS /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: authorization
+```
+
+---
+
+# 4. Content-Type is particularly important
+
+For a cross-origin `POST`, these content types are CORS-safelisted:
+
+```text
+application/x-www-form-urlencoded
+multipart/form-data
+text/plain
+```
+
+For example:
+
+```javascript
+fetch("https://api.example.com/users", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: "name=Riyaz"
+});
+```
+
+This can be a simple CORS request.
+
+No preflight is necessarily required.
+
+---
+
+But:
+
+```javascript
+fetch("https://api.example.com/users", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+        name: "Riyaz"
+    })
+});
+```
+
+`application/json` is **not** one of the safelisted content types.
+
+Therefore:
+
+```text
+POST
++
+Content-Type: application/json
+        ↓
+preflight
+```
+
+---
+
+# 5. PUT / PATCH / DELETE
+
+Consider:
+
+```javascript
+fetch("https://api.example.com/users/123", {
+    method: "DELETE"
+});
+```
+
+`DELETE` is not a CORS-safelisted method.
+
+So:
+
+```text
+DELETE
+  ↓
+cross-origin
+  ↓
+preflight
+```
+
+Browser sends:
+
+```http
+OPTIONS /users/123 HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: DELETE
+```
+
+The API might respond:
+
+```http
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: DELETE
+```
+
+Then the browser sends:
+
+```http
+DELETE /users/123 HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+```
+
+---
+
+# 6. Custom headers
+
+Suppose:
+
+```javascript
+fetch("https://api.example.com/users", {
+    headers: {
+        "X-Request-ID": "123"
+    }
+});
+```
+
+`X-Request-ID` is not a CORS-safelisted request header.
+
+Therefore:
+
+```text
+custom header
+      ↓
+preflight
+```
+
+The browser asks:
+
+```http
+OPTIONS /users HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Headers: x-request-id
+```
+
+---
+
+# 7. Authorization header
+
+This is especially common in APIs.
+
+You have:
+
+```javascript
+fetch("https://api.example.com/profile", {
+    headers: {
+        "Authorization": "Bearer abc123"
+    }
+});
+```
+
+Because `Authorization` isn't safelisted:
+
+```text
+cross-origin
++
+Authorization header
+        ↓
+preflight
+```
+
+Browser:
+
+```http
+OPTIONS /profile HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: GET
+Access-Control-Request-Headers: authorization
+```
+
+Server:
+
+```http
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Headers: Authorization
+```
+
+Then actual request:
+
+```http
+GET /profile HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Authorization: Bearer abc123
+```
+
+---
+
+# 8. Here's a useful table
+
+Assuming the request is **cross-origin**:
+
+| Request                      | Preflight? |
+| ---------------------------- | ---------- |
+| `GET /users`                 | Usually no |
+| `HEAD /users`                | Usually no |
+| `POST` + `text/plain`        | Usually no |
+| `POST` + form-urlencoded     | Usually no |
+| `POST` + multipart/form-data | Usually no |
+| `POST` + `application/json`  | **Yes**    |
+| `GET` + `Authorization`      | **Yes**    |
+| `GET` + custom header        | **Yes**    |
+| `PUT`                        | **Yes**    |
+| `PATCH`                      | **Yes**    |
+| `DELETE`                     | **Yes**    |
+
+The word **usually** matters because CORS has some additional safelisting rules around header values, `Content-Type` parameters, and other details.
+
+---
+
+# 9. Very important: same-origin requests don't need CORS preflight
+
+Suppose:
+
+```text
+Frontend:
+https://app.example.com
+
+API:
+https://app.example.com/api/users
+```
+
+Same origin.
+
+Even if you do:
+
+```javascript
+fetch("/api/users", {
+    method: "DELETE"
+});
+```
+
+there's no CORS problem.
+
+Therefore:
+
+```text
+same-origin
+    ↓
+CORS isn't relevant
+    ↓
+no CORS preflight
+```
+
+---
+
+# 10. The browser makes the decision
+
+This is also important.
+
+Your JavaScript doesn't explicitly say:
+
+```javascript
+preflight();
+```
+
+You don't normally write:
+
+```javascript
+OPTIONS /users
+```
+
+The browser automatically decides.
+
+You write:
+
+```javascript
+fetch("https://api.example.com/users", {
+    method: "PUT",
+    headers: {
+        "Content-Type": "application/json"
+    },
+    body: "..."
+});
+```
+
+Browser internally decides:
+
+```text
+Different origin?
+       ↓
+YES
+
+Is request CORS-safelisted?
+       ↓
+NO
+
+Send preflight
+       ↓
+OPTIONS
+```
+
+---
+
+# 11. What exactly is in a preflight?
+
+Suppose your code is:
+
+```javascript
+fetch("https://api.example.com/users/123", {
+    method: "PATCH",
+    headers: {
+        "Authorization": "Bearer abc",
+        "Content-Type": "application/json",
+        "X-Request-ID": "123"
+    },
+    body: JSON.stringify({
+        name: "Riyaz"
+    })
+});
+```
+
+The browser might send:
+
+```http
+OPTIONS /users/123 HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: PATCH
+Access-Control-Request-Headers: authorization, content-type, x-request-id
+```
+
+Notice that it is basically asking:
+
+> "Can `https://app.example.com` make a PATCH request to this resource using these headers?"
+
+---
+
+# 12. Server says yes
+
+```http
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: PATCH
+Access-Control-Allow-Headers: Authorization, Content-Type, X-Request-ID
+```
+
+Then:
+
+```http
+PATCH /users/123 HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Authorization: Bearer abc
+Content-Type: application/json
+X-Request-ID: 123
+
+{"name":"Riyaz"}
+```
+
+---
+
+# 13. Server says no
+
+Suppose server responds:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+or doesn't provide the required CORS headers.
+
+Then:
+
+```text
+OPTIONS
+   ↓
+CORS permission denied
+   ↓
+Browser doesn't send the actual PATCH
+```
+
+This is the case you were thinking about in the previous question.
+
+And **yes, in this particular situation, the preflight can prevent the state-changing request from being sent.**
+
+---
+
+# 14. But now connect it back to CSRF
+
+Here's why the distinction matters.
+
+### Attack 1
+
+Attacker tries:
+
+```javascript
+fetch("https://bank.com/transfer", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json"
+    }
+});
+```
+
+Likely:
+
+```text
+POST JSON
+   ↓
+preflight
+   ↓
+CORS denied
+   ↓
+actual POST doesn't happen
+```
+
+Good.
+
+### Attack 2
+
+Attacker uses:
+
+```html
+<form action="https://bank.com/transfer" method="POST">
+```
+
+with:
+
+```text
+application/x-www-form-urlencoded
+```
+
+This can be a CORS-safelisted request.
+
+So:
+
+```text
+form
+ ↓
+POST
+ ↓
+no preflight
+ ↓
+request may reach bank
+ ↓
+cookie may be attached
+ ↓
+potential CSRF
+```
+
+This is why **preflight ≠ CSRF protection**.
+
+---
+
+# 15. The simplest rule to remember
+
+When you see a cross-origin request, ask:
+
+### Step 1
+
+```text
+Is it cross-origin?
+```
+
+If no → no CORS preflight.
+
+### Step 2
+
+If yes:
+
+```text
+Is it a CORS-safelisted request?
+```
+
+If yes:
+
+```text
+No preflight
+```
+
+If no:
+
+```text
+OPTIONS preflight
+```
+
+Then:
+
+```text
+Server grants permission?
+       │
+   ┌───┴───┐
+  YES      NO
+   │        │
+actual    blocked
+request
+```
+
+---
+
+## The mental picture
+
+```text
+                 Cross-origin request
+                         │
+                         ▼
+                Is it CORS-safelisted?
+                    /           \
+                  YES            NO
+                   │              │
+                   │          OPTIONS
+                   │          preflight
+                   │              │
+                   │       CORS permission?
+                   │          /       \
+                   │        YES       NO
+                   │         │         │
+                   ▼         ▼         ▼
+              Actual      Actual     Blocked
+              request     request
+```
+
+And the **big CSRF lesson** is:
+
+> **Only some cross-origin requests get this preflight checkpoint. A request that qualifies as a CORS-safelisted request can go directly to the server, which is why applications still need explicit CSRF defenses when using cookie-based authentication.**
+
+
+---
+
