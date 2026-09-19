@@ -21403,3 +21403,1008 @@ and understand **XSS, CSRF, why HttpOnly exists, why `Secure` exists, and why ch
 
 ---
 
+# Lesson 27 — Where Should We Store Tokens?
+
+We've reached an important practical question.
+
+Suppose login gives us:
+
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "abc..."
+}
+```
+
+Where does the client put them?
+
+Common possibilities include:
+
+```text
+HttpOnly Cookie
+localStorage
+sessionStorage
+JavaScript memory
+```
+
+The answer matters because of two major browser security problems:
+
+```text
+XSS
+CSRF
+```
+
+Let's understand them first.
+
+---
+
+# 1. Option 1 — localStorage
+
+A frontend application can do:
+
+```javascript
+localStorage.setItem("access_token", token);
+```
+
+Later:
+
+```javascript
+const token = localStorage.getItem("access_token");
+```
+
+Then:
+
+```http
+GET /profile HTTP/1.1
+Authorization: Bearer eyJ...
+```
+
+The JavaScript application explicitly reads the token and puts it into the `Authorization` header.
+
+The flow is:
+
+```text
+localStorage
+     ↓
+JavaScript
+     ↓
+Authorization header
+     ↓
+API
+```
+
+This is convenient.
+
+But there's a significant problem.
+
+---
+
+# 2. XSS
+
+XSS means **Cross-Site Scripting**.
+
+Imagine your application contains an XSS vulnerability.
+
+An attacker manages to execute JavaScript in your application's origin.
+
+That malicious JavaScript could potentially do:
+
+```javascript
+const token = localStorage.getItem("access_token");
+```
+
+If the access token is there:
+
+```text
+XSS
+ ↓
+JavaScript executes
+ ↓
+read localStorage
+ ↓
+steal token
+```
+
+The attacker can potentially use the stolen bearer token from somewhere else.
+
+That's why storing sensitive bearer credentials in browser-readable storage requires careful consideration.
+
+---
+
+# 3. Why `HttpOnly` Exists
+
+Now consider a cookie:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure
+```
+
+`HttpOnly` tells the browser:
+
+> Don't expose this cookie through normal JavaScript cookie APIs.
+
+So:
+
+```javascript
+document.cookie
+```
+
+doesn't give JavaScript access to that `HttpOnly` cookie.
+
+Conceptually:
+
+```text
+                  Browser
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+    JavaScript              HTTP layer
+        │                       │
+        X                  HttpOnly cookie
+                                │
+                                ↓
+                              Server
+```
+
+This can significantly reduce the impact of token theft through scripts that simply read browser storage.
+
+But there's a very important catch.
+
+---
+
+# 4. HttpOnly Does NOT Make XSS Harmless
+
+Suppose the browser has:
+
+```text
+HttpOnly session cookie
+```
+
+Malicious JavaScript cannot simply do:
+
+```javascript
+document.cookie
+```
+
+and read it.
+
+Good.
+
+But JavaScript running in your application's origin can potentially make requests:
+
+```javascript
+fetch("/api/delete-account", {
+    method: "POST"
+});
+```
+
+The browser may automatically attach the relevant cookie.
+
+So:
+
+```text
+XSS
+ ↓
+can't directly read HttpOnly cookie
+ ↓
+but may be able to make authenticated requests
+```
+
+This is a crucial distinction.
+
+`HttpOnly` protects **cookie confidentiality from JavaScript**.
+
+It does not magically prevent XSS from making requests as the user.
+
+Therefore:
+
+> **XSS prevention is still extremely important.**
+
+---
+
+# 5. Option 2 — Cookies
+
+Instead of:
+
+```javascript
+localStorage
+```
+
+the server can issue:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+```
+
+Then the browser automatically sends:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session_id=abc123
+```
+
+The application JavaScript doesn't need to manually attach the credential.
+
+The flow becomes:
+
+```text
+Login
+ ↓
+Set-Cookie
+ ↓
+Browser cookie jar
+ ↓
+Browser automatically sends cookie
+ ↓
+Server
+```
+
+This is very convenient for browser-based applications.
+
+But now we encounter another problem.
+
+---
+
+# 6. CSRF
+
+Cookies are automatically attached by the browser.
+
+Imagine you're logged into:
+
+```text
+bank.example.com
+```
+
+Your browser has:
+
+```text
+Cookie: session_id=abc123
+```
+
+Now you visit:
+
+```text
+evil.example
+```
+
+Suppose that malicious site somehow causes your browser to send a request to:
+
+```http
+POST https://bank.example.com/transfer
+```
+
+The browser's cookie behavior is why CSRF is a concern.
+
+Conceptually:
+
+```text
+User logged into bank
+       │
+       ↓
+Browser has cookie
+       │
+       ↓
+User visits malicious site
+       │
+       ↓
+Malicious site causes request
+       │
+       ↓
+Browser may attach bank cookie
+       │
+       ↓
+Bank sees authenticated request
+```
+
+The malicious site doesn't necessarily need to know the cookie value.
+
+That's the key difference from token theft.
+
+---
+
+# 7. XSS vs CSRF
+
+This distinction is worth memorizing.
+
+### XSS
+
+Attacker gets JavaScript to execute in your application's origin.
+
+The concern is:
+
+```text
+Can attacker execute code as your application?
+```
+
+### CSRF
+
+Attacker causes a user's browser to make an authenticated request to your application.
+
+The concern is:
+
+```text
+Can attacker cause a request that carries the user's credentials?
+```
+
+Simplified:
+
+```text
+XSS
+→ attacker runs JavaScript in your origin
+
+CSRF
+→ attacker causes authenticated requests from another origin
+```
+
+They are different attacks.
+
+---
+
+# 8. SameSite Cookies
+
+One important defense against CSRF is:
+
+```http
+SameSite
+```
+
+For example:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+```
+
+The browser uses SameSite rules to restrict when cookies are sent in cross-site contexts.
+
+Common values:
+
+```text
+Strict
+Lax
+None
+```
+
+### Strict
+
+More restrictive.
+
+```text
+SameSite=Strict
+```
+
+The browser applies strong restrictions to cross-site cookie sending.
+
+### Lax
+
+A commonly used setting for many authentication cookies.
+
+```text
+SameSite=Lax
+```
+
+Allows certain cross-site navigation behavior while restricting many cross-site request scenarios.
+
+### None
+
+Allows cross-site cookie usage:
+
+```text
+SameSite=None; Secure
+```
+
+Modern browsers require `Secure` when using `SameSite=None`.
+
+The exact browser behavior is nuanced, so don't reduce SameSite to simply:
+
+```text
+Strict = good
+Lax = medium
+None = bad
+```
+
+It's about the application's cross-site requirements.
+
+---
+
+# 9. `Secure`
+
+Remember:
+
+```http
+Set-Cookie: session_id=abc123; Secure
+```
+
+`Secure` tells the browser to send the cookie only over secure connections.
+
+In practice:
+
+```text
+HTTPS
+  ↓
+cookie can be sent
+
+HTTP
+  ↓
+Secure cookie isn't sent
+```
+
+This protects against sending the cookie over an insecure HTTP connection.
+
+---
+
+# 10. Three Important Cookie Attributes
+
+For authentication cookies, you'll frequently see:
+
+```http
+Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+```
+
+Think:
+
+```text
+HttpOnly
+→ JavaScript can't directly read cookie
+
+Secure
+→ send only over secure connections
+
+SameSite
+→ controls cross-site cookie behavior
+```
+
+Each addresses a different concern.
+
+---
+
+# 11. Option 3 — sessionStorage
+
+You might also encounter:
+
+```javascript
+sessionStorage.setItem("access_token", token);
+```
+
+It behaves similarly to `localStorage` from the perspective of JavaScript access.
+
+JavaScript can read it:
+
+```javascript
+sessionStorage.getItem("access_token");
+```
+
+So XSS can potentially access it.
+
+The major difference is lifetime/scope behavior.
+
+Simplified:
+
+```text
+localStorage
+→ persists across browser sessions
+
+sessionStorage
+→ associated with a browser tab/page session
+```
+
+But neither one becomes magically secure against XSS simply because it's sessionStorage.
+
+---
+
+# 12. Option 4 — In-Memory Storage
+
+Another approach is:
+
+```javascript
+let accessToken = "...";
+```
+
+The token exists only in application memory.
+
+Conceptually:
+
+```text
+Login
+ ↓
+access token
+ ↓
+JavaScript memory
+ ↓
+Authorization header
+```
+
+If the page is refreshed:
+
+```text
+page refresh
+ ↓
+JavaScript memory reset
+ ↓
+access token gone
+```
+
+This reduces the persistence of the credential in browser storage.
+
+But now we have a UX problem:
+
+> What happens after page refresh?
+
+We need some mechanism to obtain a new access token.
+
+This is where refresh tokens and cookies can work together.
+
+---
+
+# 13. A Common Architecture
+
+One possible browser architecture is:
+
+```text
+                  Login
+                    │
+                    ↓
+              Auth Server
+                    │
+          ┌─────────┴─────────┐
+          ↓                   ↓
+    Access Token        Refresh Token
+     short-lived          longer-lived
+          │                   │
+          ↓                   ↓
+     JS memory          HttpOnly cookie
+          │                   │
+          ↓                   │
+ Authorization               │
+    header                   │
+          │                   │
+          ↓                   ↓
+       API              refresh endpoint
+```
+
+Normal API request:
+
+```http
+GET /orders
+Authorization: Bearer <access-token>
+```
+
+When access token expires:
+
+```text
+access token expired
+       ↓
+refresh endpoint
+       ↓
+HttpOnly refresh cookie
+       ↓
+new access token
+       ↓
+store in memory
+```
+
+This is one architecture used by browser applications.
+
+It's not the only architecture.
+
+---
+
+# 14. Why Keep the Access Token in Memory?
+
+Suppose:
+
+```text
+access token
+→ JavaScript memory
+```
+
+Then normal API requests use:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+A page refresh removes the token.
+
+The application can then use its refresh mechanism to obtain another access token.
+
+The goal is to avoid putting the long-lived credential into JavaScript-readable persistent storage.
+
+Again, this doesn't eliminate XSS risk. Malicious JavaScript executing while the application is running may still be able to use an in-memory access token if it can interact with application APIs.
+
+Security is about reducing attack surface, not finding one magical storage mechanism.
+
+---
+
+# 15. Why Not Put Everything in Cookies?
+
+You absolutely can design an application around cookies.
+
+For example:
+
+```text
+Browser
+  │
+  │ Cookie
+  ↓
+Backend
+  │
+  ↓
+Session
+```
+
+This is the classic server-side session model we discussed earlier.
+
+In that architecture:
+
+```text
+Cookie
+→ session ID
+
+Server
+→ session state
+```
+
+You don't necessarily need JWT at all.
+
+This is why it's important not to think:
+
+```text
+modern authentication = JWT
+```
+
+A perfectly valid architecture can be:
+
+```text
+HttpOnly cookie
++
+server-side session
+```
+
+---
+
+# 16. Session Cookie vs JWT
+
+### Session-based
+
+```text
+Browser
+   │
+   │ Cookie: session_id=abc
+   ↓
+Server
+   │
+   ↓
+Session Store
+   │
+   ↓
+user=123
+```
+
+### JWT-based
+
+```text
+Browser
+   │
+   │ Authorization: Bearer JWT
+   ↓
+API
+   │
+   ↓
+Verify JWT
+   │
+   ↓
+claims
+```
+
+Neither model is automatically "more secure."
+
+The security depends on the complete design and implementation.
+
+---
+
+# 17. Why Do We Keep Seeing `HttpOnly + Secure + SameSite`?
+
+Because authentication cookies often need protection against multiple classes of attacks:
+
+```text
+                  Auth Cookie
+                      │
+        ┌─────────────┼─────────────┐
+        ↓             ↓             ↓
+    HttpOnly        Secure       SameSite
+        │             │             │
+        ↓             ↓             ↓
+    JS access      HTTP leak     cross-site
+    reduction       reduction     request
+                                  reduction
+```
+
+They solve different problems.
+
+---
+
+# 18. A Practical Browser Flow
+
+Let's put the concepts together.
+
+### Step 1 — Login
+
+```http
+POST /login
+Content-Type: application/json
+
+{
+  "username": "riyaz",
+  "password": "secret123"
+}
+```
+
+Server responds:
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: refresh_token=xyz; HttpOnly; Secure; SameSite=Lax
+Content-Type: application/json
+
+{
+  "access_token": "eyJ..."
+}
+```
+
+The application keeps the access token in memory.
+
+---
+
+### Step 2 — API request
+
+```http
+GET /profile
+Authorization: Bearer eyJ...
+```
+
+---
+
+### Step 3 — Access token expires
+
+API:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+Application calls:
+
+```http
+POST /refresh
+Cookie: refresh_token=xyz
+```
+
+Browser automatically sends the cookie.
+
+Server verifies the refresh token.
+
+Response:
+
+```json
+{
+  "access_token": "new-eyJ..."
+}
+```
+
+Application puts the new access token into memory.
+
+Then:
+
+```http
+GET /profile
+Authorization: Bearer new-eyJ...
+```
+
+---
+
+# 19. What Happens on Logout?
+
+A good logout flow may involve both sides.
+
+Client:
+
+```http
+POST /logout
+```
+
+Server:
+
+```text
+invalidate/revoke refresh credential
+```
+
+and responds with a cookie expiration:
+
+```http
+Set-Cookie: refresh_token=; Max-Age=0; HttpOnly; Secure; SameSite=Lax
+```
+
+The browser removes the cookie.
+
+The access token that is already in memory is also discarded by the application.
+
+Depending on the architecture, an already-issued access token may remain usable until its expiration unless the server maintains revocation state.
+
+This is one reason short-lived access tokens are commonly paired with refresh-token mechanisms.
+
+---
+
+# 20. The Big Comparison
+
+| Storage          |   JavaScript can read? | Automatically sent? | Main concern                             |
+| ---------------- | ---------------------: | ------------------: | ---------------------------------------- |
+| `localStorage`   |                    Yes |                  No | XSS can steal it                         |
+| `sessionStorage` |                    Yes |                  No | XSS can steal it                         |
+| In-memory        | Application can access |                  No | XSS can potentially use it while running |
+| HttpOnly cookie  |    No direct JS access |                 Yes | CSRF/cross-site behavior                 |
+| Normal cookie    |       Yes, via JS APIs |                 Yes | XSS + CSRF concerns                      |
+
+The last column is intentionally simplified. Real security depends on the entire application.
+
+---
+
+# 21. The Most Important Trade-Off
+
+You can think of the choice as:
+
+```text
+JavaScript-readable credential
+        ↓
+    XSS exposure
+```
+
+versus:
+
+```text
+Automatically attached credential
+        ↓
+    CSRF exposure
+```
+
+That's why secure browser authentication isn't simply:
+
+> "Put the token somewhere safe."
+
+Instead, you design defenses appropriate to the credential transport mechanism.
+
+---
+
+# 22. Our Authentication Story So Far
+
+We've now gone from the original problem:
+
+```text
+HTTP is stateless
+```
+
+to:
+
+```text
+How does the server know who you are?
+```
+
+Then:
+
+```text
+Password
+   ↓
+Login
+   ↓
+Access token
+   ↓
+JWT
+   ↓
+Signature
+   ↓
+Public/private keys
+   ↓
+JWKS
+   ↓
+API validation
+   ↓
+Authentication
+   ↓
+Authorization
+```
+
+And on the browser side:
+
+```text
+Token
+   ↓
+Where do we store it?
+   │
+   ├── localStorage
+   ├── sessionStorage
+   ├── memory
+   └── cookie
+          │
+          ├── HttpOnly
+          ├── Secure
+          └── SameSite
+```
+
+---
+
+## One Mental Model to Keep
+
+When you see:
+
+```http
+Authorization: Bearer eyJ...
+```
+
+don't just think:
+
+> "JWT."
+
+Think through the whole chain:
+
+```text
+Bearer
+  ↓
+authentication scheme
+
+JWT
+  ↓
+token format
+
+Signature
+  ↓
+integrity/authenticity
+
+Claims
+  ↓
+identity/context
+
+exp / iss / aud
+  ↓
+token validation
+
+Authorization policy
+  ↓
+what the user can actually do
+```
+
+And if you see:
+
+```http
+Cookie: session_id=abc123
+```
+
+think:
+
+```text
+Cookie
+  ↓
+browser transport mechanism
+
+Session ID
+  ↓
+server-side authentication state
+
+HttpOnly / Secure / SameSite
+  ↓
+browser security controls
+```
+
+### Next: Lesson 28 — CSRF in Depth
+
+We'll build a concrete attack with two local servers:
+
+```text
+localhost:8000 → legitimate bank
+localhost:9000 → malicious website
+```
+
+and you'll see exactly **how the browser can send an authenticated cookie without the malicious site knowing its value**, why `SameSite` helps, and how CSRF tokens solve the problem.
+
+
+---
+
