@@ -30108,3 +30108,959 @@ You'll learn the difference between **`Content-Encoding` and `Transfer-Encoding`
 
 ---
 
+# Lesson 34 — HTTP Compression
+
+We've already learned that an HTTP response is ultimately **bytes**.
+
+Now imagine your server needs to send this:
+
+```text
+100 KB JSON
+```
+
+over the network.
+
+If the data can be compressed to:
+
+```text
+20 KB
+```
+
+we can dramatically reduce network transfer time.
+
+HTTP has standardized mechanisms for doing this.
+
+---
+
+# 1. The problem
+
+Suppose your API returns:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 100000
+
+{"users":[ ... lots of JSON ... ]}
+```
+
+The server needs to send:
+
+```text
+100,000 bytes
+```
+
+But JSON contains lots of repetition:
+
+```json
+{
+  "id": 1,
+  "name": "Riyaz",
+  "email": "riyaz@example.com"
+}
+```
+
+Imagine thousands of records.
+
+Compression algorithms can exploit this repetition.
+
+For example:
+
+```text
+Original:      100 KB
+gzip:           25 KB
+brotli:         20 KB
+```
+
+The exact compression ratio depends on the data.
+
+---
+
+# 2. The client tells the server what it supports
+
+The client can send:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept-Encoding: gzip, br
+```
+
+The important header is:
+
+```http
+Accept-Encoding: gzip, br
+```
+
+It means roughly:
+
+> "For the response body, I support these content codings."
+
+Common values include:
+
+```text
+gzip
+br
+deflate
+identity
+```
+
+`br` is Brotli.
+
+---
+
+# 3. Server chooses a compression
+
+Suppose the server chooses gzip.
+
+It responds:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: gzip
+
+<compressed bytes>
+```
+
+The critical header is:
+
+```http
+Content-Encoding: gzip
+```
+
+It tells the client:
+
+> "The representation has been encoded using gzip."
+
+The client decompresses it before giving the content to the application/browser.
+
+So:
+
+```text
+Client
+  │
+  │ Accept-Encoding: gzip, br
+  ▼
+Server
+  │
+  │ Content-Encoding: gzip
+  ▼
+Compressed bytes
+  │
+  ▼
+Client decompresses
+  │
+  ▼
+Application sees JSON
+```
+
+---
+
+# 4. `Accept-Encoding` vs `Content-Encoding`
+
+This is another important HTTP pair.
+
+### Request
+
+```http
+Accept-Encoding: gzip, br
+```
+
+means:
+
+> What encodings can I accept?
+
+### Response
+
+```http
+Content-Encoding: gzip
+```
+
+means:
+
+> This representation is encoded using gzip.
+
+So:
+
+```text
+Accept-Encoding
+       ↓
+client → server
+
+Content-Encoding
+       ↓
+server → client
+```
+
+Very similar to:
+
+```text
+Accept
+       ↓
+what response media types I can accept
+
+Content-Type
+       ↓
+what this body actually is
+```
+
+---
+
+# 5. Compression doesn't change the resource's media type
+
+Suppose we have:
+
+```http
+Content-Type: application/json
+Content-Encoding: gzip
+```
+
+The body is still:
+
+```text
+JSON
+```
+
+It is simply gzip-encoded.
+
+Think:
+
+```text
+Application representation
+        │
+        ▼
+      JSON
+        │
+        ▼
+      gzip
+        │
+        ▼
+compressed bytes
+```
+
+Therefore:
+
+```text
+Content-Type
+    ↓
+what the representation is
+
+Content-Encoding
+    ↓
+how that representation is encoded
+```
+
+---
+
+# 6. What happens to `Content-Length`?
+
+This is where our earlier lesson about byte counting becomes important.
+
+Suppose:
+
+```text
+Original JSON = 1000 bytes
+gzip data     = 250 bytes
+```
+
+If the server sends the gzip-compressed representation:
+
+```http
+Content-Encoding: gzip
+Content-Length: 250
+```
+
+The `Content-Length` refers to the bytes actually being transferred in the message body.
+
+Not:
+
+```text
+1000
+```
+
+but:
+
+```text
+250
+```
+
+because those are the bytes on the wire.
+
+---
+
+# 7. Compression vs `Transfer-Encoding`
+
+This is extremely important.
+
+You may see:
+
+```http
+Content-Encoding: gzip
+```
+
+and:
+
+```http
+Transfer-Encoding: chunked
+```
+
+These are **different concepts**.
+
+---
+
+## Content-Encoding
+
+Describes how the representation is encoded.
+
+```text
+JSON
+ ↓ gzip
+compressed JSON
+```
+
+Header:
+
+```http
+Content-Encoding: gzip
+```
+
+---
+
+## Transfer-Encoding
+
+Describes how the HTTP message body is transferred.
+
+For example:
+
+```http
+Transfer-Encoding: chunked
+```
+
+means the body is sent using HTTP chunks.
+
+So:
+
+```text
+Content-Encoding
+    ↓
+representation encoding
+
+Transfer-Encoding
+    ↓
+message transfer mechanism
+```
+
+Don't confuse them.
+
+---
+
+# 8. They can be used together
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: gzip
+Transfer-Encoding: chunked
+```
+
+Conceptually:
+
+```text
+JSON
+ ↓
+gzip
+ ↓
+compressed representation
+ ↓
+chunked transfer
+ ↓
+TCP
+```
+
+The two mechanisms operate at different layers of the HTTP message.
+
+---
+
+# 9. Why `Vary: Accept-Encoding` matters
+
+Now connect this to our previous caching lesson.
+
+Suppose:
+
+```text
+User A:
+Accept-Encoding: gzip
+```
+
+Server returns:
+
+```http
+Content-Encoding: gzip
+```
+
+But User B sends:
+
+```text
+Accept-Encoding: br
+```
+
+Server might return:
+
+```http
+Content-Encoding: br
+```
+
+The representations differ.
+
+A shared cache therefore needs to know that the response depends on:
+
+```text
+Accept-Encoding
+```
+
+The server can send:
+
+```http
+Vary: Accept-Encoding
+```
+
+So a response might look like:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: gzip
+Vary: Accept-Encoding
+Cache-Control: public, max-age=300
+
+<compressed bytes>
+```
+
+Conceptually:
+
+```text
+                   /users
+                      │
+             ┌────────┴────────┐
+             │                 │
+      gzip accepted        br accepted
+             │                 │
+             ▼                 ▼
+       gzip response       br response
+```
+
+The cache knows these are different variants.
+
+---
+
+# 10. A dangerous caching mistake
+
+Imagine a CDN ignores `Accept-Encoding`.
+
+First request:
+
+```http
+GET /app.js
+Accept-Encoding: gzip
+```
+
+Server:
+
+```http
+Content-Encoding: gzip
+```
+
+CDN stores:
+
+```text
+/app.js → gzip version
+```
+
+Then another client requests:
+
+```http
+GET /app.js
+Accept-Encoding: br
+```
+
+If the CDN blindly returns the cached gzip representation, it could violate the client's capabilities.
+
+That's why:
+
+```http
+Vary: Accept-Encoding
+```
+
+is important when the response varies according to that header.
+
+---
+
+# 11. Compression is usually transparent
+
+You don't normally write application code like:
+
+```text
+"Please decompress this JSON."
+```
+
+The HTTP client/library handles it.
+
+For example:
+
+```bash
+curl --compressed https://example.com
+```
+
+`curl` can negotiate compression and decompress the response.
+
+You can inspect headers with:
+
+```bash
+curl -v --compressed https://example.com
+```
+
+You'll typically see something like:
+
+```http
+> Accept-Encoding: deflate, gzip, br, zstd
+```
+
+and potentially:
+
+```http
+< Content-Encoding: gzip
+```
+
+depending on the server and connection.
+
+---
+
+# 12. Let's simulate it locally
+
+Python's standard library can create a gzip-compressed response.
+
+```python
+import gzip
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        body = b"Hello HTTP! " * 100
+
+        if "gzip" in self.headers.get("Accept-Encoding", ""):
+            body = gzip.compress(body)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+
+            self.wfile.write(body)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+
+        self.wfile.write(body)
+
+
+server = HTTPServer(("localhost", 8080), Handler)
+
+print("Server running on http://localhost:8080")
+
+server.serve_forever()
+```
+
+Now:
+
+```bash
+curl -v http://localhost:8080/
+```
+
+versus:
+
+```bash
+curl -v --compressed http://localhost:8080/
+```
+
+The second request advertises compression support.
+
+The server can then respond with:
+
+```http
+Content-Encoding: gzip
+```
+
+---
+
+# 13. Important: compression isn't always beneficial
+
+Compression costs CPU.
+
+Imagine:
+
+```text
+100 KB response
+      ↓
+gzip
+      ↓
+25 KB
+```
+
+Great.
+
+But imagine:
+
+```text
+1 KB response
+      ↓
+gzip
+      ↓
+900 bytes
+```
+
+The savings may not justify the CPU overhead.
+
+And some data is already compressed:
+
+```text
+JPEG
+PNG
+MP4
+ZIP
+GZIP
+```
+
+Compressing these again often provides little benefit.
+
+For example:
+
+```text
+video.mp4
+   ↓ gzip
+not necessarily useful
+```
+
+This is why HTTP compression is especially useful for things like:
+
+```text
+HTML
+CSS
+JavaScript
+JSON
+XML
+text
+SVG
+```
+
+---
+
+# 14. Compression and security
+
+There's an important security consideration.
+
+Suppose a response contains:
+
+```text
+secret=...
+```
+
+and also attacker-controlled content.
+
+If an attacker can repeatedly observe compressed response sizes, compression behavior can sometimes leak information about secrets.
+
+This is related to attacks such as **BREACH** in certain HTTPS scenarios.
+
+The important lesson isn't "never compress."
+
+It's:
+
+> Compression is not purely a performance feature; in some security-sensitive response designs, compression can interact with side-channel attacks.
+
+This becomes particularly relevant for responses containing secrets alongside attacker-controlled input.
+
+---
+
+# 15. `identity`
+
+You may encounter:
+
+```http
+Accept-Encoding: gzip, br, identity
+```
+
+`identity` essentially means:
+
+> No content encoding.
+
+So the server could choose:
+
+```http
+Content-Encoding: gzip
+```
+
+or potentially no content encoding.
+
+Conceptually:
+
+```text
+gzip → compressed
+br   → compressed
+identity → unchanged
+```
+
+---
+
+# 16. Compression negotiation
+
+The basic negotiation flow is:
+
+```text
+Client
+  │
+  │ Accept-Encoding: gzip, br
+  ▼
+Server
+  │
+  ├── supports gzip?
+  │
+  ├── supports br?
+  │
+  └── chooses an acceptable encoding
+        │
+        ▼
+Content-Encoding: br
+```
+
+The exact choice depends on server configuration and HTTP negotiation rules.
+
+The client is expressing what it supports, not necessarily ordering the server's choices in a simple "first one wins" way.
+
+---
+
+# 17. Quality values
+
+HTTP can express preferences using `q`.
+
+For example:
+
+```http
+Accept-Encoding: br;q=1.0, gzip;q=0.8
+```
+
+Conceptually:
+
+```text
+br     preference 1.0
+gzip   preference 0.8
+```
+
+Or:
+
+```http
+Accept-Encoding: gzip, br
+```
+
+which doesn't explicitly assign different quality values.
+
+Quality values are part of HTTP content negotiation and aren't limited to encoding.
+
+You'll also encounter:
+
+```http
+Accept: application/json;q=1.0, text/plain;q=0.5
+```
+
+Meaning the client has expressed different preferences.
+
+---
+
+# 18. Don't confuse these three
+
+This is a very useful interview table:
+
+| Header              | Question                                  |
+| ------------------- | ----------------------------------------- |
+| `Content-Type`      | What is the representation?               |
+| `Content-Encoding`  | How is the representation encoded?        |
+| `Transfer-Encoding` | How is the HTTP message body transferred? |
+
+Example:
+
+```http
+Content-Type: application/json
+Content-Encoding: gzip
+Transfer-Encoding: chunked
+```
+
+Means approximately:
+
+```text
+JSON
+ ↓
+gzip compressed
+ ↓
+sent using chunked transfer
+```
+
+---
+
+# 19. The complete request/response
+
+Client:
+
+```http
+GET /users HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Accept-Encoding: gzip, br
+```
+
+Server:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: gzip
+Content-Length: 8421
+Vary: Accept-Encoding
+Cache-Control: public, max-age=60
+
+<8421 compressed bytes>
+```
+
+The client performs:
+
+```text
+Receive 8421 bytes
+       ↓
+gzip decompress
+       ↓
+JSON
+       ↓
+application
+```
+
+---
+
+# 20. The mental model
+
+Think of the HTTP response as passing through several transformations:
+
+```text
+Application data
+      │
+      ▼
+JSON representation
+      │
+      ▼
+gzip / Brotli
+      │
+      ▼
+HTTP message body
+      │
+      ▼
+possibly chunked transfer
+      │
+      ▼
+TCP/TLS/network
+```
+
+Each HTTP header describes a different part of that process.
+
+---
+
+## One more important distinction
+
+Remember our earlier lesson:
+
+```text
+Content-Length
+```
+
+does **not** mean:
+
+> "How large is the original JSON?"
+
+It means:
+
+> **How many bytes are in the HTTP message body being transferred.**
+
+So with gzip:
+
+```text
+Original JSON       100 KB
+Compressed body      25 KB
+```
+
+you could have:
+
+```http
+Content-Encoding: gzip
+Content-Length: 25600
+```
+
+The client receives 25 KB and decompresses it to approximately 100 KB of JSON data.
+
+---
+
+# What we've learned
+
+```text
+Accept-Encoding
+       ↓
+client says what content encodings it supports
+
+Content-Encoding
+       ↓
+server tells client what encoding was applied
+
+Content-Length
+       ↓
+bytes actually present in the message body
+
+Transfer-Encoding
+       ↓
+how the message body is transferred
+
+Vary: Accept-Encoding
+       ↓
+cache must account for encoding variants
+```
+
+And the biggest distinction:
+
+```text
+Content-Encoding ≠ Transfer-Encoding
+```
+
+---
+
+### Next: Lesson 35 — HTTP/1.1 Persistent Connections
+
+We'll tackle an important question that connects several things we've already learned:
+
+> **If HTTP is request → response, why doesn't TCP disconnect after every response?**
+
+We'll explore:
+
+```text
+Connection: keep-alive
+Content-Length
+Transfer-Encoding: chunked
+HTTP pipelining
+connection reuse
+head-of-line blocking
+```
+
+and then see why **HTTP/2** changed the way multiple requests are transported over a single connection.
+
+---
