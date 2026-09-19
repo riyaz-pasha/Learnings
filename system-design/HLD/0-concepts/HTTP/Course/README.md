@@ -26189,3 +26189,987 @@ And the **big CSRF lesson** is:
 
 ---
 
+# Lesson 30 — HTTP Caching
+
+Now let's move to one of the most useful parts of HTTP:
+
+> **How can the browser avoid downloading the same resource repeatedly?**
+
+Imagine:
+
+```text
+Browser
+   │
+   │ GET /profile
+   ↓
+Server
+   │
+   │ 50 KB response
+   ↓
+Browser
+```
+
+You refresh.
+
+Without caching:
+
+```text
+Browser ── GET /profile ──→ Server
+Browser ←── 50 KB ───────── Server
+```
+
+Refresh again:
+
+```text
+Browser ── GET /profile ──→ Server
+Browser ←── 50 KB ───────── Server
+```
+
+If the data hasn't changed, we're wasting:
+
+* network bandwidth
+* server CPU
+* latency
+* battery
+* money at scale
+
+HTTP caching gives us mechanisms to avoid that.
+
+---
+
+# 1. The simplest possible cache
+
+Suppose:
+
+```http
+GET /users/123
+```
+
+returns:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+The browser could remember:
+
+```text
+/users/123
+        ↓
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+Next time:
+
+```text
+GET /users/123
+```
+
+the browser might simply use its cached response.
+
+No network request.
+
+```text
+Browser
+   │
+   ├── cache hit
+   │
+   └── return cached response
+```
+
+This is the fastest possible scenario.
+
+---
+
+# 2. How does the browser know whether it can use the cache?
+
+The server can tell the browser:
+
+```http
+Cache-Control: max-age=60
+```
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=60
+
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+This means roughly:
+
+> "This response can be considered fresh for 60 seconds."
+
+So:
+
+```text
+t = 0
+GET /users/123
+       ↓
+200 OK
+Cache-Control: max-age=60
+       ↓
+Browser caches response
+```
+
+At:
+
+```text
+t = 30 seconds
+```
+
+browser requests the same resource.
+
+It can use the cached response:
+
+```text
+Browser
+   │
+   └── cache hit
+          ↓
+       response
+```
+
+No server request necessary.
+
+---
+
+# 3. What happens after 60 seconds?
+
+The cached response becomes **stale**.
+
+That doesn't necessarily mean:
+
+> "Delete it immediately."
+
+It means:
+
+> "Don't blindly assume this cached response is still fresh."
+
+The browser may contact the server again.
+
+```text
+Cache
+  │
+  │ stale
+  ↓
+Server
+```
+
+This leads to a very useful optimization.
+
+---
+
+# 4. The problem with simply downloading it again
+
+Suppose we have:
+
+```text
+1 MB image
+```
+
+The browser cached it.
+
+One minute later:
+
+```text
+GET /image.jpg
+```
+
+The server's image hasn't changed.
+
+But if we simply download it again:
+
+```text
+1 MB
+```
+
+was transferred unnecessarily.
+
+HTTP gives us **conditional requests**.
+
+The browser can ask:
+
+> "Has this resource changed since the version I have?"
+
+---
+
+# 5. ETag
+
+The server can return:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+ETag: "abc123"
+
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+Think of the ETag as a version identifier for the representation.
+
+Conceptually:
+
+```text
+Resource
+   ↓
+ETag = "abc123"
+```
+
+The browser caches:
+
+```text
+/users/123
+   ↓
+body
+ETag: "abc123"
+```
+
+---
+
+# 6. Browser comes back later
+
+Suppose the cache is stale.
+
+Browser sends:
+
+```http
+GET /users/123 HTTP/1.1
+Host: api.example.com
+If-None-Match: "abc123"
+```
+
+This means:
+
+> "I already have version `abc123`. Has it changed?"
+
+The server checks the current representation.
+
+Suppose it hasn't changed.
+
+Server responds:
+
+```http
+HTTP/1.1 304 Not Modified
+ETag: "abc123"
+```
+
+Notice:
+
+**There is no response body.**
+
+---
+
+# 7. Why 304 is useful
+
+The browser already has:
+
+```json
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+So the server doesn't need to send it again.
+
+Instead:
+
+```text
+Browser
+  │
+  │ "Is abc123 still current?"
+  ↓
+Server
+  │
+  │ "Yes"
+  ↓
+304 Not Modified
+```
+
+The browser reuses its cached body.
+
+Instead of:
+
+```text
+1 MB response
+```
+
+you might transfer only the request + tiny response headers.
+
+Huge savings at scale.
+
+---
+
+# 8. This gives us two different caching concepts
+
+### Freshness
+
+```http
+Cache-Control: max-age=60
+```
+
+answers:
+
+> "How long can I use this cached response without asking the server?"
+
+### Validation
+
+```http
+ETag: "abc123"
+```
+
+answers:
+
+> "If my cached response is stale, can I ask the server whether it's still valid?"
+
+These are complementary.
+
+---
+
+# 9. Complete lifecycle
+
+Imagine:
+
+```http
+GET /users/123
+```
+
+Server:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: max-age=60
+ETag: "abc123"
+
+{
+    "id": 123,
+    "name": "Riyaz"
+}
+```
+
+Browser:
+
+```text
+cache:
+    URL → response
+    freshness → 60 seconds
+    ETag → abc123
+```
+
+For the next 60 seconds:
+
+```text
+GET /users/123
+       ↓
+fresh cache
+       ↓
+use cache
+```
+
+After 60 seconds:
+
+```text
+GET /users/123
+       ↓
+stale cache
+       ↓
+send:
+If-None-Match: "abc123"
+```
+
+Server:
+
+```text
+Has resource changed?
+       ↓
+NO
+       ↓
+304 Not Modified
+```
+
+Browser:
+
+```text
+reuse cached body
+```
+
+---
+
+# 10. What if the resource DID change?
+
+Suppose the server now has:
+
+```json
+{
+    "id": 123,
+    "name": "Mohammed"
+}
+```
+
+with:
+
+```text
+ETag: "xyz789"
+```
+
+Browser sends:
+
+```http
+If-None-Match: "abc123"
+```
+
+Server sees:
+
+```text
+abc123 ≠ xyz789
+```
+
+So:
+
+```http
+HTTP/1.1 200 OK
+ETag: "xyz789"
+Content-Type: application/json
+
+{
+    "id": 123,
+    "name": "Mohammed"
+}
+```
+
+Browser replaces its cached response.
+
+---
+
+# 11. Why is the status `304` instead of `200`?
+
+Because the server isn't sending a new representation.
+
+It is effectively saying:
+
+> "Your cached representation is still valid."
+
+So:
+
+```text
+200 OK
+→ here is a representation
+
+304 Not Modified
+→ your cached representation is still valid
+```
+
+This is why `304` has no response body.
+
+---
+
+# 12. Another validation mechanism: Last-Modified
+
+Instead of an ETag, a server can provide:
+
+```http
+Last-Modified: Fri, 18 Sep 2026 10:00:00 GMT
+```
+
+Browser later sends:
+
+```http
+If-Modified-Since: Fri, 18 Sep 2026 10:00:00 GMT
+```
+
+Server checks:
+
+```text
+Has resource changed since then?
+```
+
+If not:
+
+```http
+304 Not Modified
+```
+
+---
+
+# 13. ETag vs Last-Modified
+
+Think:
+
+```text
+ETag
+→ version/representation identifier
+
+Last-Modified
+→ timestamp
+```
+
+Example:
+
+```http
+ETag: "abc123"
+Last-Modified: Fri, 18 Sep 2026 10:00:00 GMT
+```
+
+A server can provide both.
+
+ETags are generally more precise because timestamps have limitations.
+
+---
+
+# 14. Why not just use timestamps?
+
+Imagine:
+
+```text
+10:00:00
+```
+
+resource changes.
+
+Then:
+
+```text
+10:00:00
+```
+
+again due to timestamp resolution or filesystem/application behavior.
+
+A timestamp isn't necessarily a perfect representation identity.
+
+ETag gives the server a more direct way to identify a particular representation.
+
+---
+
+# 15. Cache-Control
+
+`Cache-Control` is one of the most important HTTP response headers.
+
+You've already seen:
+
+```http
+Cache-Control: max-age=60
+```
+
+Some important directives:
+
+```text
+max-age
+no-cache
+no-store
+public
+private
+must-revalidate
+```
+
+Let's understand them carefully.
+
+---
+
+# 16. `max-age`
+
+```http
+Cache-Control: max-age=60
+```
+
+Means approximately:
+
+> The response can be considered fresh for 60 seconds.
+
+Example:
+
+```text
+t=0
+   GET
+   ↓
+   response
+   ↓
+   cache for 60 sec
+
+t=30
+   cache is fresh
+
+t=60+
+   cache becomes stale
+```
+
+---
+
+# 17. `no-store`
+
+This is stronger:
+
+```http
+Cache-Control: no-store
+```
+
+It means:
+
+> Don't store this response in a cache.
+
+Common example:
+
+```text
+sensitive/private response
+```
+
+For example:
+
+```http
+GET /bank/account
+```
+
+An application might choose:
+
+```http
+Cache-Control: no-store
+```
+
+depending on its security requirements.
+
+---
+
+# 18. `no-cache`
+
+This one causes confusion.
+
+People often think:
+
+```http
+Cache-Control: no-cache
+```
+
+means:
+
+> "Don't cache this."
+
+That's not quite right.
+
+`no-cache` essentially means:
+
+> **You may store the response, but you must validate it with the server before reusing it when required.**
+
+So:
+
+```text
+no-store
+→ don't store
+
+no-cache
+→ can store, but must revalidate
+```
+
+This distinction is important.
+
+---
+
+# 19. `private`
+
+```http
+Cache-Control: private
+```
+
+means the response is intended for a **private cache**, such as the user's browser, rather than a shared cache.
+
+Useful for responses that depend on the individual user.
+
+For example:
+
+```text
+GET /my-profile
+```
+
+might be:
+
+```http
+Cache-Control: private
+```
+
+because you don't want a shared intermediary cache to serve Riyaz's response to another user.
+
+---
+
+# 20. `public`
+
+```http
+Cache-Control: public
+```
+
+indicates the response can be stored by shared caches.
+
+Useful for things like:
+
+```text
+static assets
+public images
+public API responses
+```
+
+depending on the application.
+
+---
+
+# 21. Important distinction: browser cache vs server cache
+
+When we say:
+
+```text
+HTTP caching
+```
+
+don't think only about the browser.
+
+There can be:
+
+```text
+Browser
+   ↓
+CDN
+   ↓
+Reverse proxy
+   ↓
+Application
+   ↓
+Database
+```
+
+Caching can happen at multiple layers.
+
+For example:
+
+```text
+Browser cache
+        ↓
+CDN cache
+        ↓
+Application
+```
+
+A CDN can serve:
+
+```text
+GET /images/logo.png
+```
+
+without contacting your application server at all.
+
+---
+
+# 22. This is why HTTP caching is powerful
+
+Imagine:
+
+```text
+1,000,000 users
+```
+
+request:
+
+```text
+GET /logo.png
+```
+
+Without caching:
+
+```text
+1,000,000 requests
+        ↓
+Application
+```
+
+With a CDN:
+
+```text
+1,000,000 requests
+        ↓
+CDN
+        ↓
+cached logo
+```
+
+The application may receive almost none of those requests.
+
+HTTP caching isn't merely a browser optimization.
+
+It is an important distributed-systems mechanism.
+
+---
+
+# 23. A useful mental model
+
+Think of caching as two questions.
+
+### Question 1 — Freshness
+
+```text
+Can I use what I already have?
+```
+
+Controlled by things like:
+
+```http
+Cache-Control: max-age=60
+```
+
+### Question 2 — Validation
+
+```text
+If I can't blindly use it,
+has the resource actually changed?
+```
+
+Controlled by:
+
+```http
+ETag
+If-None-Match
+```
+
+or:
+
+```http
+Last-Modified
+If-Modified-Since
+```
+
+---
+
+# 24. Full picture
+
+```text
+                  GET /users/123
+                        │
+                        ▼
+                    Browser
+                        │
+                 Cache available?
+                   /          \
+                 YES           NO
+                  │             │
+             Is it fresh?       │
+              /      \          │
+            YES       NO        │
+             │         │        │
+             ▼         ▼        ▼
+          use cache  conditional request
+                         │
+                 If-None-Match
+                         │
+                         ▼
+                       Server
+                       /    \
+                    same    changed
+                     │         │
+                     ▼         ▼
+                    304       200
+                     │         │
+                     ▼         ▼
+                use cache   new body
+```
+
+---
+
+# 25. One HTTP detail worth noticing
+
+You started this course by learning:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+Now look how much HTTP semantics we've accumulated around that same request:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+Accept: application/json
+If-None-Match: "abc123"
+```
+
+Response:
+
+```http
+HTTP/1.1 304 Not Modified
+ETag: "abc123"
+Cache-Control: max-age=60
+```
+
+The application didn't need a special caching API.
+
+**HTTP itself provides the protocol-level semantics.**
+
+That's one of the reasons understanding HTTP deeply is useful even when you're working with Spring, Node, Django, FastAPI, etc.
+
+---
+
+## The key things to remember
+
+```text
+Cache-Control
+    ↓
+How caching/freshness should work
+
+ETag
+    ↓
+Identifier for a representation
+
+If-None-Match
+    ↓
+"Is my cached ETag still valid?"
+
+304
+    ↓
+"Yes, reuse your cached response"
+
+Last-Modified
+    ↓
+When representation was last modified
+
+If-Modified-Since
+    ↓
+"Has it changed since this time?"
+```
+
+And the most important distinction:
+
+```text
+Fresh cache
+    ↓
+No request needed
+
+Stale cache
+    ↓
+Maybe validate
+
+Validation succeeds
+    ↓
+304 + reuse cached body
+
+Validation fails
+    ↓
+200 + new representation
+```
+
+Next, we'll go deeper into **HTTP caching semantics and `Cache-Control`**, including `no-cache` vs `no-store`, browser cache vs CDN cache, cache invalidation, and why caching authenticated API responses can become dangerous.
+
+
+---
