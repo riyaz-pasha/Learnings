@@ -28161,3 +28161,894 @@ We'll do it using raw HTTP requests and `curl -v`, so you can actually see the r
 
 ---
 
+# Lesson 32 — HTTP Redirects
+
+A redirect is simply the server telling the client:
+
+> **"The resource you requested is somewhere else. Try this URL."**
+
+Redirects are part of the **3xx** status-code family.
+
+Let's learn them through the problem that led to them.
+
+---
+
+## 1. The basic problem
+
+Imagine you have:
+
+```text
+http://example.com
+```
+
+and you move the website to:
+
+```text
+https://example.com
+```
+
+You don't want every old link to break.
+
+So the old server can respond:
+
+```http
+HTTP/1.1 301 Moved Permanently
+Location: https://example.com/
+```
+
+The important header is:
+
+```http
+Location: https://example.com/
+```
+
+It tells the client where to go next.
+
+---
+
+# 2. What does the client do?
+
+Suppose:
+
+```bash
+curl -v http://example.com
+```
+
+Server:
+
+```http
+HTTP/1.1 301 Moved Permanently
+Location: https://example.com/
+```
+
+A redirect-capable client then makes another request:
+
+```http
+GET / HTTP/1.1
+Host: example.com
+```
+
+to the new URL.
+
+So conceptually:
+
+```text
+Client
+  │
+  │ GET /old
+  ▼
+Server
+  │
+  │ 301
+  │ Location: /new
+  ▼
+Client
+  │
+  │ GET /new
+  ▼
+Server
+  │
+  │ 200
+  ▼
+Client
+```
+
+Notice something important:
+
+> **A redirect is not the client automatically "jumping" somewhere.**
+
+It is an HTTP response containing instructions that the client may follow.
+
+---
+
+# 3. Let's see it with our local server
+
+Add this endpoint:
+
+```python
+def do_GET(self):
+    if self.path == "/old":
+        self.send_response(301)
+        self.send_header("Location", "/new")
+        self.end_headers()
+        return
+
+    if self.path == "/new":
+        body = b"You reached the new URL!"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+```
+
+Start your server:
+
+```bash
+python3 server.py
+```
+
+Now:
+
+```bash
+curl -v http://localhost:8080/old
+```
+
+You'll see approximately:
+
+```http
+> GET /old HTTP/1.1
+> Host: localhost:8080
+
+< HTTP/1.0 301 Moved Permanently
+< Location: /new
+```
+
+But `curl` doesn't necessarily follow redirects automatically.
+
+Use:
+
+```bash
+curl -v -L http://localhost:8080/old
+```
+
+`-L` means:
+
+> Follow redirects.
+
+Now you'll see:
+
+```text
+GET /old
+    ↓
+301 Location: /new
+    ↓
+GET /new
+    ↓
+200 OK
+```
+
+---
+
+# 4. Why are there so many redirect status codes?
+
+This is where HTTP gets interesting.
+
+You may have seen:
+
+```text
+301
+302
+303
+307
+308
+```
+
+They don't all mean exactly the same thing.
+
+The major difference is:
+
+> **What should happen to the HTTP method when following the redirect?**
+
+Especially:
+
+```text
+POST → ?
+```
+
+---
+
+# 5. The historical problem with 301 and 302
+
+Suppose you submit:
+
+```http
+POST /login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"username":"riyaz","password":"secret"}
+```
+
+Server responds:
+
+```http
+HTTP/1.1 302 Found
+Location: /dashboard
+```
+
+What should the client do?
+
+Strictly speaking, the original HTTP semantics around 301/302 did not cleanly express:
+
+> "Repeat the exact same POST at the new location."
+
+Historically, browsers developed behavior where a POST followed by 301/302 would commonly become:
+
+```http
+GET /dashboard
+```
+
+rather than:
+
+```http
+POST /dashboard
+```
+
+This behavior became widely deployed.
+
+So:
+
+```text
+POST /login
+     ↓
+302
+     ↓
+GET /dashboard
+```
+
+became normal browser behavior.
+
+---
+
+# 6. Why was that a problem?
+
+Imagine:
+
+```http
+POST /create-order
+```
+
+Server:
+
+```http
+302 Found
+Location: /orders
+```
+
+If the client changed the method:
+
+```text
+POST /create-order
+       ↓
+302
+       ↓
+GET /orders
+```
+
+that's probably fine.
+
+But what if you actually wanted:
+
+```text
+POST /create-order
+       ↓
+redirect
+       ↓
+POST /orders
+```
+
+Now we have a problem.
+
+We need a status code whose semantics clearly say:
+
+> **Follow the redirect without changing the method.**
+
+That's where **307** comes in.
+
+---
+
+# 7. 307 Temporary Redirect
+
+```http
+HTTP/1.1 307 Temporary Redirect
+Location: /new
+```
+
+The important rule is:
+
+> Preserve the HTTP method and request body.
+
+For example:
+
+```http
+POST /old HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+Server:
+
+```http
+HTTP/1.1 307 Temporary Redirect
+Location: /new
+```
+
+Client follows with:
+
+```http
+POST /new HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+Notice:
+
+```text
+POST
+ ↓
+307
+ ↓
+POST
+```
+
+The method is preserved.
+
+---
+
+# 8. 308 — permanent version of 307
+
+Now compare:
+
+```text
+307 Temporary Redirect
+308 Permanent Redirect
+```
+
+Their method-preservation behavior is similar.
+
+```text
+307:
+temporary + preserve method
+
+308:
+permanent + preserve method
+```
+
+Example:
+
+```http
+HTTP/1.1 308 Permanent Redirect
+Location: /new
+```
+
+A POST should remain a POST when following the redirect.
+
+So:
+
+```text
+POST /old
+     ↓
+308
+     ↓
+POST /new
+```
+
+---
+
+# 9. 301 vs 308
+
+Think:
+
+```text
+301 = permanent redirect
+308 = permanent redirect + preserve method
+```
+
+For GET:
+
+```text
+301:
+GET /old
+ ↓
+GET /new
+
+308:
+GET /old
+ ↓
+GET /new
+```
+
+No interesting difference.
+
+But for POST:
+
+```text
+301:
+POST /old
+ ↓
+GET /new        ← common client behavior
+
+308:
+POST /old
+ ↓
+POST /new       ← method preserved
+```
+
+Therefore, **308 is useful when you explicitly need method preservation for a permanent redirect.**
+
+---
+
+# 10. 302 vs 307
+
+Similarly:
+
+```text
+302 = temporary redirect
+307 = temporary redirect + preserve method
+```
+
+Conceptually:
+
+```text
+302:
+
+POST /old
+   ↓
+302
+   ↓
+GET /new
+```
+
+versus:
+
+```text
+307:
+
+POST /old
+   ↓
+307
+   ↓
+POST /new
+```
+
+The distinction matters when the original request isn't a GET.
+
+---
+
+# 11. Then what is 303?
+
+`303 See Other` has a very specific useful meaning.
+
+It essentially tells the client:
+
+> "The result is available at another resource. Retrieve it using GET."
+
+For example:
+
+```http
+POST /orders
+```
+
+Server creates the order:
+
+```http
+HTTP/1.1 303 See Other
+Location: /orders/123
+```
+
+Client then does:
+
+```http
+GET /orders/123
+```
+
+So:
+
+```text
+POST /orders
+     ↓
+303 See Other
+     ↓
+GET /orders/123
+```
+
+This is extremely useful after successful form submission or resource creation.
+
+---
+
+# 12. Why would we want this?
+
+Imagine a browser submits:
+
+```http
+POST /orders
+```
+
+and the server responds directly with the order page.
+
+Now the user refreshes the page.
+
+Depending on the situation, the browser may ask:
+
+> "Should I submit that POST again?"
+
+That can be dangerous.
+
+You don't want:
+
+```text
+Refresh
+  ↓
+POST /orders
+  ↓
+Create another order 😬
+```
+
+Instead:
+
+```text
+POST /orders
+  ↓
+303
+  ↓
+GET /orders/123
+```
+
+Now the browser is displaying:
+
+```text
+GET /orders/123
+```
+
+Refreshing means:
+
+```text
+GET /orders/123
+```
+
+not:
+
+```text
+POST /orders
+```
+
+This is commonly known as the **Post/Redirect/Get (PRG)** pattern.
+
+---
+
+# 13. The five redirects
+
+Here's the mental model:
+
+| Status | Meaning              | Method preserved? |
+| ------ | -------------------- | ----------------- |
+| `301`  | Permanent redirect   | Not reliably      |
+| `302`  | Temporary redirect   | Not reliably      |
+| `303`  | See another resource | Follow with GET   |
+| `307`  | Temporary redirect   | **Yes**           |
+| `308`  | Permanent redirect   | **Yes**           |
+
+For interview purposes, remember:
+
+```text
+301 → permanent
+302 → temporary
+303 → GET another resource
+307 → temporary + preserve method
+308 → permanent + preserve method
+```
+
+---
+
+# 14. Let's actually test POST + 307
+
+Add this to your server:
+
+```python
+def do_POST(self):
+    if self.path == "/old":
+        self.send_response(307)
+        self.send_header("Location", "/new")
+        self.end_headers()
+        return
+
+    if self.path == "/new":
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+
+        print("Received:", body.decode())
+
+        response = b"POST reached /new"
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+```
+
+Run:
+
+```bash
+curl -v -L \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/old
+```
+
+Conceptually you'll get:
+
+```text
+POST /old
+    ↓
+307 Location: /new
+    ↓
+POST /new
+    ↓
+200
+```
+
+And your server should print:
+
+```text
+Received: {"name":"Riyaz"}
+```
+
+---
+
+# 15. Now change 307 to 303
+
+Change:
+
+```python
+self.send_response(307)
+```
+
+to:
+
+```python
+self.send_response(303)
+```
+
+Then:
+
+```bash
+curl -v -L \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Riyaz"}' \
+  http://localhost:8080/old
+```
+
+The intended redirect semantics are:
+
+```text
+POST /old
+    ↓
+303 Location: /new
+    ↓
+GET /new
+```
+
+This demonstrates why 303 exists.
+
+---
+
+# 16. Redirects aren't necessarily same-origin
+
+The `Location` can point somewhere completely different:
+
+```http
+HTTP/1.1 302 Found
+Location: https://example.com/login
+```
+
+or:
+
+```http
+HTTP/1.1 301 Moved Permanently
+Location: https://new-example.com/
+```
+
+So redirects can move a client between hosts.
+
+This becomes important with:
+
+```text
+HTTP → HTTPS
+old domain → new domain
+login → identity provider
+CDN → origin
+```
+
+---
+
+# 17. Redirect chains
+
+Redirects can chain:
+
+```text
+/a
+ ↓ 301
+/b
+ ↓ 302
+/c
+ ↓ 308
+/d
+ ↓
+200
+```
+
+A client following redirects performs multiple HTTP requests.
+
+Therefore redirects have a cost:
+
+```text
+Client
+  ↓
+Server
+  ↓
+redirect
+  ↓
+Server
+  ↓
+redirect
+  ↓
+Server
+  ↓
+200
+```
+
+Each network round trip adds latency.
+
+So unnecessary redirect chains are generally undesirable.
+
+---
+
+# 18. A subtle security point
+
+Never assume:
+
+```text
+Location: ...
+```
+
+is automatically safe.
+
+For example, if an application redirects based on user input:
+
+```text
+GET /login?next=<user-controlled-url>
+```
+
+and blindly returns:
+
+```http
+302 Found
+Location: <user-controlled-url>
+```
+
+you can potentially create an **open redirect**.
+
+For example:
+
+```text
+https://mybank.com/login?next=https://evil.example
+```
+
+could redirect the user away from your site.
+
+Open redirects can be abused in phishing and authentication flows.
+
+So redirect destinations often need validation.
+
+---
+
+# 19. The complete mental model
+
+When you receive:
+
+```http
+HTTP/1.1 302 Found
+Location: /login
+```
+
+don't think:
+
+> "The server sent me to `/login`."
+
+Think:
+
+```text
+HTTP response
+     │
+     ├── status = 302
+     │
+     └── Location = /login
+                │
+                ▼
+       client decides whether
+       and how to follow it
+```
+
+The **status code defines the redirect semantics**.
+
+The **Location header identifies the target**.
+
+---
+
+## The key lesson
+
+The most important distinction is:
+
+```text
+301 / 302
+    ↓
+historically associated with method-changing
+redirect behavior
+
+303
+    ↓
+go to another resource using GET
+
+307 / 308
+    ↓
+preserve the original method and body
+```
+
+And:
+
+```text
+301 = permanent
+302 = temporary
+307 = temporary + preserve method
+308 = permanent + preserve method
+```
+
+### Next: Lesson 33 — HTTP Cookies in Depth
+
+We'll revisit cookies from the HTTP perspective and go deeper into:
+
+```text
+Set-Cookie
+Cookie
+Domain
+Path
+Expires
+Max-Age
+Secure
+HttpOnly
+SameSite
+```
+
+Then we'll manually inspect cookies with `curl`, and you'll see exactly how the browser turns:
+
+```http
+Set-Cookie: session_id=abc123
+```
+
+into:
+
+```http
+Cookie: session_id=abc123
+```
+
+on the next request.
+
+---
