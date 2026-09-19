@@ -33288,3 +33288,1239 @@ We'll also connect this to something you already learned:
 
 
 ---
+
+# Lesson 37 — What Actually Happens When You Type a URL?
+
+Now let's connect almost everything we've learned so far.
+
+Suppose you type:
+
+```text
+https://example.com/users
+```
+
+into a browser and press Enter.
+
+A lot happens before the server can even process:
+
+```http
+GET /users
+```
+
+We'll follow the request from the browser all the way to the application.
+
+---
+
+# 1. The Big Picture
+
+At a high level:
+
+```text
+Browser
+   │
+   │ 1. DNS
+   ▼
+IP address
+   │
+   │ 2. TCP connection
+   ▼
+TCP connection
+   │
+   │ 3. TLS handshake
+   ▼
+Encrypted connection
+   │
+   │ 4. HTTP negotiation
+   ▼
+HTTP/2
+   │
+   │ 5. HTTP request
+   ▼
+Server
+   │
+   ▼
+Application
+```
+
+For HTTP/3, the lower layers change:
+
+```text
+Browser
+   │
+   ▼
+DNS
+   │
+   ▼
+QUIC
+   │
+   ▼
+UDP
+   │
+   ▼
+HTTP/3
+```
+
+Let's go step by step.
+
+---
+
+# 2. Step 1 — Parse the URL
+
+Browser receives:
+
+```text
+https://example.com/users
+```
+
+It identifies:
+
+```text
+scheme = https
+host   = example.com
+path   = /users
+```
+
+Since no port was specified:
+
+```text
+HTTPS → 443
+```
+
+So conceptually:
+
+```text
+https://example.com/users
+        │
+        ├── scheme: https
+        ├── host: example.com
+        ├── port: 443
+        └── path: /users
+```
+
+This is the same URL structure we learned earlier.
+
+---
+
+# 3. Step 2 — DNS
+
+The browser needs an IP address.
+
+It asks DNS:
+
+```text
+example.com
+     ↓
+?
+     ↓
+93.184.216.34
+```
+
+Conceptually:
+
+```text
+Browser
+   │
+   │ "What IP is example.com?"
+   ▼
+DNS Resolver
+   │
+   ▼
+IP address
+```
+
+For example:
+
+```text
+example.com → 93.184.216.34
+```
+
+The exact address can vary.
+
+DNS itself is a separate protocol from HTTP.
+
+So:
+
+> **HTTP does not translate domain names into IP addresses. DNS does.**
+
+---
+
+# 4. Step 3 — Establish the Transport Connection
+
+Historically with HTTP/1.1 and HTTP/2:
+
+```text
+Browser
+   │
+   ▼
+TCP
+```
+
+The browser establishes a TCP connection to:
+
+```text
+93.184.216.34:443
+```
+
+TCP's famous three-way handshake:
+
+```text
+Client                  Server
+
+  SYN ────────────────────>
+
+      <──────────────── SYN-ACK
+
+  ACK ────────────────────>
+```
+
+Now TCP connection exists.
+
+---
+
+# 5. Why Do We Need TCP?
+
+Remember:
+
+HTTP doesn't directly move packets across the Internet.
+
+HTTP needs a transport.
+
+For HTTP/2:
+
+```text
+HTTP/2
+  ↓
+TCP
+  ↓
+IP
+```
+
+TCP provides things like:
+
+* ordered byte stream
+* retransmission
+* reliability
+* congestion control
+* flow control
+
+HTTP/2 then builds its own concepts on top:
+
+* streams
+* frames
+* HTTP/2 flow control
+* multiplexing
+
+---
+
+# 6. Step 4 — TLS
+
+We're using:
+
+```text
+https://
+```
+
+not:
+
+```text
+http://
+```
+
+So we need TLS.
+
+After TCP is established:
+
+```text
+TCP
+ ↓
+TLS
+```
+
+The TLS handshake establishes cryptographic parameters and authenticates the server using its certificate chain.
+
+Conceptually:
+
+```text
+Client                         Server
+
+ClientHello ──────────────────>
+
+              <────────────── ServerHello
+              <────────────── Certificate
+              <────────────── ...
+
+key agreement
+authentication
+encryption established
+```
+
+The details depend on the TLS version and handshake mode, but the important mental model is:
+
+```text
+TCP connection
+      ↓
+TLS-secured connection
+```
+
+---
+
+# 7. What Does HTTPS Actually Mean?
+
+This is important.
+
+People often say:
+
+> "HTTPS is HTTP with encryption."
+
+That's a useful simplification.
+
+More precisely:
+
+```text
+HTTP
+ ↓
+TLS
+ ↓
+TCP
+```
+
+TLS protects the HTTP traffic against network observers in the normal threat model.
+
+For example, someone observing the network shouldn't simply see:
+
+```http
+GET /users HTTP/1.1
+Authorization: Bearer abc123
+```
+
+Instead, they see encrypted TLS records.
+
+---
+
+# 8. Step 5 — HTTP/2 Negotiation
+
+Now comes something particularly interesting.
+
+The browser wants to know:
+
+> "Can this server speak HTTP/2?"
+
+With HTTPS, this is commonly negotiated during TLS using **ALPN**.
+
+ALPN stands for:
+
+```text
+Application-Layer Protocol Negotiation
+```
+
+Conceptually:
+
+```text
+Client:
+
+I support:
+  h2
+  http/1.1
+```
+
+Server:
+
+```text
+I'll use:
+  h2
+```
+
+So:
+
+```text
+TLS
+ │
+ └── ALPN → h2
+```
+
+Now both sides know:
+
+```text
+HTTP/2
+```
+
+will be used.
+
+---
+
+# 9. What If HTTP/2 Isn't Supported?
+
+Suppose the client offers:
+
+```text
+h2
+http/1.1
+```
+
+but the server only supports:
+
+```text
+http/1.1
+```
+
+Then they use:
+
+```text
+HTTP/1.1
+```
+
+So the negotiation might result in:
+
+```text
+Client                 Server
+
+h2
+http/1.1  ────────────>
+          <──────────── http/1.1
+```
+
+The important point:
+
+> The browser doesn't blindly assume HTTP/2.
+
+The protocol is negotiated.
+
+---
+
+# 10. HTTP/2 Connection Preface
+
+Now suppose HTTP/2 was selected.
+
+HTTP/2 has a connection preface.
+
+For a client using HTTP/2 prior knowledge, the client preface is:
+
+```text
+PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n
+```
+
+It looks strange.
+
+You might wonder:
+
+> "Why does HTTP/2 start with something that looks like HTTP/1.1?"
+
+It's partly designed as a protocol sanity check so an HTTP/1.x server is unlikely to mistake the bytes for a valid ordinary HTTP/1.x request.
+
+For browser HTTPS connections, the surrounding negotiation is different because HTTP/2 is negotiated through TLS/ALPN first.
+
+You don't need to memorize the exact bytes yet.
+
+Just remember:
+
+```text
+HTTP/2 connection
+      ↓
+connection preface
+      ↓
+HTTP/2 communication
+```
+
+---
+
+# 11. SETTINGS
+
+After the HTTP/2 connection is established, the peers exchange:
+
+```text
+SETTINGS
+```
+
+These communicate HTTP/2 configuration parameters.
+
+Conceptually:
+
+```text
+Client                         Server
+
+SETTINGS ────────────────────>
+
+              <────────────── SETTINGS
+```
+
+For example, settings can communicate things such as:
+
+* maximum concurrent streams
+* initial flow-control window
+* maximum frame size
+* maximum header list size
+
+Don't confuse this with HTTP response headers.
+
+`SETTINGS` is an **HTTP/2 frame type**.
+
+---
+
+# 12. Now We Finally Send the HTTP Request
+
+We're finally at the part we've known since Lesson 1.
+
+The browser wants:
+
+```text
+GET /users
+```
+
+In HTTP/1.1:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+In HTTP/2, conceptually:
+
+```text
+HEADERS
+stream = 1
+
+:method: GET
+:scheme: https
+:authority: example.com
+:path: /users
+accept: application/json
+```
+
+Notice what happened.
+
+The application-level HTTP meaning is still:
+
+```text
+GET
+/users
+example.com
+```
+
+But the wire representation is now:
+
+```text
+HTTP/2 HEADERS frame
+```
+
+---
+
+# 13. The Request Gets a Stream ID
+
+The browser assigns:
+
+```text
+stream = 1
+```
+
+So:
+
+```text
+GET /users
+```
+
+belongs to:
+
+```text
+Stream 1
+```
+
+Suppose the browser simultaneously requests:
+
+```text
+/users
+/products
+/orders
+```
+
+We could have:
+
+```text
+Stream 1 → /users
+Stream 3 → /products
+Stream 5 → /orders
+```
+
+All over:
+
+```text
+ONE TCP CONNECTION
+```
+
+This is the key HTTP/2 idea.
+
+---
+
+# 14. Server Sends Response
+
+Suppose `/users` returns:
+
+```json
+{"users":[{"id":1,"name":"Riyaz"}]}
+```
+
+HTTP/2 might conceptually send:
+
+```text
+HEADERS
+stream=1
+
+:status: 200
+content-type: application/json
+```
+
+followed by:
+
+```text
+DATA
+stream=1
+
+{"users":[{"id":1,"name":"Riyaz"}]}
+```
+
+So the complete exchange is roughly:
+
+```text
+Client                           Server
+
+HEADERS stream=1 ───────────────>
+
+                  <───────────── HEADERS stream=1
+
+                  <───────────── DATA stream=1
+```
+
+---
+
+# 15. What About TLS?
+
+Here's another important detail.
+
+The HTTP/2 frames aren't sent directly as visible network traffic.
+
+Conceptually:
+
+```text
+HTTP/2 frame
+     ↓
+TLS record
+     ↓
+TCP segment
+     ↓
+IP packet
+```
+
+So on the network, a passive observer sees encrypted data.
+
+They don't simply see:
+
+```text
+:method: GET
+:path: /users
+```
+
+---
+
+# 16. The Complete Stack
+
+Let's put the entire stack together.
+
+For HTTP/2:
+
+```text
+┌────────────────────────────┐
+│        Application          │
+├────────────────────────────┤
+│          HTTP/2             │
+│  streams / frames / HPACK   │
+├────────────────────────────┤
+│            TLS              │
+├────────────────────────────┤
+│            TCP              │
+├────────────────────────────┤
+│             IP              │
+├────────────────────────────┤
+│     Ethernet / Wi-Fi        │
+└────────────────────────────┘
+```
+
+When sending:
+
+```text
+HTTP/2
+  ↓
+TLS
+  ↓
+TCP
+  ↓
+IP
+  ↓
+Network
+```
+
+When receiving:
+
+```text
+Network
+  ↓
+IP
+  ↓
+TCP
+  ↓
+TLS
+  ↓
+HTTP/2
+  ↓
+Application
+```
+
+---
+
+# 17. Where Does the Web Server Fit?
+
+This is a very useful distinction for backend engineering.
+
+Imagine:
+
+```text
+Browser
+   │
+   ▼
+Internet
+   │
+   ▼
+Load Balancer / Reverse Proxy
+   │
+   ▼
+Web Server
+   │
+   ▼
+Application
+   │
+   ▼
+Database
+```
+
+The browser doesn't necessarily connect directly to your application process.
+
+For example:
+
+```text
+Browser
+   │
+ HTTPS
+   ▼
+Nginx / Envoy / Cloud Load Balancer
+   │
+ HTTP
+   ▼
+Spring Boot
+   │
+ JDBC
+   ▼
+PostgreSQL
+```
+
+Different protocols can be used at different layers.
+
+---
+
+# 18. Very Important: HTTP Terminates Somewhere
+
+Suppose:
+
+```text
+Browser
+   │ HTTPS
+   ▼
+Load Balancer
+   │ HTTP
+   ▼
+Spring Boot
+```
+
+The load balancer may terminate TLS.
+
+That means:
+
+```text
+Browser ─── encrypted ───> Load Balancer
+                              │
+                              │ HTTP
+                              ▼
+                         Application
+```
+
+This is commonly called **TLS termination**.
+
+The application itself doesn't necessarily handle the original TLS connection.
+
+---
+
+# 19. What Does the Application Actually See?
+
+Suppose your Spring controller has:
+
+```java
+@GetMapping("/users")
+public List<User> getUsers() {
+    ...
+}
+```
+
+Your application doesn't usually deal with:
+
+```text
+TCP SYN
+TCP ACK
+TLS records
+HTTP/2 frame headers
+```
+
+The HTTP server/framework processes those lower-level details.
+
+By the time your controller executes, it essentially sees:
+
+```text
+method = GET
+path = /users
+headers = ...
+body = ...
+```
+
+This is why understanding the protocol stack is useful.
+
+You can distinguish:
+
+```text
+Network problem
+       ↓
+TCP/TLS problem
+       ↓
+HTTP problem
+       ↓
+Reverse proxy problem
+       ↓
+Application problem
+       ↓
+Database problem
+```
+
+---
+
+# 20. What Changes with HTTP/3?
+
+Now compare the stack.
+
+HTTP/2:
+
+```text
+HTTP/2
+  ↓
+TLS
+  ↓
+TCP
+  ↓
+IP
+```
+
+HTTP/3:
+
+```text
+HTTP/3
+  ↓
+QUIC
+  ↓
+UDP
+  ↓
+IP
+```
+
+QUIC itself provides:
+
+* reliable delivery
+* congestion control
+* encryption
+* independent streams
+* connection management
+
+So HTTP/3 doesn't need TCP underneath.
+
+---
+
+# 21. Why Does HTTP/3 Use UDP?
+
+This is often misunderstood.
+
+It is **not**:
+
+> "UDP is faster because it doesn't guarantee delivery."
+
+Rather:
+
+> QUIC builds the reliability and transport features it needs on top of UDP.
+
+Conceptually:
+
+```text
+TCP
+├── reliability
+├── ordering
+├── congestion control
+└── flow control
+```
+
+QUIC provides analogous transport functionality:
+
+```text
+QUIC
+├── reliability
+├── congestion control
+├── flow control
+├── streams
+├── connection migration
+└── encryption integration
+```
+
+Then:
+
+```text
+HTTP/3
+   ↓
+QUIC
+```
+
+---
+
+# 22. The Problem HTTP/3 Is Trying to Solve
+
+Remember HTTP/2:
+
+```text
+HTTP/2
+   ↓
+TCP
+```
+
+HTTP/2 has multiple streams:
+
+```text
+Stream 1
+Stream 3
+Stream 5
+```
+
+But TCP sees one ordered byte stream.
+
+Suppose packets are:
+
+```text
+Packet 1
+Packet 2
+Packet 3
+Packet 4
+```
+
+Packet 2 is lost.
+
+TCP may need to wait for retransmission of packet 2 before delivering later bytes in order.
+
+Even if:
+
+```text
+Stream 5
+```
+
+doesn't care about the missing data from:
+
+```text
+Stream 1
+```
+
+TCP operates below HTTP/2 and sees one ordered byte stream.
+
+That's **TCP-level head-of-line blocking**.
+
+---
+
+# 23. QUIC Changes This
+
+QUIC has independent streams.
+
+Conceptually:
+
+```text
+QUIC connection
+│
+├── Stream 1
+│
+├── Stream 3
+│
+└── Stream 5
+```
+
+If data for Stream 1 is lost:
+
+```text
+Stream 1 → wait for retransmission
+```
+
+Stream 5 can continue receiving its own data.
+
+That's the major transport-level advantage.
+
+---
+
+# 24. HTTP/1.1 → HTTP/2 → HTTP/3
+
+Now you can see the evolution.
+
+### HTTP/1.1
+
+```text
+HTTP messages
+     ↓
+TCP
+```
+
+Problem:
+
+```text
+limited multiplexing
+```
+
+### HTTP/2
+
+```text
+HTTP
+ ↓
+Frames
+ ↓
+Streams
+ ↓
+TCP
+```
+
+Solved:
+
+```text
+HTTP-level multiplexing
+```
+
+Remaining:
+
+```text
+TCP-level HOL blocking
+```
+
+### HTTP/3
+
+```text
+HTTP
+ ↓
+Frames
+ ↓
+Streams
+ ↓
+QUIC
+ ↓
+UDP
+```
+
+Solved:
+
+```text
+TCP-level HOL blocking
+```
+
+---
+
+# 25. A Useful Analogy
+
+Think of HTTP/1.1 as:
+
+```text
+One road
+One lane
+Cars mostly proceed sequentially
+```
+
+HTTP/2:
+
+```text
+One road
+Multiple logical lanes
+Different requests can be interleaved
+```
+
+But the road itself is still controlled by TCP.
+
+HTTP/3:
+
+```text
+Multiple independent logical streams
+managed by QUIC
+```
+
+A delay affecting one stream doesn't impose the same TCP byte-stream ordering constraint on all the others.
+
+It's not a perfect analogy, but it's useful for remembering the architecture.
+
+---
+
+# 26. Your Browser Request — Final Mental Model
+
+When you enter:
+
+```text
+https://example.com/users
+```
+
+think:
+
+```text
+                 URL
+                  │
+                  ▼
+                DNS
+                  │
+                  ▼
+              IP address
+                  │
+                  ▼
+              TCP/QUIC
+                  │
+                  ▼
+                TLS*
+                  │
+                  ▼
+          Protocol negotiation
+                  │
+                  ▼
+            HTTP/2 or HTTP/3
+                  │
+                  ▼
+             HTTP request
+                  │
+                  ▼
+        Load balancer / proxy
+                  │
+                  ▼
+             Application
+                  │
+                  ▼
+               Database
+```
+
+`*` TLS handling differs between HTTP/2 and HTTP/3 because QUIC incorporates TLS 1.3 into the QUIC connection establishment.
+
+---
+
+# 27. The Most Important Layering Rule
+
+Here's a principle worth remembering for system design and debugging:
+
+> **Each layer solves a different problem.**
+
+```text
+DNS
+→ Where is the server?
+
+IP
+→ How do packets reach it?
+
+TCP / QUIC
+→ How do endpoints communicate reliably and efficiently?
+
+TLS
+→ How do we authenticate and protect the connection?
+
+HTTP
+→ What does the request mean?
+
+Application
+→ What should the business logic do?
+
+Database
+→ How should data be stored/retrieved?
+```
+
+This separation is extremely important.
+
+For example:
+
+```text
+404
+```
+
+is an HTTP/application-level concept.
+
+It isn't a TCP error.
+
+Whereas:
+
+```text
+Connection refused
+```
+
+can happen before HTTP is even reached.
+
+---
+
+# 28. One Final Exercise
+
+Take this request:
+
+```bash
+curl -v https://example.com/users
+```
+
+Try to mentally map what you're seeing to:
+
+```text
+DNS
+ ↓
+TCP
+ ↓
+TLS
+ ↓
+ALPN
+ ↓
+HTTP/2
+ ↓
+HEADERS
+ ↓
+DATA
+```
+
+You don't need to understand every `curl -v` line yet.
+
+The goal is simply to recognize:
+
+> **Which layer am I looking at?**
+
+---
+
+## Next — Lesson 38: HTTP/2 Hands-On
+
+We'll make this practical.
+
+We'll use `curl` to inspect:
+
+```text
+HTTP/1.1
+HTTP/2
+TLS
+ALPN
+connection reuse
+```
+
+and then use a lower-level HTTP/2 inspection tool if available.
+
+We'll also answer a very important question:
+
+> **If HTTP/2 is binary, how can tools like browsers and servers still expose normal HTTP methods, headers, URLs, and status codes to applications?**
+
+
+---
+
