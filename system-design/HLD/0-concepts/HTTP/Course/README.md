@@ -36565,3 +36565,1066 @@ IP packet
 
 This will tie together almost everything we've learned so far.
 
+---
+
+# Lesson 40 — From `GET /users` to Network Packets
+
+Now we're going to connect **HTTP → HTTP/2 → TLS → TCP → IP** at the byte/packet level.
+
+The goal is not to memorize binary values. The goal is to understand **what each layer actually does to the data**.
+
+---
+
+# 1. Start With the Application Request
+
+Suppose your application wants:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+At the application level, we can think of this as:
+
+```text
+Method      GET
+Target      /users
+Host        example.com
+Accept      application/json
+```
+
+That's the **HTTP meaning**.
+
+---
+
+# 2. HTTP/1.1 Puts It Into Text
+
+HTTP/1.1 represents that information as bytes corresponding to text:
+
+```http
+GET /users HTTP/1.1\r\n
+Host: example.com\r\n
+Accept: application/json\r\n
+\r\n
+```
+
+The important point:
+
+> HTTP/1.1's wire format is text-oriented.
+
+The bytes eventually look roughly like:
+
+```text
+47 45 54 20 2F 75 73 65 72 73 ...
+```
+
+For example:
+
+```text
+G = 0x47
+E = 0x45
+T = 0x54
+```
+
+---
+
+# 3. HTTP/2 Doesn't Send That Text
+
+With HTTP/2, the same semantic request:
+
+```text
+GET /users
+```
+
+is represented using pseudo-headers:
+
+```text
+:method: GET
+:scheme: https
+:authority: example.com
+:path: /users
+accept: application/json
+```
+
+Then HTTP/2 encodes those headers into an HTTP/2 `HEADERS` frame.
+
+Conceptually:
+
+```text
+Application
+    │
+    │ GET /users
+    ▼
+HTTP/2
+    │
+    │ HEADERS frame
+    ▼
+Binary data
+```
+
+---
+
+# 4. HTTP/2 Frame
+
+Remember the HTTP/2 frame structure:
+
+```text
+┌───────────────────────────┐
+│ Length       24 bits      │
+├───────────────────────────┤
+│ Type          8 bits      │
+├───────────────────────────┤
+│ Flags         8 bits      │
+├───────────────────────────┤
+│ Stream ID    31 bits      │
+├───────────────────────────┤
+│ Payload                   │
+└───────────────────────────┘
+```
+
+The frame header is always:
+
+```text
+9 bytes
+```
+
+The payload depends on the frame type.
+
+For a `HEADERS` frame:
+
+```text
+Payload
+   ↓
+HPACK-encoded header block
+```
+
+---
+
+# 5. Where Does HPACK Fit?
+
+We discussed HPACK previously.
+
+Its job is:
+
+> Compress the HTTP header representation.
+
+So conceptually:
+
+```text
+HTTP headers
+     ↓
+HPACK
+     ↓
+compressed header block
+     ↓
+HEADERS frame
+```
+
+Don't think of HPACK as compressing the entire HTTP request.
+
+It's specifically concerned with **HTTP header fields**.
+
+---
+
+# 6. What About the Body?
+
+Suppose:
+
+```http
+POST /users
+Content-Type: application/json
+
+{"name":"Riyaz"}
+```
+
+HTTP/2 might represent it as:
+
+```text
+HEADERS stream=1
+    :method = POST
+    :path = /users
+    content-type = application/json
+
+DATA stream=1
+    {"name":"Riyaz"}
+```
+
+So:
+
+```text
+Headers
+   ↓
+HEADERS frame
+
+Body
+   ↓
+DATA frame
+```
+
+A large body can be split across multiple DATA frames.
+
+---
+
+# 7. Now TLS Enters
+
+If we're using HTTPS:
+
+```text
+HTTP/2
+   ↓
+TLS
+```
+
+TLS takes the HTTP/2 bytes and protects them.
+
+Conceptually:
+
+```text
+HTTP/2 frames
+       ↓
+      TLS
+       ↓
+encrypted TLS records
+```
+
+The network observer doesn't get to simply read:
+
+```text
+:method: GET
+:path: /users
+```
+
+from the encrypted traffic.
+
+---
+
+# 8. Important: TLS Doesn't Understand HTTP Semantics
+
+TLS doesn't know:
+
+```text
+GET
+POST
+/users
+Content-Type
+Authorization
+```
+
+TLS essentially sees:
+
+```text
+bytes
+```
+
+It protects those bytes.
+
+Think:
+
+```text
+HTTP/2
+"I have these bytes."
+
+       ↓
+
+TLS
+"I'll protect these bytes."
+
+       ↓
+
+TCP
+"I'll reliably transport these bytes."
+```
+
+Each layer has a different responsibility.
+
+---
+
+# 9. TCP Enters
+
+After TLS produces protected records:
+
+```text
+TLS
+ ↓
+TCP
+```
+
+TCP sees a byte stream.
+
+It doesn't understand:
+
+```text
+HTTP/2
+HEADERS
+DATA
+Stream 1
+```
+
+TCP sees:
+
+```text
+bytes
+bytes
+bytes
+bytes
+...
+```
+
+This is a very important layering principle.
+
+---
+
+# 10. TCP Segmentation
+
+Suppose TLS produces:
+
+```text
+100 KB
+```
+
+of data.
+
+TCP doesn't necessarily send that as one giant network packet.
+
+It divides the byte stream into segments suitable for transmission.
+
+Conceptually:
+
+```text
+TLS data
+──────────────────────────────
+
+TCP:
+┌────────┐
+│segment │
+├────────┤
+│segment │
+├────────┤
+│segment │
+├────────┤
+│segment │
+└────────┘
+```
+
+The exact sizes depend on things such as MTU, TCP options, congestion state, and implementation.
+
+---
+
+# 11. IP Comes Next
+
+TCP segments are carried inside IP packets.
+
+Conceptually:
+
+```text
+TCP segment
+     ↓
+IP packet
+```
+
+An IPv4 packet roughly looks like:
+
+```text
+┌──────────────────────┐
+│ IP Header            │
+├──────────────────────┤
+│ TCP Header           │
+├──────────────────────┤
+│ TLS-encrypted data   │
+└──────────────────────┘
+```
+
+This is a simplified picture.
+
+---
+
+# 12. Ethernet / Wi-Fi
+
+Finally, the IP packet is carried over the local network.
+
+For Wi-Fi, conceptually:
+
+```text
+┌──────────────────────┐
+│ Wi-Fi frame          │
+├──────────────────────┤
+│ IP packet            │
+│   └── TCP segment    │
+│       └── TLS data   │
+└──────────────────────┘
+```
+
+So the overall nesting becomes:
+
+```text
+Wi-Fi/Ethernet
+    └── IP
+         └── TCP
+              └── TLS
+                   └── HTTP/2
+                        └── HTTP/2 frame
+```
+
+---
+
+# 13. The Full Encapsulation Picture
+
+This is the key diagram:
+
+```text
+┌───────────────────────────────────────────────┐
+│ Ethernet / Wi-Fi                              │
+│ ┌───────────────────────────────────────────┐ │
+│ │ IP                                        │ │
+│ │ ┌───────────────────────────────────────┐ │ │
+│ │ │ TCP                                   │ │ │
+│ │ │ ┌───────────────────────────────────┐ │ │ │
+│ │ │ │ TLS                               │ │ │ │
+│ │ │ │ ┌───────────────────────────────┐ │ │ │ │
+│ │ │ │ │ HTTP/2                       │ │ │ │ │
+│ │ │ │ │ ┌───────────────────────────┐ │ │ │ │ │
+│ │ │ │ │ │ HEADERS frame             │ │ │ │ │ │
+│ │ │ │ │ └───────────────────────────┘ │ │ │ │ │
+│ │ │ │ └───────────────────────────────┘ │ │ │ │
+│ │ │ └───────────────────────────────────┘ │ │ │
+│ │ └───────────────────────────────────────┘ │ │
+│ └───────────────────────────────────────────┘ │
+└───────────────────────────────────────────────┘
+```
+
+This is called **encapsulation**.
+
+Each layer wraps the data from the layer above.
+
+---
+
+# 14. On the Way Back
+
+The server receives the network data.
+
+It reverses the process:
+
+```text
+Wi-Fi / Ethernet
+       ↓
+IP
+       ↓
+TCP
+       ↓
+TLS
+       ↓
+HTTP/2
+       ↓
+HEADERS / DATA
+       ↓
+HTTP request
+       ↓
+Application
+```
+
+This is **decapsulation**.
+
+---
+
+# 15. Let's Follow a Real Request
+
+Suppose you run:
+
+```bash
+curl --http2 https://example.com/users
+```
+
+Conceptually:
+
+### Application
+
+```text
+GET /users
+```
+
+### HTTP/2
+
+```text
+HEADERS
+stream=1
+```
+
+### HPACK
+
+```text
+header block → compressed representation
+```
+
+### TLS
+
+```text
+encrypted TLS records
+```
+
+### TCP
+
+```text
+TCP byte stream
+```
+
+### IP
+
+```text
+IP packets
+```
+
+### Network
+
+```text
+Ethernet/Wi-Fi
+```
+
+Then the server reverses all of that.
+
+---
+
+# 16. This Explains Why Packet Capture Looks Confusing
+
+If you use a tool like Wireshark on an HTTPS HTTP/2 connection, you may see:
+
+```text
+Ethernet
+IP
+TCP
+TLS
+```
+
+but not readable:
+
+```text
+GET /users
+```
+
+because TLS is protecting the HTTP traffic.
+
+Without the appropriate decryption context, the HTTP contents remain encrypted.
+
+---
+
+# 17. What If We Use Plain HTTP?
+
+Now compare:
+
+```text
+http://example.com
+```
+
+instead of:
+
+```text
+https://example.com
+```
+
+Conceptually:
+
+```text
+HTTP/1.1
+   ↓
+TCP
+   ↓
+IP
+```
+
+There is no TLS layer.
+
+So a network observer can potentially see the HTTP contents directly.
+
+For example:
+
+```http
+GET /users HTTP/1.1
+Host: example.com
+```
+
+This is one reason plain HTTP should generally not be used for sensitive communication.
+
+---
+
+# 18. HTTP/2 + HTTPS
+
+Typical HTTP/2 web connection:
+
+```text
+HTTP/2
+   ↓
+TLS
+   ↓
+TCP
+   ↓
+IP
+```
+
+Notice something interesting.
+
+HTTP/2 itself isn't encryption.
+
+You can conceptually separate:
+
+```text
+HTTP/2 = HTTP protocol + binary framing + multiplexing
+TLS    = encryption/authentication
+TCP    = transport
+```
+
+Each solves a different problem.
+
+---
+
+# 19. Now HTTP/3
+
+Let's do the same exercise with HTTP/3.
+
+Application wants:
+
+```text
+GET /users
+```
+
+HTTP/3 creates a request using HTTP/3's framing and header compression.
+
+Conceptually:
+
+```text
+HTTP/3 HEADERS
+      ↓
+QPACK
+      ↓
+QUIC
+      ↓
+UDP
+      ↓
+IP
+```
+
+There is no TCP layer.
+
+---
+
+# 20. HTTP/3 Encapsulation
+
+Conceptually:
+
+```text
+┌──────────────────────────────────────────┐
+│ Ethernet / Wi-Fi                         │
+│ ┌──────────────────────────────────────┐ │
+│ │ IP                                   │ │
+│ │ ┌──────────────────────────────────┐ │ │
+│ │ │ UDP                              │ │ │
+│ │ │ ┌──────────────────────────────┐ │ │ │
+│ │ │ │ QUIC                         │ │ │ │
+│ │ │ │ ┌──────────────────────────┐ │ │ │ │
+│ │ │ │ │ HTTP/3                  │ │ │ │ │
+│ │ │ │ │ ┌──────────────────────┐ │ │ │ │ │
+│ │ │ │ │ │ HEADERS frame        │ │ │ │ │ │
+│ │ │ │ │ └──────────────────────┘ │ │ │ │ │
+│ │ │ │ └──────────────────────────┘ │ │ │ │
+│ │ │ └──────────────────────────────┘ │ │ │
+│ │ └──────────────────────────────────┘ │ │
+│ └──────────────────────────────────────┘ │
+└──────────────────────────────────────────┘
+```
+
+---
+
+# 21. One Subtle Difference
+
+Earlier we said:
+
+```text
+HTTP/2 → TLS → TCP
+```
+
+For HTTP/3, don't think:
+
+```text
+HTTP/3 → TLS → QUIC
+```
+
+as three independent layers in exactly the same sense.
+
+QUIC incorporates TLS 1.3 into its connection establishment and uses TLS-protected packets.
+
+So a more useful simplified model is:
+
+```text
+HTTP/3
+   ↓
+QUIC
+   ↓
+UDP
+```
+
+with TLS integrated into QUIC.
+
+---
+
+# 22. Where Does Encryption Happen?
+
+For HTTP/2:
+
+```text
+HTTP/2
+   ↓
+TLS encrypts/protects
+   ↓
+TCP
+```
+
+For HTTP/3:
+
+```text
+HTTP/3
+   ↓
+QUIC provides encrypted transport using TLS 1.3
+   ↓
+UDP
+```
+
+This is why HTTP/3 connections are inherently encrypted in normal operation.
+
+---
+
+# 23. Now Let's Revisit TCP Head-of-Line Blocking
+
+You can now understand exactly why this happens.
+
+HTTP/2:
+
+```text
+HTTP/2 streams
+       ↓
+TLS
+       ↓
+TCP
+       ↓
+one ordered byte stream
+```
+
+If TCP loses an earlier segment:
+
+```text
+TCP:
+segment 1 ✓
+segment 2 ✓
+segment 3 ✗
+segment 4 ✓
+segment 5 ✓
+```
+
+TCP's contract requires ordered delivery.
+
+So the HTTP/2 layer doesn't simply get:
+
+```text
+segment 4
+segment 5
+```
+
+independently.
+
+---
+
+# 24. HTTP/3 Changes the Transport
+
+HTTP/3:
+
+```text
+HTTP/3 streams
+       ↓
+QUIC
+       ↓
+UDP
+```
+
+QUIC knows about its streams.
+
+So:
+
+```text
+Stream 1 → packet lost
+Stream 3 → data available
+Stream 5 → data available
+```
+
+QUIC can continue delivering data for streams whose data is available.
+
+That's the crucial architectural difference.
+
+---
+
+# 25. One More Important Concept: Packets vs Frames
+
+Don't confuse:
+
+```text
+HTTP/2 frame
+```
+
+with:
+
+```text
+TCP segment
+```
+
+They belong to different layers.
+
+For example:
+
+```text
+HTTP/2:
+
+HEADERS frame
+DATA frame
+DATA frame
+```
+
+might be carried by:
+
+```text
+TLS records
+```
+
+which are carried by:
+
+```text
+TCP segments
+```
+
+which are carried by:
+
+```text
+IP packets
+```
+
+So:
+
+```text
+HTTP/2 frame
+      ↓
+TLS record
+      ↓
+TCP segment
+      ↓
+IP packet
+```
+
+The boundaries do not necessarily map one-to-one.
+
+A single HTTP/2 frame can span multiple lower-level transport packets, and a transport packet can carry data from parts of different higher-level records.
+
+---
+
+# 26. Why This Matters for Debugging
+
+Imagine your API is returning slowly.
+
+You can now ask:
+
+### DNS problem?
+
+```text
+Can I resolve the hostname?
+```
+
+### TCP problem?
+
+```text
+Can I establish the connection?
+Are there retransmissions?
+```
+
+### TLS problem?
+
+```text
+Does the handshake succeed?
+```
+
+### HTTP/2 problem?
+
+```text
+Are streams being created?
+Is flow control limiting us?
+```
+
+### Application problem?
+
+```text
+Why is /users taking 5 seconds?
+```
+
+### Database problem?
+
+```text
+Why does the query take 4.5 seconds?
+```
+
+Without understanding the layers, these can all look like:
+
+```text
+"The API is slow."
+```
+
+---
+
+# 27. A Useful Backend Engineer's Mental Model
+
+When debugging a request:
+
+```text
+https://api.example.com/users/123
+```
+
+think:
+
+```text
+DNS
+ ↓
+IP
+ ↓
+TCP / QUIC
+ ↓
+TLS
+ ↓
+HTTP/2 / HTTP/3
+ ↓
+Reverse proxy / load balancer
+ ↓
+Application server
+ ↓
+Application code
+ ↓
+Database / cache / downstream service
+```
+
+And latency is the sum of multiple pieces:
+
+```text
+Total latency
+=
+DNS
++ connection establishment
++ TLS/QUIC setup
++ network RTT
++ proxy
++ application
++ database
++ response transfer
+```
+
+Not every request pays every component in full—connection reuse and caching can eliminate or reduce some of them.
+
+---
+
+# 28. The Three Most Important Layers to Remember
+
+For now, don't try to memorize every networking protocol.
+
+Keep this:
+
+```text
+HTTP
+"What does this request mean?"
+```
+
+```text
+TCP / QUIC
+"How do endpoints communicate?"
+```
+
+```text
+IP
+"How do packets reach the destination?"
+```
+
+And:
+
+```text
+TLS
+"How do we protect/authenticate the connection?"
+```
+
+---
+
+# 29. Your HTTP Journey So Far
+
+You've gone from:
+
+```text
+GET / HTTP/1.1
+```
+
+to understanding:
+
+```text
+HTTP
+ ↓
+HTTP/1.1
+ ↓
+persistent connections
+ ↓
+HTTP/2
+ ↓
+frames
+ ↓
+streams
+ ↓
+multiplexing
+ ↓
+HPACK
+ ↓
+TCP
+ ↓
+HOL blocking
+ ↓
+QUIC
+ ↓
+HTTP/3
+```
+
+That's a significant jump from simply knowing how to make a REST API call.
+
+---
+
+# 30. Next — Lesson 41: HTTP/2 Hands-On With `curl` and `nghttp2`
+
+Now let's make the lower-level concepts practical.
+
+We'll inspect actual HTTP/2 behavior using command-line tools:
+
+```bash
+curl --http2
+```
+
+and, if available on your Mac:
+
+```bash
+nghttp
+```
+
+We'll learn how to see:
+
+```text
+stream IDs
+HEADERS
+DATA
+SETTINGS
+PING
+GOAWAY
+multiplexed requests
+```
+
+We'll also learn an important practical distinction:
+
+> **`curl -v` shows you HTTP semantics, while an HTTP/2-specific debugging tool can expose the frame-level protocol.**
+
+That distinction will make the next lesson much more hands-on.
+
+---
+
