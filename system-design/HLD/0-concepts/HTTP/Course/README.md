@@ -37628,3 +37628,833 @@ That distinction will make the next lesson much more hands-on.
 
 ---
 
+# Lesson 41 — HTTP/2 Hands-On: Seeing the Frames
+
+Now let's move from **understanding HTTP/2 conceptually** to actually observing it.
+
+Our goal today:
+
+```text
+curl
+  ↓
+HTTP/2 connection
+  ↓
+SETTINGS
+  ↓
+HEADERS  → stream 1
+  ↓
+DATA     → stream 1
+```
+
+And then we'll see how multiple requests use **different stream IDs on the same connection**.
+
+---
+
+## 1. First check whether your curl supports HTTP/2
+
+Run:
+
+```bash
+curl --version
+```
+
+Look for:
+
+```text
+Features: ... HTTP2 ...
+```
+
+If `HTTP2` is present, you're good.
+
+Also check:
+
+```bash
+curl -V
+```
+
+---
+
+# 2. Use curl to make an HTTP/2 request
+
+Let's use a public HTTPS server:
+
+```bash
+curl -v --http2 https://example.com/
+```
+
+You'll see something similar to:
+
+```text
+* ALPN: curl offers h2,http/1.1
+* ALPN: server accepted h2
+* using HTTP/2
+```
+
+Then:
+
+```text
+> GET / HTTP/2
+> Host: example.com
+> user-agent: curl/...
+> accept: */*
+```
+
+And:
+
+```text
+< HTTP/2 200
+< content-type: text/html
+< content-length: ...
+```
+
+### Important
+
+This output:
+
+```text
+> GET / HTTP/2
+```
+
+is **curl's human-readable representation**.
+
+It does **not** mean the network contains:
+
+```text
+GET / HTTP/2\r\n
+Host: example.com\r\n
+```
+
+like HTTP/1.1.
+
+HTTP/2 is binary.
+
+Conceptually, curl is showing us:
+
+```text
+HEADERS frame
+    :method = GET
+    :scheme = https
+    :authority = example.com
+    :path = /
+    accept = */*
+```
+
+---
+
+# 3. Why `curl -v` isn't enough
+
+This is an important distinction.
+
+With HTTP/1.1, you can understand the actual wire format relatively easily:
+
+```http
+GET / HTTP/1.1
+Host: example.com
+Accept: */*
+```
+
+With HTTP/2, the actual wire looks more like:
+
+```text
+┌─────────────────────────────┐
+│ HTTP/2 HEADERS frame        │
+│                             │
+│ stream = 1                  │
+│ flags = END_HEADERS         │
+│ payload = HPACK bytes       │
+└─────────────────────────────┘
+```
+
+The header values are encoded.
+
+So if we want to actually inspect HTTP/2 frames, we need an HTTP/2-aware tool.
+
+---
+
+# 4. Enter `nghttp2`
+
+One popular HTTP/2 implementation/toolset is **nghttp2**.
+
+On macOS, if you use Homebrew:
+
+```bash
+brew install nghttp2
+```
+
+Then check:
+
+```bash
+nghttp --version
+```
+
+You should get something like:
+
+```text
+nghttp nghttp2/...
+```
+
+`nghttp` is particularly useful for learning because it can show HTTP/2 frames.
+
+---
+
+# 5. Make an HTTP/2 request with `nghttp`
+
+Try:
+
+```bash
+nghttp -nv https://example.com/
+```
+
+The important part is `-nv`.
+
+`-n` disables something we don't need here, while `-v` gives verbose HTTP/2 frame information.
+
+You'll see output along the lines of:
+
+```text
+[  0.000] Connected
+[  0.000] send SETTINGS frame <length=...>
+[  0.000] send HEADERS frame <length=..., flags=0x25, stream_id=13>
+          ; END_STREAM
+          ; END_HEADERS
+          ; PRIORITY
+          :method: GET
+          :scheme: https
+          :authority: example.com
+          :path: /
+```
+
+And eventually:
+
+```text
+recv SETTINGS frame
+recv HEADERS frame
+recv DATA frame
+```
+
+The exact output depends on the server and nghttp2 version.
+
+---
+
+# 6. Now something interesting: Stream ID
+
+Look carefully at:
+
+```text
+stream_id=13
+```
+
+You might wonder:
+
+> Why 13? Didn't we say the first client stream is normally 1?
+
+Yes.
+
+But `nghttp` may create several streams depending on what it is doing, including requests for related resources or other operations.
+
+The important rule is:
+
+```text
+Client-created streams → odd IDs
+
+Server-created streams → even IDs
+```
+
+For example:
+
+```text
+Stream 1
+Stream 3
+Stream 5
+Stream 7
+```
+
+are client-created streams.
+
+---
+
+# 7. Think of a stream as a virtual conversation
+
+Suppose the browser needs:
+
+```text
+GET /
+GET /style.css
+GET /app.js
+GET /logo.png
+```
+
+HTTP/1.1 might involve multiple connections.
+
+HTTP/2 can do:
+
+```text
+                 ONE TCP CONNECTION
+                        │
+       ┌────────────────┼────────────────┐
+       │                │                │
+   Stream 1         Stream 3         Stream 5
+       │                │                │
+     GET /        GET /style.css    GET /app.js
+```
+
+And perhaps:
+
+```text
+Stream 7
+   │
+GET /logo.png
+```
+
+All are multiplexed over the same connection.
+
+---
+
+# 8. Frames belong to streams
+
+This is the key mental model.
+
+A **stream** is not one frame.
+
+A stream can contain many frames:
+
+```text
+Stream 1
+
+HEADERS
+   ↓
+DATA
+   ↓
+DATA
+   ↓
+DATA
+   ↓
+END_STREAM
+```
+
+For example:
+
+```text
+HEADERS stream=1
+DATA    stream=1
+DATA    stream=1
+DATA    stream=1
+```
+
+Another stream can simultaneously do:
+
+```text
+HEADERS stream=3
+DATA    stream=3
+```
+
+The frames can be interleaved:
+
+```text
+HEADERS stream=1
+HEADERS stream=3
+DATA    stream=1
+HEADERS stream=5
+DATA    stream=3
+DATA    stream=1
+DATA    stream=5
+```
+
+This is **multiplexing**.
+
+---
+
+# 9. SETTINGS frame
+
+When an HTTP/2 connection starts, you'll see `SETTINGS`.
+
+For example:
+
+```text
+send SETTINGS frame
+recv SETTINGS frame
+```
+
+These are **connection-level** frames.
+
+Therefore:
+
+```text
+stream_id = 0
+```
+
+Remember our earlier rule:
+
+```text
+stream 0
+    ↓
+connection-level
+```
+
+Whereas:
+
+```text
+stream 1
+stream 3
+stream 5
+...
+```
+
+represent actual HTTP request/response streams.
+
+---
+
+# 10. SETTINGS does not mean "HTTP settings for one request"
+
+This distinction is important.
+
+Imagine:
+
+```text
+TCP connection
+│
+├── SETTINGS
+│
+├── Stream 1
+│   ├── HEADERS
+│   └── DATA
+│
+├── Stream 3
+│   ├── HEADERS
+│   └── DATA
+│
+└── Stream 5
+    ├── HEADERS
+    └── DATA
+```
+
+`SETTINGS` applies to the **HTTP/2 connection**.
+
+It isn't part of:
+
+```http
+GET /users
+```
+
+---
+
+# 11. HEADERS frame
+
+Now we get to the actual request.
+
+Conceptually:
+
+```text
+HEADERS
+stream_id = 1
+```
+
+Inside the header block:
+
+```text
+:method      GET
+:scheme      https
+:authority   example.com
+:path        /
+accept       */*
+user-agent   ...
+```
+
+But remember:
+
+**These aren't sent as plain text.**
+
+They are HPACK-encoded.
+
+So the actual payload might look like arbitrary binary bytes:
+
+```text
+8a 87 41 0b ...
+```
+
+Don't try to interpret those bytes manually yet.
+
+Think:
+
+```text
+HTTP headers
+      ↓
+HPACK
+      ↓
+binary header block
+      ↓
+HEADERS frame
+```
+
+---
+
+# 12. DATA frame
+
+If the response has a body:
+
+```http
+<html>
+    ...
+</html>
+```
+
+HTTP/2 sends that body using `DATA` frames.
+
+Conceptually:
+
+```text
+HEADERS stream=1
+        ↓
+DATA stream=1
+        ↓
+DATA stream=1
+        ↓
+DATA stream=1
+        ↓
+END_STREAM
+```
+
+Large responses may therefore be split across multiple DATA frames.
+
+---
+
+# 13. HEADERS and DATA have different jobs
+
+Think of it like this:
+
+```text
+HEADERS
+    ↓
+"What is this response?"
+
+DATA
+    ↓
+"Here is the actual content."
+```
+
+For a response:
+
+```text
+HEADERS
+    :status = 200
+    content-type = text/html
+
+DATA
+    <html>...</html>
+```
+
+---
+
+# 14. What does END_STREAM mean?
+
+You will often see flags such as:
+
+```text
+END_STREAM
+END_HEADERS
+```
+
+They mean different things.
+
+### END_HEADERS
+
+Means:
+
+> The header block is complete.
+
+For example:
+
+```text
+HEADERS
+    :status 200
+    content-type text/html
+    END_HEADERS
+```
+
+### END_STREAM
+
+Means:
+
+> There will be no more frames in this direction for this stream.
+
+For example:
+
+```text
+HEADERS
+DATA
+DATA
+DATA
+END_STREAM
+```
+
+After that:
+
+```text
+No more response data.
+```
+
+---
+
+# 15. A complete HTTP/2 exchange
+
+Let's simplify everything we've learned.
+
+Client opens connection:
+
+```text
+TCP connection
+      │
+      ↓
+HTTP/2
+```
+
+Then:
+
+```text
+CLIENT                         SERVER
+
+SETTINGS -------------------->
+              <--------------- SETTINGS
+
+HEADERS
+stream=1
+GET / ----------------------->
+              <--------------- HEADERS
+                              :status 200
+
+              <--------------- DATA
+                              <html>...
+
+              <--------------- DATA
+                              ...
+
+                              END_STREAM
+```
+
+That's the basic lifecycle.
+
+---
+
+# 16. Compare this with HTTP/1.1
+
+HTTP/1.1:
+
+```http
+GET / HTTP/1.1
+Host: example.com
+Accept: */*
+
+HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Length: 1234
+
+<html>...</html>
+```
+
+HTTP/2 conceptually:
+
+```text
+HEADERS stream=1
+    :method GET
+    :scheme https
+    :authority example.com
+    :path /
+    accept */*
+
+HEADERS stream=1
+    :status 200
+    content-type text/html
+
+DATA stream=1
+    <html>...</html>
+```
+
+Same **HTTP semantics**.
+
+Different **wire representation**.
+
+---
+
+# 17. The most important evolution
+
+At this point, you should see the progression:
+
+### HTTP/1.1
+
+```text
+HTTP request
+    ↓
+text
+    ↓
+TCP
+```
+
+### HTTP/2
+
+```text
+HTTP semantics
+    ↓
+HEADERS / DATA frames
+    ↓
+HPACK
+    ↓
+TCP
+```
+
+### HTTP/3
+
+```text
+HTTP semantics
+    ↓
+HEADERS / DATA frames
+    ↓
+QPACK
+    ↓
+QUIC
+    ↓
+UDP
+```
+
+The HTTP concepts didn't disappear.
+
+They were given increasingly efficient wire representations and transports.
+
+---
+
+# 18. One more experiment
+
+Run:
+
+```bash
+curl -v --http1.1 https://example.com/ > /dev/null
+```
+
+Then:
+
+```bash
+curl -v --http2 https://example.com/ > /dev/null
+```
+
+Compare the output.
+
+The first should show something like:
+
+```text
+ALPN: server accepted http/1.1
+
+> GET / HTTP/1.1
+> Host: example.com
+> Accept: */*
+```
+
+The second:
+
+```text
+ALPN: server accepted h2
+
+> GET / HTTP/2
+> Host: example.com
+> Accept: */*
+```
+
+But internally:
+
+```text
+HTTP/1.1
+    ↓
+text request line + text headers
+```
+
+versus:
+
+```text
+HTTP/2
+    ↓
+HEADERS frame
+    ↓
+HPACK encoded headers
+```
+
+That's the important difference.
+
+---
+
+# 19. Where we are now
+
+You now have three different levels in your head:
+
+```text
+                    HTTP semantics
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+          HTTP/1.1               HTTP/2
+              │                     │
+       textual messages       binary frames
+                                    │
+                                  HPACK
+```
+
+And below that:
+
+```text
+HTTP/1.1
+    ↓
+TCP
+
+HTTP/2
+    ↓
+TCP
+
+HTTP/3
+    ↓
+QUIC
+    ↓
+UDP
+```
+
+So when debugging a real production request, don't think:
+
+> "HTTP is TCP."
+
+Instead think:
+
+```text
+Application
+    ↓
+HTTP
+    ↓
+HTTP/2 or HTTP/1.1 or HTTP/3
+    ↓
+TLS
+    ↓
+TCP / QUIC
+    ↓
+IP
+    ↓
+Network
+```
+
+---
+
+## Next — Lesson 42
+
+We'll go one level deeper into **HTTP/2 multiplexing and flow control**.
+
+We'll answer a very practical question:
+
+> If one HTTP/2 connection carries 100 requests at the same time, **how does HTTP/2 prevent one large response from consuming all the connection's resources?**
+
+That leads to:
+
+```text
+WINDOW_UPDATE
+stream-level flow control
+connection-level flow control
+backpressure
+```
+
+and this connects directly to concepts you'll see in real backend systems.
+
+
+---
