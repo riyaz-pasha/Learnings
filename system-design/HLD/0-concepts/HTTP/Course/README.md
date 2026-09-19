@@ -27173,3 +27173,991 @@ Next, we'll go deeper into **HTTP caching semantics and `Cache-Control`**, inclu
 
 
 ---
+
+# Lesson 31 — HTTP Caching in Depth
+
+Last time we learned the basic caching flow:
+
+```text
+Fresh cache
+    ↓
+reuse response
+
+Stale cache
+    ↓
+validate with ETag
+    ↓
+304 → reuse old body
+200 → download new body
+```
+
+Now let's answer a more important question:
+
+> **Who is allowed to cache this response, for how long, and under what conditions?**
+
+That's where `Cache-Control` becomes important.
+
+---
+
+## 1. `max-age` — "You can reuse this for N seconds"
+
+Suppose the server returns:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=60
+ETag: "abc123"
+
+{"id":123,"name":"Riyaz"}
+```
+
+The cache receives this at:
+
+```text
+10:00:00
+```
+
+For the next 60 seconds:
+
+```text
+10:00:00 ───────────────── 10:01:00
+          fresh
+```
+
+If the browser asks again at `10:00:30`:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+```
+
+The browser may simply use its cached response.
+
+**No network request is necessary.**
+
+At `10:01:30`, the cached response is stale.
+
+Now the browser can validate:
+
+```http
+GET /users/123 HTTP/1.1
+Host: example.com
+If-None-Match: "abc123"
+```
+
+Server:
+
+```http
+HTTP/1.1 304 Not Modified
+ETag: "abc123"
+```
+
+So:
+
+```text
+Fresh
+  ↓
+use cache
+
+Stale
+  ↓
+validate
+  ↓
+304 → use cache
+200 → replace cache
+```
+
+---
+
+# 2. `no-cache` does NOT mean "don't cache"
+
+This is one of the biggest HTTP caching interview traps.
+
+Consider:
+
+```http
+Cache-Control: no-cache
+```
+
+It means approximately:
+
+> You may store this response, but you must validate it before reusing it.
+
+So:
+
+```text
+Response
+   ↓
+Can store? YES
+   ↓
+Can reuse without validation? NO
+```
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: no-cache
+ETag: "abc123"
+
+{"name":"Riyaz"}
+```
+
+The browser can store the body.
+
+But when it needs the resource again:
+
+```http
+GET /profile HTTP/1.1
+If-None-Match: "abc123"
+```
+
+The server can respond:
+
+```http
+304 Not Modified
+```
+
+This saves transferring the response body.
+
+---
+
+# 3. `no-store` means something very different
+
+Now:
+
+```http
+Cache-Control: no-store
+```
+
+means:
+
+> Do not store this response in a cache.
+
+So:
+
+```text
+no-cache
+
+store?       YES
+reuse freely? NO
+validate?    YES
+```
+
+while:
+
+```text
+no-store
+
+store?       NO
+```
+
+This distinction is extremely important.
+
+### Example
+
+A highly sensitive response might use:
+
+```http
+Cache-Control: no-store
+```
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+
+{
+    "accountNumber": "...",
+    "balance": 500000
+}
+```
+
+The intention is that caches should not retain the response.
+
+---
+
+# 4. `private` vs `public`
+
+Now we introduce another concept:
+
+> **Who is allowed to cache it?**
+
+Imagine:
+
+```text
+                 ┌── Browser A
+Internet ─ CDN ──┼── Browser B
+                 └── Browser C
+```
+
+The CDN is a **shared cache**.
+
+Browser A's cache is a **private cache**.
+
+---
+
+## `private`
+
+```http
+Cache-Control: private
+```
+
+means the response is intended for a private cache, such as the user's browser, rather than a shared cache.
+
+Example:
+
+```http
+GET /profile
+Authorization: Bearer abc
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: private, max-age=60
+```
+
+Conceptually:
+
+```text
+Browser cache
+    ↓
+YES
+
+CDN/shared cache
+    ↓
+NO
+```
+
+This is useful for user-specific responses.
+
+---
+
+# 5. `public`
+
+```http
+Cache-Control: public
+```
+
+says the response can be stored by shared caches, subject to the other caching rules.
+
+Example:
+
+```http
+GET /products/123
+```
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: public, max-age=60
+```
+
+Now a CDN can potentially cache it.
+
+That gives us:
+
+```text
+                 ┌── User A
+                 │
+Internet ───── CDN ─── User B
+                 │
+                 └── User C
+```
+
+Instead of every request reaching your application:
+
+```text
+User A ──┐
+User B ──┼── Application
+User C ──┘
+```
+
+the CDN can answer many requests itself.
+
+---
+
+# 6. `s-maxage` — special TTL for shared caches
+
+This is particularly useful with CDNs.
+
+Suppose:
+
+```http
+Cache-Control: public, max-age=60, s-maxage=300
+```
+
+We can think of it as:
+
+```text
+Browser cache:
+60 seconds
+
+Shared cache / CDN:
+300 seconds
+```
+
+So:
+
+```text
+                max-age
+Browser ───────── 60 sec
+
+                s-maxage
+CDN ──────────── 300 sec
+```
+
+This allows you to have different caching policies for browsers and CDNs.
+
+---
+
+# 7. A real architecture
+
+Imagine your application:
+
+```text
+                 ┌──────────────┐
+                 │    Browser   │
+                 └──────┬───────┘
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │     CDN      │
+                 └──────┬───────┘
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │ Reverse Proxy│
+                 └──────┬───────┘
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │ Application  │
+                 └──────┬───────┘
+                        │
+                        ▼
+                    Database
+```
+
+A request might be:
+
+```http
+GET /products/123
+```
+
+First:
+
+```text
+Browser cache?
+```
+
+If not:
+
+```text
+CDN cache?
+```
+
+If not:
+
+```text
+Application
+```
+
+If the CDN has:
+
+```text
+/product/123
+```
+
+cached and still fresh, the request may never reach your application.
+
+That's one of the major performance benefits of HTTP caching.
+
+---
+
+# 8. `Vary` — "The response depends on this request header"
+
+Here's a subtle problem.
+
+Suppose your server responds differently depending on:
+
+```http
+Accept-Encoding
+```
+
+Client A:
+
+```http
+Accept-Encoding: gzip
+```
+
+Server returns compressed content.
+
+Client B:
+
+```http
+Accept-Encoding: br
+```
+
+Server returns Brotli-compressed content.
+
+A cache needs to understand:
+
+> These are different representations.
+
+That's where:
+
+```http
+Vary: Accept-Encoding
+```
+
+comes in.
+
+Example:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Encoding: gzip
+Vary: Accept-Encoding
+Cache-Control: public, max-age=300
+```
+
+Conceptually:
+
+```text
+URL: /index.html
+
+Accept-Encoding: gzip
+        ↓
+cached representation A
+
+Accept-Encoding: br
+        ↓
+cached representation B
+```
+
+---
+
+# 9. Why `Vary` matters
+
+Imagine the cache only considers:
+
+```text
+URL
+```
+
+as the cache key.
+
+User A:
+
+```http
+GET /profile
+Accept: application/json
+```
+
+gets:
+
+```json
+{"name":"Riyaz"}
+```
+
+Then User B requests:
+
+```http
+GET /profile
+Accept: text/html
+```
+
+But the cache might return the previously cached JSON response.
+
+That's obviously wrong.
+
+When the response representation depends on a request header, the caching rules need to account for that dependency.
+
+`Vary` communicates this.
+
+---
+
+# 10. Authentication + caching
+
+Now we reach an important real-world problem.
+
+Suppose:
+
+```http
+GET /profile
+Authorization: Bearer user-A-token
+```
+
+Server returns:
+
+```json
+{
+    "name": "Riyaz",
+    "email": "riyaz@example.com"
+}
+```
+
+Imagine a shared CDN caches that response.
+
+Then:
+
+```text
+User A
+   ↓
+GET /profile
+   ↓
+CDN
+   ↓
+Application
+```
+
+The CDN stores:
+
+```text
+/profile → User A's profile
+```
+
+Then User B requests:
+
+```http
+GET /profile
+Authorization: Bearer user-B-token
+```
+
+If the shared cache incorrectly serves User A's cached response:
+
+```text
+User B
+   ↓
+CDN
+   ↓
+User A's data   💥
+```
+
+This is a catastrophic caching bug.
+
+---
+
+# 11. Don't casually cache user-specific responses
+
+For private user data, a common design is:
+
+```http
+Cache-Control: private, no-store
+```
+
+or, depending on the application's requirements:
+
+```http
+Cache-Control: private, no-cache
+```
+
+The distinction remains:
+
+```text
+private, no-store
+    ↓
+don't retain it in caches
+
+private, no-cache
+    ↓
+may retain privately
+but must validate before reuse
+```
+
+The exact policy should depend on the sensitivity and desired behavior of the data.
+
+The important architectural principle is:
+
+> **Don't accidentally put user-specific responses into shared caches.**
+
+---
+
+# 12. `Authorization` doesn't magically mean "never cache"
+
+There's a subtle point here.
+
+Seeing:
+
+```http
+Authorization: Bearer abc123
+```
+
+doesn't mean HTTP has a universal rule saying:
+
+> "Caching is forbidden."
+
+Cache behavior depends on HTTP caching rules and cache implementation/configuration.
+
+But for application design, user-specific authenticated responses should be treated carefully.
+
+For example:
+
+```http
+GET /profile
+Authorization: Bearer ...
+```
+
+is fundamentally different from:
+
+```http
+GET /products/123
+```
+
+where the representation is identical for everyone.
+
+So think:
+
+```text
+Public shared data
+        ↓
+CDN caching is often useful
+
+User-specific data
+        ↓
+private / no-store / careful validation
+```
+
+---
+
+# 13. Cache invalidation
+
+Now we encounter one of the classic distributed-systems problems:
+
+> **What happens when the underlying data changes?**
+
+Suppose:
+
+```http
+GET /products/123
+```
+
+returns:
+
+```json
+{
+    "price": 100
+}
+```
+
+and the cache stores it for:
+
+```text
+1 hour
+```
+
+Then the database changes:
+
+```text
+price = 80
+```
+
+But the cache still contains:
+
+```text
+price = 100
+```
+
+for potentially another hour.
+
+So you have a consistency problem:
+
+```text
+Database
+price = 80
+
+Cache
+price = 100
+```
+
+---
+
+# 14. Common cache invalidation strategies
+
+### Strategy 1 — Short TTL
+
+```http
+Cache-Control: max-age=30
+```
+
+Old data can survive for at most roughly the freshness lifetime before revalidation is needed.
+
+Simple, but potentially stale.
+
+---
+
+### Strategy 2 — Explicit purge
+
+When data changes:
+
+```text
+Update database
+      ↓
+Invalidate CDN cache
+```
+
+For example:
+
+```text
+PUT /products/123
+      ↓
+DB updated
+      ↓
+CDN cache invalidated
+```
+
+This can provide fresher data but requires cache-management infrastructure.
+
+---
+
+### Strategy 3 — Versioned URLs
+
+Very common for static assets.
+
+Instead of:
+
+```text
+/app.js
+```
+
+use:
+
+```text
+/app.7f83a2.js
+```
+
+When the application changes:
+
+```text
+/app.92bc11.js
+```
+
+Now the URL itself identifies the version.
+
+You can safely cache these for a long time:
+
+```http
+Cache-Control: public, max-age=31536000, immutable
+```
+
+Conceptually:
+
+```text
+app.js
+  ↓
+same URL, changing content
+  ↓
+harder caching problem
+
+
+app.7f83a2.js
+  ↓
+new content = new URL
+  ↓
+easy long-term caching
+```
+
+This technique is called **content hashing/versioned assets**.
+
+---
+
+# 15. Advanced: `stale-while-revalidate`
+
+There's another useful caching directive:
+
+```http
+Cache-Control: max-age=60, stale-while-revalidate=30
+```
+
+Conceptually:
+
+```text
+0 ───────────── 60 ───────────── 90
+      fresh          stale-but-usable
+```
+
+During the first 60 seconds:
+
+```text
+use cache
+```
+
+During the next 30 seconds:
+
+```text
+serve cached response
++
+revalidate in background
+```
+
+This can reduce latency because the user doesn't necessarily wait for the validation request.
+
+---
+
+# 16. `Age` — how old is a shared cached response?
+
+A shared cache can send:
+
+```http
+Age: 42
+```
+
+meaning approximately:
+
+> This response has been in the cache for 42 seconds.
+
+For example:
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: public, max-age=300
+Age: 42
+```
+
+`Age` is useful when debugging CDN/shared-cache behavior.
+
+You may also see headers such as:
+
+```http
+X-Cache: HIT
+```
+
+but `X-Cache` is not a standard HTTP caching header; its meaning depends on the CDN/proxy.
+
+---
+
+# 17. The mental model you should now have
+
+When you see:
+
+```http
+Cache-Control: public, max-age=60, s-maxage=300
+ETag: "abc123"
+Vary: Accept-Encoding
+```
+
+think:
+
+```text
+                   HTTP RESPONSE
+                        │
+                        ▼
+              ┌───────────────────┐
+              │ Can it be cached?  │
+              └─────────┬─────────┘
+                        │
+                        ▼
+                public / private
+                        │
+                        ▼
+              How long is it fresh?
+                        │
+                max-age / s-maxage
+                        │
+                        ▼
+                   stale?
+                        │
+                        ▼
+                 ETag validation
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+             304                 200
+              │                   │
+         reuse body          new body
+```
+
+And if the representation depends on request headers:
+
+```text
+             Vary
+              ↓
+      different variants
+```
+
+---
+
+# 18. Important directives cheat sheet
+
+| Directive                   | Meaning                                                 |
+| --------------------------- | ------------------------------------------------------- |
+| `max-age=60`                | Fresh for 60 seconds                                    |
+| `no-cache`                  | Can store, but must validate before reuse when required |
+| `no-store`                  | Don't store                                             |
+| `private`                   | Intended for private caches                             |
+| `public`                    | May be stored by shared caches                          |
+| `s-maxage=300`              | Freshness lifetime for shared caches                    |
+| `must-revalidate`           | Once stale, must revalidate rather than freely reuse    |
+| `stale-while-revalidate=30` | May serve stale while revalidating                      |
+| `Vary: Accept-Encoding`     | Cache representation varies by that request header      |
+
+---
+
+## One important distinction
+
+Don't confuse:
+
+```text
+Cache-Control
+```
+
+with:
+
+```text
+ETag
+```
+
+They solve different problems.
+
+### Cache-Control
+
+Answers:
+
+> **Can I use the cached response, and when?**
+
+### ETag
+
+Answers:
+
+> **Is my cached representation still the same?**
+
+So:
+
+```text
+Cache-Control
+      ↓
+freshness policy
+
+ETag
+      ↓
+validation mechanism
+```
+
+Together they form a powerful caching system.
+
+---
+
+### Next: Lesson 32 — HTTP Redirects
+
+We'll go back to the **3xx** family and understand redirects properly:
+
+```text
+301 vs 302 vs 303 vs 307 vs 308
+```
+
+including the important question:
+
+> **Why can a redirect change POST into GET, and why were 307/308 introduced?**
+
+We'll do it using raw HTTP requests and `curl -v`, so you can actually see the redirect behavior.
+
+---
+
