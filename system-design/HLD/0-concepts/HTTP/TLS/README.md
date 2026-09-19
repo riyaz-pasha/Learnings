@@ -1439,3 +1439,825 @@ That question leads directly to:
 **public/private keys → digital signatures → certificates → Certificate Authorities → certificate chains.**
 
 ---
+
+# Lesson 4 — Public/Private Keys & Digital Signatures
+
+We have reached the **authentication problem**.
+
+Diffie-Hellman lets two parties establish a shared secret, but it doesn't automatically tell Alice **who she's talking to**.
+
+So let's step back and understand another cryptographic building block:
+
+> **Public-key cryptography.**
+
+---
+
+# 1. Two different kinds of keys
+
+Imagine Bob has two keys:
+
+```text
+                 Bob
+                  │
+          ┌───────┴────────┐
+          │                │
+     🔒 Private key     📢 Public key
+       secret              share
+```
+
+The important rule is:
+
+> **Private key stays private. Public key can be distributed freely.**
+
+For example:
+
+```text
+Bob's private key
+        🔒
+        │
+        └── only Bob has it
+
+Bob's public key
+        📢
+        │
+        ├── Alice can have it
+        ├── Server can have it
+        ├── Browser can have it
+        └── Anyone can have it
+```
+
+---
+
+# 2. What can we do with these keys?
+
+There are two major concepts we need to distinguish.
+
+### Encryption
+
+Someone uses Bob's **public key** to protect something intended for Bob.
+
+```text
+Alice
+  │
+  │ Bob's public key
+  ▼
+🔒 Encrypt
+  │
+  ▼
+Ciphertext
+  │
+  ▼
+Bob
+  │
+  │ Bob's private key
+  ▼
+Decrypt
+```
+
+The private key is required to recover the protected information.
+
+---
+
+### Digital signatures
+
+This works in the opposite conceptual direction.
+
+Bob uses his **private key** to create a signature.
+
+```text
+Bob
+ │
+ │ private key 🔒
+ ▼
+Sign
+ │
+ ▼
+Digital signature
+ │
+ ▼
+Alice
+```
+
+Alice uses Bob's **public key** to verify it:
+
+```text
+Signature
+    +
+Bob's public key
+    ↓
+Verify
+    ↓
+✅ Valid
+```
+
+This is extremely important for TLS.
+
+---
+
+# 3. Why are digital signatures useful?
+
+Suppose Bob says:
+
+> "I own this public key."
+
+Anyone can create a public/private key pair.
+
+So merely receiving:
+
+```text
+Bob's public key
+```
+
+doesn't prove that it's actually Bob's key.
+
+But suppose Bob can produce a signature that only someone possessing Bob's private key could produce.
+
+Now Alice can check:
+
+```text
+                 Bob
+                  │
+           private key 🔒
+                  │
+                Sign
+                  │
+                  ▼
+            Signature
+                  │
+                  ▼
+                Alice
+                  │
+           Bob public key
+                  │
+                Verify
+                  │
+                  ▼
+                  ✅
+```
+
+The signature provides evidence that the holder of the corresponding private key authorized the signed data.
+
+---
+
+# 4. Don't think of a signature as an encrypted message
+
+This is a common beginner mistake.
+
+You might hear:
+
+> "A digital signature is encrypting with the private key."
+
+That's a useful historical simplification, but **don't use it as your mental model for modern cryptography**.
+
+Think:
+
+```text
+Encryption
+──────────
+Protect secrecy
+
+Digital signature
+─────────────────
+Prove authenticity/integrity
+```
+
+They solve different problems.
+
+---
+
+# 5. What exactly gets signed?
+
+Suppose Bob wants to sign:
+
+```text
+Hello Alice
+```
+
+A simplified conceptual implementation is:
+
+```text
+message
+   │
+   ▼
+Hash
+   │
+   ▼
+digest
+   │
+   ▼
+Sign with private key
+   │
+   ▼
+signature
+```
+
+So:
+
+```text
+message
+   ↓
+SHA-256
+   ↓
+digest
+   ↓
+private-key signature
+```
+
+Alice receives:
+
+```text
+message
+signature
+```
+
+She can calculate the hash herself and verify the signature using Bob's public key.
+
+---
+
+# 6. Why hash the message first?
+
+Imagine signing a 500 MB file directly.
+
+That's unnecessary.
+
+Instead:
+
+```text
+500 MB document
+       │
+       ▼
+     SHA-256
+       │
+       ▼
+  32-byte digest
+       │
+       ▼
+    signature
+```
+
+The digest is a compact representation of the content.
+
+If the message changes:
+
+```text
+Hello Alice
+```
+
+to:
+
+```text
+Hello Bob
+```
+
+the hash changes dramatically.
+
+For example, conceptually:
+
+```text
+SHA256("Hello Alice")
+       ↓
+ABC123...
+
+SHA256("Hello Bob")
+       ↓
+91F827...
+```
+
+Therefore the signature verification fails.
+
+This gives us **integrity** as well as authentication of the signer.
+
+---
+
+# 7. Hands-on: SHA-256
+
+Let's actually see this.
+
+Run:
+
+```bash
+echo -n "Hello Alice" | shasum -a 256
+```
+
+You'll get a hash.
+
+Now:
+
+```bash
+echo -n "Hello Bob" | shasum -a 256
+```
+
+Different input:
+
+```text
+Hello Alice
+     ↓
+hash A
+
+Hello Bob
+     ↓
+hash B
+```
+
+Now change only one character:
+
+```bash
+echo -n "Hello AlicE" | shasum -a 256
+```
+
+You'll get another completely different digest.
+
+That's the **avalanche effect** you'll frequently hear about with cryptographic hashes.
+
+---
+
+# 8. Generate a real key pair
+
+Let's create an RSA key pair for learning purposes.
+
+```bash
+openssl genpkey \
+  -algorithm RSA \
+  -out bob-private.pem \
+  -pkeyopt rsa_keygen_bits:2048
+```
+
+This creates:
+
+```text
+bob-private.pem
+```
+
+This file contains Bob's private key.
+
+Treat it as secret.
+
+Now extract the public key:
+
+```bash
+openssl pkey \
+  -in bob-private.pem \
+  -pubout \
+  -out bob-public.pem
+```
+
+Now:
+
+```text
+bob-private.pem 🔒
+bob-public.pem  📢
+```
+
+---
+
+# 9. Look at the private key
+
+Run:
+
+```bash
+openssl pkey \
+  -in bob-private.pem \
+  -text \
+  -noout
+```
+
+You'll see a large amount of mathematical information.
+
+Don't worry about understanding every number yet.
+
+The important thing is:
+
+```text
+Private key
+    │
+    ├── secret mathematical parameters
+    │
+    └── must be protected
+```
+
+---
+
+# 10. Look at the public key
+
+Run:
+
+```bash
+openssl pkey \
+  -pubin \
+  -in bob-public.pem \
+  -text \
+  -noout
+```
+
+You'll see the public mathematical parameters.
+
+The distinction is:
+
+```text
+Private key
+───────────
+Secret
+
+Public key
+──────────
+Not secret
+```
+
+---
+
+# 11. Create a message
+
+```bash
+echo -n "Hello Alice" > message.txt
+```
+
+Now Bob signs it:
+
+```bash
+openssl dgst \
+  -sha256 \
+  -sign bob-private.pem \
+  -out signature.bin \
+  message.txt
+```
+
+We now have:
+
+```text
+message.txt
+signature.bin
+bob-public.pem
+```
+
+---
+
+# 12. Verify the signature
+
+Alice receives:
+
+```text
+message.txt
+signature.bin
+bob-public.pem
+```
+
+She runs:
+
+```bash
+openssl dgst \
+  -sha256 \
+  -verify bob-public.pem \
+  -signature signature.bin \
+  message.txt
+```
+
+You should see:
+
+```text
+Verified OK
+```
+
+🎉
+
+You've just performed a real digital signature operation.
+
+---
+
+# 13. Now attack the message
+
+Change the message:
+
+```bash
+echo -n "Hello Bob" > message.txt
+```
+
+Run verification again:
+
+```bash
+openssl dgst \
+  -sha256 \
+  -verify bob-public.pem \
+  -signature signature.bin \
+  message.txt
+```
+
+It should fail.
+
+Why?
+
+Because Bob signed:
+
+```text
+Hello Alice
+```
+
+but Alice is now verifying:
+
+```text
+Hello Bob
+```
+
+The hash changed.
+
+Therefore:
+
+```text
+signature
+   ↓
+doesn't match
+   ↓
+❌ verification failure
+```
+
+This is one of the most important properties we'll use later.
+
+---
+
+# 14. Now we have an authentication building block
+
+We can now say:
+
+```text
+Bob
+ │
+ │ private key 🔒
+ ▼
+Digital Signature
+ │
+ ▼
+Alice
+ │
+ │ Bob's public key
+ ▼
+Verify
+```
+
+But...
+
+There's still a gigantic problem.
+
+---
+
+# 15. Where did Alice get Bob's public key?
+
+Suppose Bob sends:
+
+```text
+Here is my public key:
+
+bob-public.pem
+```
+
+Alice receives it.
+
+But an attacker could intercept it:
+
+```text
+Bob
+ │
+ │ Bob's real public key
+ ▼
+Attacker
+ │
+ │ Attacker's public key
+ ▼
+Alice
+```
+
+Alice thinks:
+
+```text
+"This is Bob's public key."
+```
+
+But it's actually:
+
+```text
+Attacker's public key
+```
+
+The attacker can now create signatures with **their own private key**.
+
+So we're back to the MITM problem.
+
+---
+
+# 16. We need a trusted third party
+
+We need someone Alice already trusts to say:
+
+> "Yes, this public key belongs to Bob."
+
+Conceptually:
+
+```text
+             Trusted Authority
+                    │
+                    │
+              "This key belongs
+                 to Bob"
+                    │
+                    ▼
+Bob ──────────────── Certificate
+                    │
+                    ▼
+                   Alice
+```
+
+This trusted authority is called a:
+
+# Certificate Authority (CA)
+
+And this is where **certificates** enter the story.
+
+---
+
+# 17. A certificate is more than a public key
+
+A simplified certificate might contain:
+
+```text
+┌───────────────────────────────┐
+│ Certificate                   │
+├───────────────────────────────┤
+│ Subject: bank.example         │
+│                               │
+│ Public Key:                   │
+│     ABCDEFG...                │
+│                               │
+│ Valid From: ...               │
+│ Valid Until: ...              │
+│                               │
+│ Issuer: Example Intermediate  │
+│                               │
+│ Signature:                    │
+│     XYZ123...                 │
+└───────────────────────────────┘
+```
+
+The important idea is:
+
+```text
+Certificate
+     │
+     ├── identity information
+     ├── public key
+     ├── validity period
+     ├── issuer
+     └── CA signature
+```
+
+The CA signs the certificate.
+
+---
+
+# 18. The trust chain
+
+Eventually your browser will do something conceptually like:
+
+```text
+bank.example
+     │
+     │ certificate
+     ▼
+Intermediate CA
+     │
+     │ certificate
+     ▼
+Root CA
+     │
+     ▼
+Browser's trust store
+```
+
+The browser already has a collection of trusted root certificates.
+
+Therefore:
+
+```text
+Browser
+   │
+   │ "I trust this Root CA."
+   ▼
+Root CA
+   │
+   │ signed Intermediate CA
+   ▼
+Intermediate CA
+   │
+   │ signed bank.example
+   ▼
+bank.example
+```
+
+This is the **chain of trust**.
+
+We'll spend a full lesson on this because it is one of the most important parts of TLS.
+
+---
+
+# 19. Our story so far
+
+Look at how each problem introduced the next concept:
+
+```text
+Plain HTTP
+    │
+    ├── Anyone can read data
+    │       ↓
+    │    Encryption
+    │
+    ├── Data can be modified
+    │       ↓
+    │    Integrity protection
+    │
+    ├── How do we establish a secret?
+    │       ↓
+    │    Diffie-Hellman
+    │
+    ├── How do we know who we're talking to?
+    │       ↓
+    │    Public/private keys
+    │    Digital signatures
+    │
+    └── How do we know a public key belongs
+        to the claimed server?
+            ↓
+        Certificates
+            ↓
+        Certificate Authorities
+```
+
+And we're getting very close to TLS.
+
+---
+
+# One important correction to keep in mind
+
+You may now be tempted to imagine HTTPS as:
+
+```text
+Certificate
+   ↓
+Encrypt everything using certificate public key
+   ↓
+HTTP
+```
+
+**That's not how modern TLS works.**
+
+Instead, we're heading toward something closer to:
+
+```text
+             TLS Handshake
+                  │
+       ┌──────────┴──────────┐
+       │                     │
+Authentication          Key Exchange
+       │                     │
+Certificate             ECDHE/DH
+       │                     │
+       └──────────┬──────────┘
+                  ▼
+            Shared secrets
+                  │
+                  ▼
+            Key derivation
+                  │
+                  ▼
+           Symmetric keys
+                  │
+                  ▼
+        Encrypted HTTP data
+```
+
+That's the architecture we'll eventually reproduce ourselves.
+
+---
+
+## Next: Lesson 5 — Certificates & Certificate Authorities
+
+We'll build a **real certificate hierarchy on your Mac**:
+
+```text
+                    Root CA
+                       │
+                       │ signs
+                       ▼
+                Intermediate CA
+                       │
+                       │ signs
+                       ▼
+                localhost cert
+                       │
+                       ▼
+                HTTPS server
+                       │
+                       ▼
+                    curl
+```
+
+You'll generate the CA, generate a server certificate, inspect it with OpenSSL, and see exactly **what the browser is trusting and why**.
+
+---
+
