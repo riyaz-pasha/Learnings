@@ -3293,3 +3293,985 @@ HTTP request ─────────────────>
 We'll explain **what each message contains, why it exists, where the keys come from, and how TLS 1.3 gets from "hello" to encrypted HTTP**.
 
 ---
+
+# Lesson 6 — The TLS 1.3 Handshake
+
+Now we get to the most important part of the course:
+
+> **What actually happens when you type `https://example.com` and press Enter?**
+
+We'll focus on **TLS 1.3**, because that's the modern version you should understand first.
+
+Don't worry if some details feel new. We'll keep connecting them back to the pieces we've already learned.
+
+---
+
+# 1. Start with the big picture
+
+Suppose:
+
+```text
+Browser
+   │
+   │ HTTPS
+   ▼
+example.com
+```
+
+Before HTTP data can be safely exchanged, TLS has to establish:
+
+1. Which cryptographic algorithms to use
+2. A shared secret
+3. The server's identity
+4. Keys for encrypting the connection
+
+Conceptually:
+
+```text
+Browser                         Server
+
+   │                              │
+   │────── ClientHello ──────────>│
+   │                              │
+   │<────── ServerHello ──────────│
+   │<────── Certificate ──────────│
+   │<────── CertificateVerify ────│
+   │<────── Finished ─────────────│
+   │                              │
+   │────── Finished ─────────────>│
+   │                              │
+   │══════ Encrypted HTTP ═══════>│
+```
+
+That's the simplified TLS 1.3 handshake.
+
+But there's a subtle and beautiful thing happening here:
+
+**The key exchange and authentication happen together.**
+
+---
+
+# 2. First: ClientHello
+
+The client starts.
+
+Conceptually:
+
+```text
+Browser
+   │
+   │ ClientHello
+   ▼
+Server
+```
+
+The ClientHello contains information such as:
+
+```text
+ClientHello
+├── TLS version / supported versions
+├── Random value
+├── Supported cipher suites
+├── Key share
+├── Extensions
+└── SNI
+```
+
+Let's unpack these.
+
+---
+
+# 3. TLS version
+
+The client tells the server what TLS versions it supports.
+
+Modern clients generally advertise TLS 1.3 support.
+
+Conceptually:
+
+```text
+Supported versions:
+
+TLS 1.3
+TLS 1.2
+...
+```
+
+The server selects a compatible version.
+
+For our course:
+
+```text
+Client → TLS 1.3 supported
+Server → TLS 1.3 selected
+```
+
+---
+
+# 4. Cipher suites
+
+Remember that TLS needs symmetric encryption.
+
+The client therefore tells the server which cryptographic combinations it supports.
+
+For TLS 1.3, you'll encounter names such as:
+
+```text
+TLS_AES_128_GCM_SHA256
+TLS_AES_256_GCM_SHA384
+TLS_CHACHA20_POLY1305_SHA256
+```
+
+Don't try to memorize them yet.
+
+We'll decode this later.
+
+The important idea:
+
+```text
+Client:
+"I support these cryptographic algorithms."
+
+Server:
+"I'll use this one."
+```
+
+---
+
+# 5. SNI — Server Name Indication
+
+This is extremely important in real-world HTTPS.
+
+Imagine one server has:
+
+```text
+Server
+ ├── google.example
+ ├── shop.example
+ ├── api.example
+ └── blog.example
+```
+
+The server needs to know which hostname the client wants.
+
+The client therefore sends an extension called:
+
+**SNI — Server Name Indication**
+
+Conceptually:
+
+```text
+ClientHello
+
+SNI:
+    example.com
+```
+
+So the server knows:
+
+> "The client is asking for `example.com`."
+
+This allows infrastructure hosting many HTTPS sites on the same IP address to select the appropriate certificate/configuration.
+
+---
+
+# 6. The most important part: Key Share
+
+Here's where our Diffie-Hellman lesson comes back.
+
+The client generates an ephemeral key pair.
+
+Conceptually:
+
+```text
+Client
+
+private key 🔒
+      +
+public key 📢
+```
+
+The public portion is included in the ClientHello:
+
+```text
+ClientHello
+    │
+    └── Key Share
+            │
+            ▼
+       Client public value
+```
+
+The private portion **never leaves the client**.
+
+---
+
+# 7. Server does the same
+
+The server generates its own ephemeral key pair:
+
+```text
+Server
+
+private key 🔒
+      +
+public key 📢
+```
+
+The server sends its public value back.
+
+So:
+
+```text
+Client                              Server
+
+private 🔒                           private 🔒
+public  📢                           public  📢
+    │                                  │
+    │────── public ──────────────────>│
+    │<────── public ──────────────────│
+```
+
+Both can now derive the same shared secret.
+
+This is essentially the modern TLS form of **Diffie-Hellman**, usually using elliptic-curve Diffie-Hellman.
+
+You'll frequently see:
+
+**ECDHE**
+
+which means:
+
+> Elliptic Curve Diffie-Hellman Ephemeral.
+
+---
+
+# 8. What does "ephemeral" mean?
+
+This is important.
+
+The server doesn't necessarily use one permanent Diffie-Hellman private key forever.
+
+Instead:
+
+```text
+Connection 1
+    ↓
+temporary key pair
+
+Connection 2
+    ↓
+different temporary key pair
+
+Connection 3
+    ↓
+different temporary key pair
+```
+
+So:
+
+```text
+Connection #1 → 🔑 temporary secret #1
+Connection #2 → 🔑 temporary secret #2
+Connection #3 → 🔑 temporary secret #3
+```
+
+This provides an important property called:
+
+# Forward secrecy
+
+We'll dedicate a full lesson to it later.
+
+---
+
+# 9. ServerHello
+
+The server responds:
+
+```text
+Client                          Server
+
+ClientHello ──────────────────>
+
+            <────────────────── ServerHello
+```
+
+The ServerHello tells the client:
+
+```text
+"I've selected these parameters."
+```
+
+Among other things:
+
+```text
+ServerHello
+├── Selected TLS version
+├── Selected cipher suite
+└── Server key share
+```
+
+Now both sides have exchanged the information needed for the key agreement.
+
+---
+
+# 10. Shared secret
+
+Conceptually:
+
+```text
+Client                           Server
+
+Client private 🔒                Server private 🔒
+       │                                │
+       │                                │
+       ▼                                ▼
+Client public 📢  ──────────────>  Server
+Server public 📢  <──────────────  Client
+       │                                │
+       └──────────┬─────────────────────┘
+                  ▼
+             Shared secret
+```
+
+The network observer sees the public values.
+
+But doesn't know the private values.
+
+Therefore the attacker cannot practically derive the same secret.
+
+---
+
+# 11. But we still haven't authenticated the server
+
+This is the problem we solved with certificates.
+
+The server now sends:
+
+```text
+Certificate
+```
+
+Conceptually:
+
+```text
+Server
+   │
+   │ Certificate
+   ▼
+Client
+```
+
+The certificate says roughly:
+
+```text
+"This public key belongs to example.com."
+
+Signed by:
+Intermediate CA
+```
+
+The client then validates the certificate chain.
+
+---
+
+# 12. Certificate validation
+
+The client checks things such as:
+
+```text
+Certificate
+    │
+    ├── Is the signature valid?
+    │
+    ├── Is the CA trusted?
+    │
+    ├── Does the chain lead to a trusted root?
+    │
+    ├── Is the certificate currently valid?
+    │
+    ├── Does hostname match SAN?
+    │
+    └── Are other certificate constraints satisfied?
+```
+
+If validation fails:
+
+```text
+❌ TLS connection rejected
+```
+
+If validation succeeds:
+
+```text
+✅ Server identity accepted
+```
+
+---
+
+# 13. But the certificate alone isn't enough
+
+This is a subtle but extremely important point.
+
+Suppose the certificate says:
+
+```text
+example.com
+public key = ABC...
+```
+
+The client needs to know:
+
+> "Does the server actually possess the private key corresponding to ABC...?"
+
+Otherwise someone could simply steal/copy the public certificate.
+
+That's where:
+
+# CertificateVerify
+
+comes in.
+
+---
+
+# 14. CertificateVerify
+
+The server uses its **private key corresponding to the certificate's public key** to create a digital signature over the relevant handshake transcript.
+
+Conceptually:
+
+```text
+Handshake messages
+      │
+      ▼
+    Hash
+      │
+      ▼
+Server private key 🔒
+      │
+      ▼
+Digital signature
+```
+
+The server sends:
+
+```text
+CertificateVerify
+    │
+    └── signature
+```
+
+The client uses the public key from the certificate:
+
+```text
+Certificate public key
+          +
+CertificateVerify signature
+          ↓
+        Verify
+          ↓
+          ✅
+```
+
+This proves something very important:
+
+> The server participating in this handshake possesses the private key corresponding to the certified public key.
+
+---
+
+# 15. We now have two different kinds of keys
+
+This is where beginners often get confused.
+
+During TLS, we have:
+
+### Certificate key
+
+Used for authentication:
+
+```text
+Server private key
+       ↓
+CertificateVerify
+```
+
+and:
+
+```text
+Certificate public key
+       ↓
+Verify signature
+```
+
+---
+
+### Ephemeral ECDHE key
+
+Used for key agreement:
+
+```text
+Client ephemeral private
+       +
+Server ephemeral public
+       ↓
+Shared secret
+```
+
+and:
+
+```text
+Server ephemeral private
+       +
+Client ephemeral public
+       ↓
+Same shared secret
+```
+
+So:
+
+```text
+Certificate keys
+        │
+        └── Authentication
+
+ECDHE keys
+        │
+        └── Key agreement
+```
+
+**They're solving different problems.**
+
+---
+
+# 16. Why not use the certificate key for everything?
+
+Excellent question.
+
+Historically, TLS could use RSA for key transport.
+
+Modern TLS 1.3 intentionally uses ephemeral Diffie-Hellman-style key exchange.
+
+Why?
+
+One major reason is:
+
+# Forward secrecy
+
+Suppose an attacker records your encrypted traffic today:
+
+```text
+2026
+
+Attacker
+   │
+   └── records encrypted traffic
+```
+
+Then imagine they steal your server's long-term private key next year:
+
+```text
+2027
+
+Server private key stolen 🔓
+```
+
+With ephemeral key exchange, the attacker generally **cannot use that long-term private key alone to reconstruct past session secrets**.
+
+That's a huge security property.
+
+We'll explore exactly why later.
+
+---
+
+# 17. Finished
+
+After the handshake messages have been authenticated, both sides send:
+
+```text
+Finished
+```
+
+Conceptually:
+
+```text
+Client                         Server
+
+ClientHello ──────────────────>
+             <───────────────── ServerHello
+             <───────────────── Certificate
+             <───────────────── CertificateVerify
+             <───────────────── Finished
+
+Finished ─────────────────────>
+```
+
+The Finished message proves that both parties derived the expected handshake secrets and that the handshake wasn't tampered with.
+
+At this point:
+
+```text
+             TLS established
+                    │
+                    ▼
+              🔑 session keys
+                    │
+                    ▼
+             Secure channel
+```
+
+---
+
+# 18. Now HTTP can finally happen
+
+The browser can now send:
+
+```http
+GET / HTTP/1.1
+Host: example.com
+```
+
+But this isn't sent as plaintext over the network.
+
+Instead:
+
+```text
+HTTP request
+     │
+     ▼
+TLS record layer
+     │
+     ▼
+Encryption
+     │
+     ▼
+Encrypted bytes
+     │
+     ▼
+Network
+```
+
+The server decrypts it:
+
+```text
+Encrypted bytes
+      │
+      ▼
+   decrypt
+      │
+      ▼
+HTTP request
+```
+
+So:
+
+```text
+Browser                              Server
+
+GET / HTTP/1.1
+      │
+      │ 🔒 encrypted
+      ├─────────────────────────────>
+      │
+      │                     decrypt
+      │                         ↓
+      │                    GET / HTTP/1.1
+```
+
+---
+
+# 19. The complete TLS 1.3 story
+
+Let's put everything together.
+
+```text
+CLIENT                                      SERVER
+  │                                            │
+  │ ClientHello                                │
+  │ - TLS versions                             │
+  │ - cipher suites                            │
+  │ - SNI                                      │
+  │ - ephemeral key share                      │
+  │───────────────────────────────────────────>│
+  │                                            │
+  │                          ServerHello        │
+  │                          - selected TLS     │
+  │                          - selected cipher  │
+  │                          - key share        │
+  │<───────────────────────────────────────────│
+  │                                            │
+  │                          Certificate       │
+  │<───────────────────────────────────────────│
+  │                                            │
+  │                          CertificateVerify │
+  │<───────────────────────────────────────────│
+  │                                            │
+  │                          Finished         │
+  │<───────────────────────────────────────────│
+  │                                            │
+  │ Finished                                   │
+  │───────────────────────────────────────────>│
+  │                                            │
+  │                                            │
+  │ 🔒 encrypted HTTP                         │
+  │───────────────────────────────────────────>│
+  │                                            │
+  │ 🔒 encrypted HTTP response                 │
+  │<───────────────────────────────────────────│
+```
+
+This is the core of HTTPS.
+
+---
+
+# 20. Let's see this on your Mac
+
+Now let's stop talking abstractly.
+
+Run:
+
+```bash
+openssl s_client \
+  -connect example.com:443 \
+  -servername example.com \
+  -tls1_3
+```
+
+You'll see information about the TLS connection.
+
+Look for things such as:
+
+```text
+Protocol  : TLSv1.3
+Cipher    : ...
+Server certificate
+```
+
+The exact output varies by OpenSSL version and server configuration.
+
+---
+
+# 21. Get a much cleaner summary
+
+Try:
+
+```bash
+openssl s_client \
+  -connect example.com:443 \
+  -servername example.com \
+  -tls1_3 \
+  </dev/null 2>/dev/null
+```
+
+Look for:
+
+```text
+Protocol  : TLSv1.3
+Cipher    : TLS_AES_256_GCM_SHA384
+```
+
+You may get a different cipher suite. That's perfectly normal.
+
+---
+
+# 22. What does this cipher suite mean?
+
+Suppose you see:
+
+```text
+TLS_AES_256_GCM_SHA384
+```
+
+Break it apart:
+
+```text
+TLS
+ │
+ └── TLS protocol
+
+AES_256
+ │
+ └── AES with 256-bit key
+
+GCM
+ │
+ └── authenticated encryption mode
+
+SHA384
+ │
+ └── hash used by the TLS cryptographic machinery
+```
+
+We'll dive deeply into this later.
+
+Notice what's **not** in the name:
+
+```text
+RSA
+Diffie-Hellman
+ECDHE
+```
+
+That's because TLS 1.3 separates key exchange/authentication mechanisms from the symmetric cipher suite naming in a way that differs from TLS 1.2.
+
+---
+
+# 23. Try forcing TLS 1.2
+
+Run:
+
+```bash
+openssl s_client \
+  -connect example.com:443 \
+  -servername example.com \
+  -tls1_2 \
+  </dev/null 2>/dev/null
+```
+
+Then compare:
+
+```text
+TLS 1.2
+```
+
+with:
+
+```text
+TLS 1.3
+```
+
+You'll notice differences.
+
+TLS 1.3 significantly simplified and shortened the handshake and removed several older cryptographic mechanisms.
+
+We'll do a dedicated **TLS 1.2 vs TLS 1.3** lesson later.
+
+---
+
+# 24. One subtle correction
+
+You may now think:
+
+```text
+ClientHello
+      ↓
+ServerHello
+      ↓
+Certificate
+      ↓
+Finished
+      ↓
+HTTP
+```
+
+and that's approximately correct for learning.
+
+But don't think of TLS as simply a sequence of independent messages.
+
+The handshake messages are cryptographically tied together.
+
+The protocol derives keys from the handshake state and authenticates the transcript.
+
+That's important because an attacker shouldn't be able to:
+
+```text
+modify message 1
+remove message 2
+replace message 3
+```
+
+without the other side detecting it.
+
+This is why **Finished** is so important.
+
+---
+
+# 25. The complete mental model
+
+At this point you should be able to think about HTTPS like this:
+
+```text
+                    HTTPS
+                      │
+                      ▼
+                    TLS
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+    Authentication          Key Agreement
+          │                       │
+    Certificate              ECDHE
+          │                       │
+    CertificateVerify             │
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+                Shared secrets
+                      │
+                      ▼
+                Key derivation
+                      │
+                      ▼
+                Session keys
+                      │
+                      ▼
+              AES-GCM / ChaCha20
+                      │
+                      ▼
+              Encrypted HTTP
+```
+
+And the three original problems:
+
+```text
+Can someone read it?
+        ↓
+Encryption
+
+Can someone modify it?
+        ↓
+Authenticated encryption + handshake authentication
+
+Am I talking to the real server?
+        ↓
+Certificate + CA + signature
+```
+
+---
+
+# Next lesson — Let's actually build HTTPS ourselves
+
+This is where the course becomes much more hands-on.
+
+We'll create:
+
+```text
+                    Our local machine
+
+                 ┌──────────────┐
+                 │    Root CA   │
+                 └──────┬───────┘
+                        │
+                     signs
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │ localhost    │
+                 │ certificate  │
+                 └──────┬───────┘
+                        │
+                        ▼
+              Python HTTPS server
+                        │
+                        │ TLS
+                        ▼
+                     curl
+```
+
+We'll generate the CA and server certificate ourselves, start a tiny Python HTTPS server, connect to it with `curl`, and intentionally make certificate validation fail first.
+
+Then we'll make our client trust our CA.
+
+That will make **CA → certificate → trust store → TLS handshake → HTTPS** concrete rather than just theoretical.
+
+---
+
