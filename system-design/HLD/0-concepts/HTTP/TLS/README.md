@@ -5359,3 +5359,770 @@ We'll also answer a subtle question:
 That leads directly into the distinction between **certificate authentication, TLS key exchange, and session encryption**.
 
 ---
+
+# Lesson 8 — What exactly is inside a TLS certificate?
+
+We now have a working HTTPS server:
+
+```text
+curl
+  │
+  │ HTTPS
+  ▼
+localhost:8443
+  │
+  ├── server.crt
+  └── server.key
+```
+
+But we have mostly treated `server.crt` as a black box.
+
+Let's open it up.
+
+---
+
+## 1. First, inspect your certificate
+
+From your `~/tls-course` directory:
+
+```bash
+cd ~/tls-course
+
+openssl x509 \
+  -in server.crt \
+  -noout \
+  -text
+```
+
+You'll see quite a lot of output.
+
+Don't worry about understanding everything yet. The important sections are:
+
+```text
+Certificate:
+    Data:
+        Version: 3
+        Serial Number: ...
+        Signature Algorithm: ...
+        Issuer: ...
+        Validity:
+            Not Before: ...
+            Not After : ...
+        Subject: ...
+        Subject Public Key Info:
+            ...
+        X509v3 extensions:
+            ...
+    Signature Algorithm: ...
+    Signature Value:
+        ...
+```
+
+Let's understand these one by one.
+
+---
+
+# 2. Who issued this certificate?
+
+Look at:
+
+```text
+Issuer: C=IN, O=TLS Course, CN=TLS Course Root CA
+```
+
+This means:
+
+> "The CA that issued/signed this certificate is TLS Course Root CA."
+
+And:
+
+```text
+Subject: C=IN, O=TLS Course, CN=localhost
+```
+
+means:
+
+> "This certificate represents localhost."
+
+So:
+
+```text
+Issuer  → who signed it
+Subject → who the certificate represents
+```
+
+For a real website, you might see something like:
+
+```text
+Issuer:
+    Google Trust Services ...
+
+Subject:
+    CN=www.google.com
+```
+
+---
+
+# 3. The public key is inside the certificate
+
+Look for:
+
+```text
+Subject Public Key Info:
+    Public Key Algorithm: ...
+    Public-Key: ...
+```
+
+This is extremely important.
+
+Remember our earlier discussion:
+
+```text
+server.key
+    │
+    │ contains
+    ▼
+PRIVATE KEY 🔒
+```
+
+while:
+
+```text
+server.crt
+    │
+    │ contains
+    ▼
+PUBLIC KEY 🔓
+```
+
+The certificate essentially says:
+
+```text
+"This public key belongs to localhost."
+```
+
+and the CA signs that statement.
+
+---
+
+# 4. The certificate does NOT contain the private key
+
+This distinction is worth making very clear.
+
+You have:
+
+```text
+server.key
+```
+
+and:
+
+```text
+server.crt
+```
+
+The certificate contains:
+
+```text
+identity
++
+public key
++
+metadata
++
+CA signature
+```
+
+It does **not** contain:
+
+```text
+server.key
+```
+
+That's why exposing a certificate is normally fine:
+
+```bash
+cat server.crt
+```
+
+But you should **never** casually expose:
+
+```bash
+cat server.key
+```
+
+The private key must remain secret.
+
+---
+
+# 5. Why does the certificate contain a public key?
+
+Suppose your server sends:
+
+```text
+server.crt
+```
+
+to the browser.
+
+The browser extracts:
+
+```text
+Server public key
+```
+
+Then during TLS authentication, the server proves:
+
+> "I actually possess the private key corresponding to this public key."
+
+It does this through `CertificateVerify`.
+
+Conceptually:
+
+```text
+Certificate
+    │
+    └── public key
+          │
+          │ verify
+          ▼
+      CertificateVerify
+          ▲
+          │
+      server.key
+```
+
+So the certificate doesn't authenticate the server by itself.
+
+It provides the **public key and identity binding** needed for the authentication process.
+
+---
+
+# 6. What is SAN?
+
+In your certificate, run:
+
+```bash
+openssl x509 \
+  -in server.crt \
+  -noout \
+  -ext subjectAltName
+```
+
+You should see:
+
+```text
+X509v3 Subject Alternative Name:
+    DNS:localhost, IP Address:127.0.0.1
+```
+
+This is the **Subject Alternative Name (SAN)** extension.
+
+It tells the client:
+
+```text
+This certificate is valid for:
+
+localhost
+127.0.0.1
+```
+
+This matters because when you run:
+
+```bash
+curl https://localhost:8443
+```
+
+curl needs to verify:
+
+```text
+Requested hostname
+        │
+        ▼
+     localhost
+        │
+        │ matches
+        ▼
+Certificate SAN
+```
+
+If the certificate were only valid for:
+
+```text
+example.com
+```
+
+then:
+
+```bash
+curl https://localhost:8443
+```
+
+should fail hostname verification.
+
+---
+
+# 7. Let's actually create that failure
+
+We can demonstrate this.
+
+Our current certificate has:
+
+```text
+DNS:localhost
+IP:127.0.0.1
+```
+
+So this works:
+
+```bash
+curl --cacert ca.crt https://localhost:8443
+```
+
+But imagine we connect using a hostname that isn't listed.
+
+For example:
+
+```bash
+curl --cacert ca.crt https://127.0.0.1:8443
+```
+
+Our certificate actually contains `127.0.0.1`, so this should also work.
+
+But if we used:
+
+```bash
+curl --cacert ca.crt https://127.0.0.2:8443
+```
+
+we'd have a different problem.
+
+The TCP connection itself isn't the issue.
+
+The certificate identity is.
+
+Conceptually:
+
+```text
+Client asks for:
+127.0.0.2
+
+Certificate says:
+localhost
+127.0.0.1
+
+            ❌
+
+Hostname/IP doesn't match
+```
+
+This is why certificates aren't simply:
+
+> "The server has a valid certificate."
+
+They are:
+
+> "The server has a certificate that is trusted **and valid for the identity I'm connecting to**."
+
+---
+
+# 8. The certificate's validity period
+
+You'll see:
+
+```text
+Validity
+    Not Before: ...
+    Not After : ...
+```
+
+For our certificate:
+
+```bash
+openssl x509 \
+  -in server.crt \
+  -noout \
+  -dates
+```
+
+Example:
+
+```text
+notBefore=...
+notAfter=...
+```
+
+The client checks whether the current time falls within that period.
+
+Conceptually:
+
+```text
+         valid period
+    ├───────────────────┤
+    ▲                   ▲
+ Not Before          Not After
+
+          ▲
+       current time
+```
+
+Outside the validity period:
+
+```text
+             ❌ certificate invalid
+```
+
+This is one reason certificates eventually need to be renewed/replaced.
+
+---
+
+# 9. What is the CA signature?
+
+This is the really important part.
+
+Our certificate contains something like:
+
+```text
+Signature Algorithm: sha256WithRSAEncryption
+
+Signature Value:
+    4a:9f:...
+    ...
+```
+
+Remember our earlier digital-signature lesson.
+
+The CA effectively signs the certificate's contents using:
+
+```text
+CA private key 🔒
+```
+
+The client can verify that signature using:
+
+```text
+CA public key 🔓
+```
+
+So conceptually:
+
+```text
+                CA
+                │
+         CA private key
+                │
+                ▼
+       signs certificate
+                │
+                ▼
+        server.crt
+                │
+                ▼
+             Client
+                │
+       CA public key
+                │
+                ▼
+       verify signature
+```
+
+---
+
+# 10. The subtle question
+
+You might now wonder:
+
+> If the CA's private key signed my certificate, does the CA's private key participate whenever I make an HTTPS request?
+
+**No.**
+
+This is a crucial TLS concept.
+
+The CA was involved when the certificate was issued:
+
+```text
+        Certificate issuance
+       
+Server ──CSR──► CA
+                 │
+                 │ CA private key
+                 ▼
+            server.crt
+```
+
+After that, the CA isn't sitting in the middle of every HTTPS connection.
+
+Actual HTTPS connection:
+
+```text
+Browser                    Server
+   │                          │
+   │──── TLS handshake ──────►│
+   │                          │
+   │     certificate          │
+   │◄─────────────────────────│
+   │                          │
+   │   verify CA signature    │
+   │                          │
+   │──── key exchange ───────►│
+   │                          │
+   │◄──── encrypted data ─────│
+```
+
+The CA's private key is **not** used to encrypt your HTTP requests.
+
+---
+
+# 11. Three different keys — three different jobs
+
+This is one of the most important mental models in TLS.
+
+### ① CA private key
+
+```text
+ca.key
+```
+
+Used by:
+
+```text
+CA
+ │
+ └── signs certificates
+```
+
+It is mainly involved during **certificate issuance**.
+
+---
+
+### ② Server private key
+
+```text
+server.key
+```
+
+Used by the server to prove:
+
+```text
+"I possess the private key corresponding
+to the public key in this certificate."
+```
+
+This is part of TLS authentication.
+
+---
+
+### ③ Ephemeral ECDHE private key
+
+Created for the TLS connection itself.
+
+Used for:
+
+```text
+key agreement
+```
+
+It helps both sides derive a shared secret.
+
+So:
+
+```text
+CA private key
+     │
+     └── certificate issuance
+
+
+Server private key
+     │
+     └── server authentication
+
+
+ECDHE private key
+     │
+     └── session key establishment
+```
+
+And eventually:
+
+```text
+session keys
+     │
+     └── encrypt HTTP data
+```
+
+---
+
+# 12. Now let's build the complete picture
+
+At certificate issuance time:
+
+```text
+                    Certificate Authority
+
+                     ca.key 🔒
+                        │
+                        │ signs
+                        ▼
+                 ┌──────────────┐
+                 │ server.crt   │
+                 │              │
+                 │ identity     │
+                 │ public key   │
+                 │ validity     │
+                 │ SAN          │
+                 │ CA signature │
+                 └──────────────┘
+```
+
+At connection time:
+
+```text
+Client                                      Server
+  │                                           │
+  │────────── ClientHello ──────────────────►│
+  │                                           │
+  │◄──────── ServerHello ────────────────────│
+  │                                           │
+  │◄──────── server.crt ─────────────────────│
+  │                                           │
+  │   verify certificate                      │
+  │                                           │
+  │   verify CA signature                     │
+  │   check validity                          │
+  │   check SAN                               │
+  │                                           │
+  │◄──── CertificateVerify ──────────────────│
+  │                                           │
+  │   verify using certificate's             │
+  │   public key                              │
+  │                                           │
+  │─────── ECDHE key exchange ──────────────►│
+  │                                           │
+  │      derive shared secrets                │
+  │                                           │
+  │════════ encrypted HTTP ══════════════════│
+```
+
+Notice the separation:
+
+```text
+Certificate
+     ↓
+"Who is this server?"
+
+ECDHE
+     ↓
+"How do we establish shared secrets?"
+
+Symmetric encryption
+     ↓
+"How do we efficiently protect the actual data?"
+```
+
+That's the architecture we're trying to understand.
+
+---
+
+# 13. One more important certificate extension
+
+Run:
+
+```bash
+openssl x509 \
+  -in server.crt \
+  -noout \
+  -ext basicConstraints \
+  -ext keyUsage \
+  -ext extendedKeyUsage
+```
+
+You should see things corresponding to what we specified:
+
+```text
+CA:FALSE
+```
+
+This says:
+
+> This certificate is not a CA certificate.
+
+And:
+
+```text
+Extended Key Usage:
+    TLS Web Server Authentication
+```
+
+This says the certificate is intended for server authentication.
+
+So certificates don't merely contain:
+
+```text
+name + public key
+```
+
+They can contain constraints describing **how that certificate may be used**.
+
+---
+
+## Your certificate mental model
+
+Think of `server.crt` as a signed ID card:
+
+```text
+┌────────────────────────────────────┐
+│          SERVER CERTIFICATE        │
+│                                    │
+│ Subject: localhost                 │
+│                                    │
+│ SAN: localhost, 127.0.0.1          │
+│                                    │
+│ Public Key: 🔓                     │
+│                                    │
+│ Valid: date → date                 │
+│                                    │
+│ Usage: Server Authentication       │
+│                                    │
+│ Issuer: TLS Course Root CA         │
+│                                    │
+│ CA Signature: ✍️                   │
+└────────────────────────────────────┘
+```
+
+The CA is essentially saying:
+
+> "I, a trusted CA, signed this certificate stating that this public key is associated with this identity, subject to these constraints."
+
+---
+
+## Next: Lesson 9 — Let's build a real certificate chain
+
+Right now we have:
+
+```text
+Root CA
+   │
+   └── localhost certificate
+```
+
+Real production PKI usually looks more like:
+
+```text
+Root CA
+   │
+   ▼
+Intermediate CA
+   │
+   ▼
+Server Certificate
+```
+
+We'll create that ourselves with OpenSSL.
+
+You'll see **why intermediate CAs exist**, why servers normally send the intermediate certificate, why the root is normally kept offline, and what happens when the chain is incomplete.
+
+Then we'll deliberately break the chain and watch TLS fail.
+
+Say **next** when you're ready.
+
+---
