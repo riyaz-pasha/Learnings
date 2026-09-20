@@ -4275,3 +4275,1087 @@ That will make **CA → certificate → trust store → TLS handshake → HTTPS*
 
 ---
 
+# Lesson 7 — Build Your Own HTTPS Server
+
+Now we're going to stop using `example.com`.
+
+We'll create our own tiny HTTPS setup:
+
+```text
+                  Our Mac
+
+        ┌──────────────────────┐
+        │      Root CA         │
+        │   ca.crt / ca.key    │
+        └──────────┬───────────┘
+                   │ signs
+                   ▼
+        ┌──────────────────────┐
+        │ localhost certificate│
+        │ server.crt           │
+        │ server.key           │
+        └──────────┬───────────┘
+                   │
+                   ▼
+             Python server
+                   │
+              HTTPS :8443
+                   │
+                   ▼
+                 curl
+```
+
+The goal is to understand **exactly where each file comes from and why it exists**.
+
+---
+
+# 1. Create a workspace
+
+Open Terminal:
+
+```bash
+mkdir -p ~/tls-course
+cd ~/tls-course
+```
+
+We'll keep everything here.
+
+```text
+tls-course/
+```
+
+---
+
+# 2. First create our Certificate Authority
+
+Remember our certificate chain:
+
+```text
+Root CA
+   │
+   │ signs
+   ▼
+Server certificate
+```
+
+We are going to become our own tiny CA.
+
+This is **only for learning/local development**.
+
+---
+
+## Generate the CA private key
+
+Run:
+
+```bash
+openssl genrsa -out ca.key 4096
+```
+
+Now:
+
+```text
+tls-course/
+└── ca.key
+```
+
+This is extremely important.
+
+```text
+ca.key 🔒
+```
+
+It is the CA's private key.
+
+Anyone who gets this key could potentially create certificates that clients trusting this CA would accept.
+
+So in real life:
+
+> **CA private keys are extremely sensitive.**
+
+---
+
+# 3. Create the CA certificate
+
+Now run:
+
+```bash
+openssl req \
+  -x509 \
+  -new \
+  -key ca.key \
+  -sha256 \
+  -days 3650 \
+  -out ca.crt \
+  -subj "/C=IN/O=TLS Course/CN=TLS Course Root CA"
+```
+
+We now have:
+
+```text
+tls-course/
+├── ca.key    🔒
+└── ca.crt    📜
+```
+
+What's `ca.crt`?
+
+It's the **public certificate of our CA**.
+
+It contains information about the CA and its public key, and it is self-signed because this is our root.
+
+Conceptually:
+
+```text
+ca.key
+  │
+  │ signs
+  ▼
+ca.crt
+```
+
+---
+
+# 4. Why is the root certificate self-signed?
+
+Our root CA is at the top of the trust hierarchy:
+
+```text
+Root CA
+   │
+   └── nobody above it
+```
+
+So who signs the root?
+
+The root signs itself.
+
+Hence:
+
+```text
+Root CA
+  │
+  └── signs its own certificate
+```
+
+This is called a **self-signed certificate**.
+
+But remember:
+
+> Self-signed does not automatically mean trusted.
+
+Our Mac doesn't inherently trust `TLS Course Root CA`.
+
+We haven't installed it into a trust store yet.
+
+---
+
+# 5. Inspect our CA certificate
+
+Run:
+
+```bash
+openssl x509 \
+  -in ca.crt \
+  -noout \
+  -subject \
+  -issuer \
+  -dates
+```
+
+You'll see something like:
+
+```text
+subject=C=IN, O=TLS Course, CN=TLS Course Root CA
+issuer=C=IN, O=TLS Course, CN=TLS Course Root CA
+notBefore=...
+notAfter=...
+```
+
+Notice:
+
+```text
+subject = TLS Course Root CA
+issuer  = TLS Course Root CA
+```
+
+That's because it's self-signed.
+
+---
+
+# 6. Now create the server private key
+
+Our HTTPS server needs its own key pair.
+
+Run:
+
+```bash
+openssl genrsa -out server.key 2048
+```
+
+Now:
+
+```text
+tls-course/
+├── ca.key       🔒
+├── ca.crt       📜
+└── server.key   🔒
+```
+
+The server's private key is different from the CA's private key.
+
+That's important.
+
+```text
+CA private key
+      │
+      └── signs certificates
+
+Server private key
+      │
+      └── proves server identity during TLS
+```
+
+---
+
+# 7. Create a certificate signing request
+
+Now the server needs to ask our CA:
+
+> "Please issue me a certificate for `localhost`."
+
+That's what a **CSR** is.
+
+CSR = **Certificate Signing Request**
+
+Run:
+
+```bash
+openssl req \
+  -new \
+  -key server.key \
+  -out server.csr \
+  -subj "/C=IN/O=TLS Course/CN=localhost"
+```
+
+Now:
+
+```text
+tls-course/
+├── ca.key
+├── ca.crt
+├── server.key
+└── server.csr
+```
+
+---
+
+# 8. What is inside a CSR?
+
+Conceptually:
+
+```text
+CSR
+├── Requested identity
+│     localhost
+│
+├── Server public key
+│
+└── Proof that requester owns
+    corresponding private key
+```
+
+The CSR is essentially:
+
+> "Here is the public key I want certified, and here is the identity I'm requesting."
+
+The CA then decides whether to issue a certificate.
+
+---
+
+# 9. Important distinction: CSR ≠ Certificate
+
+Don't mix these up.
+
+```text
+CSR
+ │
+ │ submitted to CA
+ ▼
+CA
+ │
+ │ validates / approves / signs
+ ▼
+Certificate
+```
+
+So:
+
+```text
+server.csr
+```
+
+is a request.
+
+Whereas:
+
+```text
+server.crt
+```
+
+will be the actual certificate.
+
+---
+
+# 10. Why do we need SAN?
+
+Earlier we discussed:
+
+```text
+Subject Alternative Name
+```
+
+Modern TLS hostname validation relies on SAN.
+
+So we're going to explicitly create:
+
+```text
+localhost
+127.0.0.1
+```
+
+as valid identities.
+
+Create:
+
+```bash
+cat > server.ext <<'EOF'
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=@alt_names
+
+[alt_names]
+DNS.1=localhost
+IP.1=127.0.0.1
+EOF
+```
+
+Check it:
+
+```bash
+cat server.ext
+```
+
+You should see:
+
+```text
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=@alt_names
+
+[alt_names]
+DNS.1=localhost
+IP.1=127.0.0.1
+```
+
+---
+
+# 11. Sign the server certificate
+
+Now our CA signs the CSR:
+
+```bash
+openssl x509 \
+  -req \
+  -in server.csr \
+  -CA ca.crt \
+  -CAkey ca.key \
+  -CAcreateserial \
+  -out server.crt \
+  -days 365 \
+  -sha256 \
+  -extfile server.ext
+```
+
+Now:
+
+```text
+tls-course/
+├── ca.key
+├── ca.crt
+├── ca.srl
+├── server.key
+├── server.csr
+├── server.crt
+└── server.ext
+```
+
+The important files are:
+
+```text
+ca.key       🔒 Root CA private key
+ca.crt       📜 Root CA certificate
+
+server.key   🔒 Server private key
+server.crt   📜 Server certificate
+```
+
+---
+
+# 12. Look at the server certificate
+
+Run:
+
+```bash
+openssl x509 \
+  -in server.crt \
+  -noout \
+  -subject \
+  -issuer \
+  -dates \
+  -ext subjectAltName
+```
+
+You should see something like:
+
+```text
+subject=C=IN, O=TLS Course, CN=localhost
+issuer=C=IN, O=TLS Course, CN=TLS Course Root CA
+
+X509v3 Subject Alternative Name:
+    DNS:localhost, IP Address:127.0.0.1
+```
+
+This is our chain:
+
+```text
+TLS Course Root CA
+       │
+       │ signed
+       ▼
+   localhost
+ certificate
+```
+
+---
+
+# 13. Verify the certificate manually
+
+This is a great command:
+
+```bash
+openssl verify \
+  -CAfile ca.crt \
+  server.crt
+```
+
+You should get:
+
+```text
+server.crt: OK
+```
+
+Think about what we just told OpenSSL:
+
+```text
+"Trust ca.crt as a CA,
+and verify server.crt against it."
+```
+
+It found:
+
+```text
+server.crt
+    │
+    │ signed by
+    ▼
+ca.crt
+    │
+    ▼
+trusted
+```
+
+---
+
+# 14. But your browser doesn't trust our CA
+
+This is intentional.
+
+Our CA is:
+
+```text
+TLS Course Root CA
+```
+
+Your Mac has no reason to trust it.
+
+So if we start an HTTPS server and connect normally, we'll get a trust error.
+
+That's exactly what we want to see.
+
+---
+
+# 15. Create a tiny HTTPS server
+
+Create:
+
+```bash
+cat > server.py <<'EOF'
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import ssl
+
+server = HTTPServer(("127.0.0.1", 8443), SimpleHTTPRequestHandler)
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(
+    certfile="server.crt",
+    keyfile="server.key",
+)
+
+server.socket = context.wrap_socket(
+    server.socket,
+    server_side=True,
+)
+
+print("HTTPS server running on https://localhost:8443")
+
+server.serve_forever()
+EOF
+```
+
+Run:
+
+```bash
+python3 server.py
+```
+
+You should see:
+
+```text
+HTTPS server running on https://localhost:8443
+```
+
+Your server is now listening on:
+
+```text
+https://localhost:8443
+```
+
+---
+
+# 16. Connect using curl
+
+Open another terminal.
+
+Run:
+
+```bash
+curl https://localhost:8443
+```
+
+You will likely get something similar to:
+
+```text
+curl: (60) SSL certificate problem:
+unable to get local issuer certificate
+```
+
+This is **good**.
+
+Our TLS connection is being rejected because:
+
+```text
+localhost certificate
+       │
+       │ signed by
+       ▼
+TLS Course Root CA
+       │
+       │
+       ▼
+❌ curl doesn't trust this CA
+```
+
+---
+
+# 17. This is the most important lesson here
+
+The certificate itself can be perfectly valid.
+
+The signature can be perfectly valid.
+
+The certificate can contain:
+
+```text
+localhost
+```
+
+And still:
+
+```text
+❌ connection rejected
+```
+
+because the client doesn't trust the CA.
+
+This is why we said earlier:
+
+> **Valid signature ≠ trusted certificate.**
+
+Trust is ultimately anchored in the client's configured trust store.
+
+---
+
+# 18. Let's explicitly tell curl to trust our CA
+
+We can do this without changing your Mac's global trust store.
+
+Run:
+
+```bash
+curl \
+  --cacert ca.crt \
+  https://localhost:8443
+```
+
+Now:
+
+```text
+curl
+ │
+ │ trust ca.crt
+ ▼
+TLS Course Root CA
+ │
+ │ signed
+ ▼
+localhost certificate
+ │
+ ▼
+TLS handshake
+ │
+ ▼
+HTTP
+```
+
+You should receive an HTTP response from your Python server.
+
+🎉
+
+You just built a working private HTTPS PKI.
+
+---
+
+# 19. Notice what `--cacert` means
+
+This:
+
+```bash
+curl --cacert ca.crt ...
+```
+
+does **not** mean:
+
+> "Ignore certificate validation."
+
+It's the opposite.
+
+It means:
+
+> "Use this certificate as a trusted CA."
+
+That's very different from:
+
+```bash
+curl -k https://localhost:8443
+```
+
+which disables normal certificate verification.
+
+Avoid thinking of `-k` as a solution to certificate problems.
+
+For learning, it's useful to see the difference:
+
+```text
+--cacert ca.crt
+     ↓
+"I trust this CA."
+```
+
+versus:
+
+```text
+-k
+     ↓
+"Don't verify the certificate properly."
+```
+
+---
+
+# 20. Let's inspect the actual TLS connection
+
+Run:
+
+```bash
+openssl s_client \
+  -connect localhost:8443 \
+  -servername localhost
+```
+
+You'll see your certificate:
+
+```text
+Certificate chain
+...
+```
+
+and information such as:
+
+```text
+Protocol
+Cipher
+Server certificate
+```
+
+You can also explicitly give OpenSSL your CA:
+
+```bash
+openssl s_client \
+  -connect localhost:8443 \
+  -servername localhost \
+  -CAfile ca.crt
+```
+
+Near the end you should see:
+
+```text
+Verify return code: 0 (ok)
+```
+
+That is extremely useful.
+
+---
+
+# 21. What just happened?
+
+Let's reconstruct the entire process.
+
+You ran:
+
+```text
+curl https://localhost:8443
+```
+
+The client contacted:
+
+```text
+127.0.0.1:8443
+```
+
+The server said:
+
+```text
+"I support TLS."
+```
+
+Then:
+
+```text
+Server
+  │
+  ├── server.crt
+  │
+  └── server.key
+```
+
+The certificate says:
+
+```text
+localhost
+   │
+   │ public key
+   │
+   └── signed by TLS Course Root CA
+```
+
+Curl initially said:
+
+```text
+"I don't trust TLS Course Root CA."
+```
+
+Therefore:
+
+```text
+❌ TLS verification failed
+```
+
+Then we gave curl:
+
+```text
+--cacert ca.crt
+```
+
+Now:
+
+```text
+curl
+  │
+  │ trusts
+  ▼
+TLS Course Root CA
+  │
+  │ signed
+  ▼
+localhost certificate
+  │
+  ▼
+✅ trusted
+```
+
+Then the TLS handshake could complete.
+
+---
+
+# 22. This is a miniature version of real HTTPS
+
+Our setup:
+
+```text
+              Our Root CA
+                   │
+                   │ signs
+                   ▼
+            localhost.crt
+                   │
+                   ▼
+              Python server
+                   │
+                   ▼
+                 curl
+```
+
+The real internet:
+
+```text
+                 Root CA
+                    │
+                    │
+                    ▼
+              Intermediate CA
+                    │
+                    │
+                    ▼
+              example.com
+                    │
+                    ▼
+               Web server
+                    │
+                    ▼
+                 Browser
+```
+
+Same fundamental trust model.
+
+The scale and operational complexity are different.
+
+---
+
+# 23. One thing we haven't done yet
+
+Our setup currently has:
+
+```text
+Root CA
+   │
+   └── localhost
+```
+
+Real production PKI normally looks more like:
+
+```text
+Root CA
+   │
+   ▼
+Intermediate CA
+   │
+   ▼
+Server certificate
+```
+
+We'll build that ourselves too.
+
+But before doing that, there's another very important concept.
+
+---
+
+# 24. Where are the actual encryption keys?
+
+Look at our files:
+
+```text
+ca.key
+server.key
+```
+
+Those are **private keys**.
+
+But when you connect with TLS, the actual traffic encryption uses **session keys derived during the handshake**.
+
+These are not simply:
+
+```text
+server.key
+```
+
+used to encrypt every HTTP request.
+
+Instead:
+
+```text
+server.key
+      │
+      │ authentication
+      ▼
+CertificateVerify
+
+ECDHE ephemeral keys
+      │
+      ▼
+shared secret
+      │
+      ▼
+TLS key schedule
+      │
+      ▼
+session traffic keys
+      │
+      ▼
+AES-GCM / ChaCha20-Poly1305
+      │
+      ▼
+HTTP
+```
+
+This distinction is fundamental.
+
+---
+
+# 25. Your current directory
+
+At this point you should have:
+
+```text
+tls-course/
+│
+├── ca.key          🔒 Root private key
+├── ca.crt          📜 Root certificate
+│
+├── server.key      🔒 Server private key
+├── server.csr      📄 Certificate request
+├── server.crt      📜 Server certificate
+├── server.ext      ⚙️ Certificate extensions
+│
+├── ca.srl
+└── server.py
+```
+
+You can inspect everything with:
+
+```bash
+ls -la
+```
+
+---
+
+# 26. A very important security habit
+
+Don't accidentally commit these into Git:
+
+```text
+❌ ca.key
+❌ server.key
+```
+
+For this learning directory, you could create:
+
+```bash
+cat > .gitignore <<'EOF'
+*.key
+*.srl
+EOF
+```
+
+The certificates are public information in principle:
+
+```text
+ca.crt
+server.crt
+```
+
+The private keys are not.
+
+---
+
+# 27. What we have now learned
+
+We started with:
+
+```text
+"I want HTTPS."
+```
+
+and actually built:
+
+```text
+                 Root CA
+                   │
+                signs
+                   │
+                   ▼
+          localhost certificate
+                   │
+                   ▼
+              HTTPS server
+                   │
+                   ▼
+                  curl
+```
+
+We saw a real trust failure:
+
+```text
+❌ unable to get local issuer certificate
+```
+
+and fixed it properly by giving the client the CA:
+
+```bash
+curl --cacert ca.crt https://localhost:8443
+```
+
+That's a much better learning experience than simply saying "certificates provide trust."
+
+---
+
+## Next: Lesson 8 — What exactly is inside a TLS certificate?
+
+We'll dissect `server.crt` field-by-field and then build the **full chain**:
+
+```text
+Root CA
+   ↓
+Intermediate CA
+   ↓
+localhost certificate
+```
+
+We'll also answer a subtle question:
+
+> **If the CA signs a certificate, why doesn't the CA's private key have to participate in every HTTPS connection?**
+
+That leads directly into the distinction between **certificate authentication, TLS key exchange, and session encryption**.
+
+---
