@@ -199,3 +199,244 @@ Just say:
 👉 *“Teach DFS template”*
 or
 👉 *“Start with problem 1 step-by-step”*
+
+----
+
+You’re absolutely right — **not all problems in that list are “pure DFS”**.
+Some are **naturally BFS**, some **DFS is optimal**, and some can be done with **both but one is preferred**.
+
+Let’s clean this up properly 👇
+
+---
+
+# 🧠 First: Clear Mental Model (VERY IMPORTANT)
+
+### When to use DFS vs BFS
+
+### ✅ DFS is natural when:
+
+* You need **path exploration**
+* You need **post-order computation (bottom-up)**
+* You track **global answer (diameter, max path, etc.)**
+* Tree **construction / modification**
+
+---
+
+### ✅ BFS is natural when:
+
+* You need **level-by-level**
+* Shortest path in **unweighted graph**
+* “First time you reach something” matters
+* Problems with **distance / levels**
+
+---
+
+# 🚀 Now: YOUR LIST — CLEAN SEPARATION
+
+---
+
+# ✅ PURE / NATURAL DFS PROBLEMS
+
+These are **best solved using DFS** (don’t force BFS here)
+
+### 🔹 Basic DFS
+
+* Binary Tree Preorder Traversal
+* Maximum Depth of Binary Tree
+* Invert Binary Tree
+* Univalued Binary Tree
+* Path Sum
+
+---
+
+### 🔹 DFS with Global / Post-order
+
+* Diameter of Binary Tree
+* Binary Tree Maximum Path Sum 🔥
+* Sum Root to Leaf Numbers
+* Path Sum III 🔥
+
+---
+
+### 🔹 DFS + BST Logic
+
+* Validate Binary Search Tree
+* Closest Binary Search Tree Value
+* Kth Smallest Element in BST *(DFS inorder)*
+* Inorder Successor in BST
+
+---
+
+### 🔹 DFS Construction / Modification
+
+* Convert Sorted Array to BST
+* Build Tree from Preorder + Inorder 🔥
+* Flatten Binary Tree to Linked List 🔥
+* Delete Nodes and Return Forest
+
+---
+
+### 🔹 Advanced DFS
+
+* Lowest Common Ancestor 🔥
+* Boundary of Binary Tree
+* Serialize & Deserialize Binary Tree 🔥
+* Recover Tree From Preorder Traversal
+* Height After Subtree Removal Queries 🔥
+* Sum of Distances in Tree 🔥 (Rerooting DP)
+
+---
+
+# 👉 Summary:
+
+👉 These are **true DFS mastery problems**
+
+---
+
+# ⚖️ CAN BE DONE WITH BOTH (DFS or BFS)
+
+These are where **you choose depending on style/interview**
+
+---
+
+### 🔹 Flexible Problems
+
+* Binary Tree Right Side View
+
+  * DFS → Right-first traversal
+  * BFS → Level order (most common)
+
+* Kth Smallest Element in BST
+
+  * DFS → Inorder (best)
+  * BFS → possible but unnecessary
+
+---
+
+# 👉 Recommendation:
+
+👉 Prefer **DFS for interviews** unless explicitly level-based
+
+---
+
+# 🔵 NATURAL BFS PROBLEMS
+
+These are **better / cleaner with BFS**
+
+---
+
+### 🔹 Level-Based Problems
+
+* Binary Tree Right Side View ✅ (BEST with BFS)
+* Count Complete Tree Nodes *(optimized BFS / binary search combo)*
+
+---
+
+### 🔹 Nested Structure
+
+* Nested List Weight Sum II
+
+  * BFS → level-wise weighting (cleanest)
+  * DFS → tricky (need depth tracking)
+
+---
+
+# ❌ NOT REALLY DFS/BFS CORE (Special Category)
+
+These use DFS internally but are more about **structure or math**
+
+* Count Complete Tree Nodes → binary search trick
+* Convert Sorted List to BST → divide & conquer
+* Boundary of Binary Tree → mixed traversal
+* Sum Root to Leaf Numbers → math + DFS
+
+---
+
+# 📊 FINAL CLEAN CLASSIFICATION
+
+```id="dfs-bfs-clean"
+PURE DFS:
+- Preorder Traversal
+- Max Depth
+- Invert Tree
+- Univalued Tree
+- Path Sum
+- Diameter
+- Validate BST
+- Closest Value
+- Kth Smallest (DFS preferred)
+- Sum Root to Leaf
+- Path Sum III
+- Convert Array → BST
+- Build Tree (Pre + In)
+- Flatten Tree
+- Delete Nodes → Forest
+- LCA
+- Max Path Sum
+- Boundary
+- Inorder Successor
+- Serialize/Deserialize
+- Recover Tree
+- Height After Removal
+- Sum of Distances
+
+BOTH (DFS/BFS):
+- Right Side View
+
+PURE BFS (Recommended):
+- Right Side View (best)
+- Nested List Weight Sum II
+
+SPECIAL / MIXED:
+- Count Complete Nodes
+- Convert Sorted List → BST
+```
+
+---
+
+# 🔥 Most Important Insight (for your interviews)
+
+👉 Interviewers expect:
+
+* DFS mastery for:
+
+  * Tree DP
+  * Path problems
+  * Global variables
+
+* BFS mastery for:
+
+  * Shortest path
+  * Level traversal
+
+---
+
+# 🎯 What You Should Do (Based on Your Goal)
+
+Since you're preparing for **Google L4/L5**:
+
+👉 Focus heavily on these DFS patterns:
+
+1. **Post-order DFS (most important)**
+2. **Path DFS**
+3. **DFS + Global variable**
+4. **DFS + HashMap (Path Sum III)**
+5. **Rerooting DFS (Sum of Distances)**
+
+---
+
+# 🚀 If you want next step
+
+I can give you:
+
+👉 **DFS Master Template (like your binary search template)**
+👉 With:
+
+* exact recursion pattern
+* when to use global variable
+* when to return value
+* Java templates for each pattern
+
+Just say:
+**"Give DFS master template"**
+
