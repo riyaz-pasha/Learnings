@@ -1,18 +1,18 @@
 # ☕ Java 8 Streams — EPAM Interview Prep Guide
 
-> A comprehensive reference guide covering Java 8 functional programming, Streams API, Collectors, Optional, Comparators, Collections Framework, and 52 coding interview problems with complete solutions.
+> A comprehensive reference guide covering Java 8 functional programming, Streams API, Collectors, Optional, Comparators, Collections Framework, Concurrency (`CompletableFuture`), tricky edge-case traps, modern Java (9–17) additions, and 62 coding interview problems with complete solutions.
 
 ## 🎯 Overview & Battle Plan
 
-EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparators, and functional programming**. This guide compiles all essential core concepts and 52 commonly asked interview coding problems.
+EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparators, Concurrency, and functional programming**. This guide compiles all essential core concepts, tricky edge-case traps, and 62 commonly asked interview coding problems.
 
 | Metric | Value |
 | :--- | :--- |
-| **Core Concept Modules** | 9 modules |
-| **Total Practice Problems** | 52 problems |
+| **Core Concept Modules** | 12 modules |
+| **Total Practice Problems** | 62 problems |
 | 🟢 **Easy Problems** | 11 |
-| 🟡 **Medium Problems** | 23 |
-| 🔴 **Hard Problems** | 18 |
+| 🟡 **Medium Problems** | 31 |
+| 🔴 **Hard Problems** | 20 |
 
 ## 📑 Table of Contents <a id="table-of-contents"></a>
 
@@ -27,11 +27,14 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
 - [⚖️ Comparator & Comparable](#comparator)
 - [λ Functional Interfaces](#functional)
 - [⚡ Parallel Streams](#parallel)
+- [⚡ CompletableFuture & Asynchronous Concurrency](#completable-future)
+- [⚠️ Common Interview Traps & Edge Cases](#traps-and-edge-cases)
+- [🚀 Modern Java (9–17) Stream Enhancements](#modern-java)
 - [⚡ Quick Cheat Sheet](#quick-cheat-sheet)
 
 ### Practice Problems by Category
 
-- [**Basic Streams** (10)](#basic-streams)
+- [**Basic Streams** (11)](#basic-streams)
   - [🟢 #1 Sum of all elements](#problem-1)
   - [🟢 #2 Filter even numbers](#problem-2)
   - [🟢 #3 Convert list to uppercase](#problem-3)
@@ -42,7 +45,8 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🟢 #8 Check if any/all/none match](#problem-8)
   - [🟢 #9 Flatten nested lists (flatMap)](#problem-9)
   - [🟢 #10 Join strings with delimiter](#problem-10)
-- [**Strings** (7)](#strings)
+  - [🟡 #55 Intersection and difference of two lists](#problem-55)
+- [**Strings** (11)](#strings)
   - [🟡 #11 Find duplicate characters in a string](#problem-11)
   - [🟡 #12 First non-repeating character](#problem-12)
   - [🟡 #13 Count vowels and consonants](#problem-13)
@@ -50,7 +54,11 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🟡 #15 Check if string is a palindrome](#problem-15)
   - [🟡 #16 Word frequency count](#problem-16)
   - [🔴 #17 Longest word in a sentence](#problem-17)
-- [**Numbers** (8)](#numbers)
+  - [🟡 #57 Parse a comma-separated key-value String into a Map](#problem-57)
+  - [🟡 #58 Find first repeating character in a String](#problem-58)
+  - [🔴 #59 Word frequency count from multi-line text or file](#problem-59)
+  - [🟡 #61 Find the longest palindrome word in a sentence](#problem-61)
+- [**Numbers** (9)](#numbers)
   - [🟢 #18 Find average of list](#problem-18)
   - [🟡 #19 Fibonacci using iterate](#problem-19)
   - [🟡 #20 Find prime numbers up to N](#problem-20)
@@ -59,7 +67,8 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🟡 #23 Partition numbers into even/odd](#problem-23)
   - [🟡 #24 Sum of digits using streams](#problem-24)
   - [🔴 #25 Running total (prefix sum)](#problem-25)
-- [**Objects & Employees** (7)](#objects-employees)
+  - [🟡 #54 Find all duplicate elements in a single pass](#problem-54)
+- [**Objects & Employees** (9)](#objects-employees)
   - [🟡 #26 Group employees by department](#problem-26)
   - [🟡 #27 Highest salary per department](#problem-27)
   - [🟡 #28 Average salary by department](#problem-28)
@@ -67,13 +76,16 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🟡 #30 Top 3 highest paid employees](#problem-30)
   - [🔴 #31 Department with highest average salary](#problem-31)
   - [🔴 #32 Employees with same salary](#problem-32)
-- [**Maps & Collections** (6)](#maps-collections)
+  - [🟡 #53 Find the N-th highest distinct salary](#problem-53)
+  - [🟡 #60 Partition and map only employee names by salary threshold](#problem-60)
+- [**Maps & Collections** (7)](#maps-collections)
   - [🟡 #33 Invert a Map](#problem-33)
   - [🟡 #34 Sort Map by value](#problem-34)
   - [🟡 #35 Merge two maps](#problem-35)
   - [🟡 #36 Find most frequent element](#problem-36)
   - [🔴 #37 Group anagrams together](#problem-37)
   - [🔴 #38 Count character frequency in a list of strings](#problem-38)
+  - [🟡 #56 Flatten a Map<K, List<V>> into a single distinct List](#problem-56)
 - [**Advanced** (7)](#advanced)
   - [🔴 #39 Custom Collector — Sum of squares](#problem-39)
   - [🔴 #40 Nested grouping](#problem-40)
@@ -82,7 +94,7 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🔴 #43 Transpose a matrix](#problem-43)
   - [🔴 #44 Sliding window maximum](#problem-44)
   - [🔴 #45 Longest consecutive sequence length](#problem-45)
-- [**EPAM Favorites** (7)](#epam-favorites)
+- [**EPAM Favorites** (8)](#epam-favorites)
   - [🟡 #46 List of Strings → Map<length, List<String>>](#problem-46)
   - [🟡 #47 Integer list to comma-separated string](#problem-47)
   - [🔴 #48 Find all pairs summing to target](#problem-48)
@@ -90,6 +102,7 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
   - [🔴 #50 Chained Optional operations](#problem-50)
   - [🔴 #51 Infinite stream with limit](#problem-51)
   - [🔴 #52 Collect to immutable map with transformation](#problem-52)
+  - [🔴 #62 Concurrent async service calls with CompletableFuture.allOf()](#problem-62)
 
 ---
 
@@ -109,6 +122,8 @@ EPAM coding rounds heavily test **Java 8 Streams, Collectors, Optional, Comparat
 | `partitioningBy(predicate)` | Collector | Splits stream into `Map<Boolean, List<T>>` |
 | `reduce(identity, accumulator)` | Terminal (Eager) | Folds stream elements into a single aggregate value |
 | `Optional.ofNullable(val)` | Utility | Wraps value safely, preventing `NullPointerException` |
+| `CompletableFuture.supplyAsync()` | Concurrency | Runs async supplier task in common `ForkJoinPool` |
+| `Collectors.teeing()` (Java 12+) | Collector | Computes two collectors concurrently in a single stream pass |
 
 ---
 
@@ -435,6 +450,203 @@ List<Integer> result = list.parallelStream()
 
 ---
 
+### ⚡ CompletableFuture & Asynchronous Concurrency <a id="completable-future"></a>
+
+Introduced in Java 8, `CompletableFuture<T>` provides non-blocking, composable, event-driven asynchronous programming.
+
+#### 1. Creation & Execution
+```java
+// Run task asynchronously returning a result
+CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+    return fetchFromDatabase();
+}, customExecutor); // Optional custom Executor; defaults to ForkJoinPool.commonPool()
+
+// Run task returning void
+CompletableFuture<Void> voidFuture = CompletableFuture.runAsync(() -> logEvent());
+```
+
+#### 2. Transforming & Chaining (thenApply vs thenCompose vs thenCombine)
+| Method | Input / Arguments | Equivalent to | Typical Use |
+| :--- | :--- | :--- | :--- |
+| `thenApply(Function<T, R>)` | Value `T` | `map` | Synchronously transform output |
+| `thenApplyAsync(...)` | Value `T` | Async `map` | Transform output in another thread |
+| `thenCompose(Function<T, CompletableFuture<R>>)` | Value `T` returning Future | `flatMap` | Chain dependent async call |
+| `thenCombine(otherFuture, BiFunction<T, U, V>)` | Two independent Futures | Zip / Combine | Execute two tasks in parallel and merge results |
+| `thenAccept(Consumer<T>)` | Value `T` returning void | Terminal action | Log, save, or notify |
+
+#### 3. Combining Multiple Futures
+```java
+CompletableFuture<A> f1 = CompletableFuture.supplyAsync(this::getA);
+CompletableFuture<B> f2 = CompletableFuture.supplyAsync(this::getB);
+CompletableFuture<C> f3 = CompletableFuture.supplyAsync(this::getC);
+
+// Wait for ALL futures to complete:
+CompletableFuture<Void> all = CompletableFuture.allOf(f1, f2, f3);
+all.thenRun(() -> {
+    A a = f1.join();
+    B b = f2.join();
+    C c = f3.join();
+});
+
+// Complete as soon as the FIRST future completes:
+CompletableFuture<Object> any = CompletableFuture.anyOf(f1, f2, f3);
+```
+
+#### 4. Resilient Error Handling
+```java
+future
+    // Return fallback value on exception:
+    .exceptionally(ex -> {
+        System.err.println("Failed: " + ex.getMessage());
+        return "Fallback Default";
+    })
+    // Or handle both success and error explicitly:
+    .handle((result, ex) -> {
+        if (ex != null) return "Handled: " + ex.getMessage();
+        return result.toUpperCase();
+    });
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+---
+
+### ⚠️ Common Interview Traps & Edge Cases <a id="traps-and-edge-cases"></a>
+
+These edge-case questions are frequently asked in EPAM senior technical rounds to evaluate deep understanding of JVM and stream internals.
+
+#### 1. The `Collectors.toMap()` NullPointerException Trap
+> **Question:** Why does the following code throw a `NullPointerException` even though `HashMap` permits null values?
+```java
+Map<String, String> map = list.stream()
+    .collect(Collectors.toMap(Person::getId, Person::getMiddleName)); // NPE if middleName is null!
+```
+**Root Cause:** Under the hood, `Collectors.toMap()` delegates to `Map.merge(key, value, merger)`. The contract of `Map.merge()` in Java specifies that if the new value is `null`, it immediately throws `NullPointerException`.
+
+**Safe Fix:** Collect using supplier, accumulator, and combiner:
+```java
+Map<String, String> safeMap = list.stream()
+    .collect(
+        HashMap::new,
+        (m, p) -> m.put(p.getId(), p.getMiddleName()),
+        HashMap::putAll
+    );
+```
+
+#### 2. The Stream Re-use Trap
+> **Question:** What happens if you run two terminal operations on the same stream reference?
+```java
+Stream<String> stream = list.stream().filter(s -> s.length() > 3);
+long count = stream.count();
+List<String> collected = stream.collect(Collectors.toList()); // Throws IllegalStateException!
+```
+**Fix:** Streams cannot be consumed twice. Use a `Supplier<Stream<T>>` to generate fresh streams on demand:
+```java
+Supplier<Stream<String>> streamSupplier = () -> list.stream().filter(s -> s.length() > 3);
+long count = streamSupplier.get().count();
+List<String> collected = streamSupplier.get().collect(Collectors.toList());
+```
+
+#### 3. Infinite Stream Hanging with `sorted()`
+> **Question:** Why does `Stream.iterate(1, n -> n + 1).filter(n -> n % 2 == 0).limit(5)` terminate, but adding `.sorted()` hangs indefinitely?
+```java
+Stream.iterate(1, n -> n + 1)
+      .sorted()    // HANGS FOREVER! Cannot sort an unbounded dataset
+      .limit(5)
+```
+**Explanation:** Intermediate operations are classified as **stateless** (`filter`, `map`, `peek`) vs **stateful** (`sorted`, `distinct`). A stateful operation like `sorted()` must consume the *entire* stream before it can yield its first element. On infinite streams, it never finishes.
+
+#### 4. The Java 9+ `peek()` Optimization Trap
+> **Question:** Does `Stream.of("a", "b", "c").peek(System.out::println).count()` print anything?
+**Answer:** In Java 8, it prints all 3 elements. In **Java 9+**, it prints **nothing**! In newer JDKs, `count()` inspects the stream flags; since the source is `StreamOpFlag.SIZED` and no intermediate operations alter the count, the JVM optimizes away the pipeline execution entirely.
+
+#### 5. `Arrays.asList()` vs `Collections.unmodifiableList()` vs `List.of()` (Java 9)
+| Feature | `Arrays.asList(...)` | `Collections.unmodifiableList(list)` | `List.of(...)` (Java 9+) |
+| :--- | :--- | :--- | :--- |
+| **Null values** | Allowed | Depends on wrapped list | ❌ Throws `NullPointerException` |
+| **Add / Remove** | ❌ `UnsupportedOperationException` | ❌ `UnsupportedOperationException` | ❌ `UnsupportedOperationException` |
+| **`set(index, val)`** | ✅ Allowed (mutates original array) | ❌ `UnsupportedOperationException` | ❌ `UnsupportedOperationException` |
+| **Underlying Changes** | Backed by array (reflects array changes) | Backed by original list (reflects changes!) | Truly immutable (independent value) |
+| **Memory Overhead** | Small wrapper | Wrapper object | Highly compact internal array |
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+---
+
+### 🚀 Modern Java (9–17) Stream Enhancements <a id="modern-java"></a>
+
+Top interviewers frequently ask: *"How would you improve this using modern Java features?"*
+
+#### 1. `takeWhile()` and `dropWhile()` (Java 9)
+Enables short-circuiting on sorted streams without traversing the rest of the stream:
+
+```java
+List<Integer> nums = Arrays.asList(2, 4, 6, 7, 8, 10);
+
+// takeWhile stops as soon as predicate fails (takes 2, 4, 6):
+List<Integer> evensBeforeOdd = nums.stream()
+    .takeWhile(n -> n % 2 == 0)
+    .collect(Collectors.toList()); // [2, 4, 6]
+
+// dropWhile discards elements while predicate is true, then takes the remainder:
+List<Integer> remainder = nums.stream()
+    .dropWhile(n -> n % 2 == 0)
+    .collect(Collectors.toList()); // [7, 8, 10]
+```
+
+#### 2. Three-Argument `Stream.iterate` (Java 9)
+Provides a clean functional equivalent to the classic for-loop:
+
+```java
+// Traditional: for (int i = 0; i < 10; i += 2)
+Stream.iterate(0, i -> i < 10, i -> i + 2)
+      .forEach(System.out::println); // 0, 2, 4, 6, 8
+```
+
+#### 3. `Optional.stream()` (Java 9)
+Effortlessly flattens collections containing Optionals without null checks or nested filters:
+
+```java
+List<Optional<String>> optionalList = Arrays.asList(
+    Optional.of("A"), Optional.empty(), Optional.of("B")
+);
+
+List<String> presentValues = optionalList.stream()
+    .flatMap(Optional::stream) // Unpacks non-empty Optionals
+    .collect(Collectors.toList()); // ["A", "B"]
+```
+
+#### 4. `Collectors.teeing()` (Java 12)
+Executes two downstream collectors simultaneously in a single stream pass and merges results via a `BiFunction`:
+
+```java
+// Find both Min and Max in ONE single stream pass:
+record MinMax(int min, int max) {}
+
+MinMax result = Stream.of(5, 2, 8, 1, 9, 3).collect(
+    Collectors.teeing(
+        Collectors.minBy(Integer::compareTo),
+        Collectors.maxBy(Integer::compareTo),
+        (minOpt, maxOpt) -> new MinMax(minOpt.orElse(0), maxOpt.orElse(0))
+    )
+); // MinMax[min=1, max=9]
+```
+
+#### 5. `Stream.toList()` (Java 16)
+Produces an unmodifiable list directly with lower memory overhead and cleaner syntax:
+
+```java
+// Java 8:
+List<String> list8 = stream.collect(Collectors.toList()); // Mutable ArrayList
+
+// Java 16+:
+List<String> list16 = stream.toList(); // Immutable, compact, no Collector boilerplate
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+---
+
 ## 💻 Practice Problems
 
 ### Basic Streams <a id="basic-streams"></a>
@@ -635,6 +847,37 @@ String result = names.stream()
 
 [↑ Back to Table of Contents](#table-of-contents)
 
+#### Problem 55: Intersection and difference of two lists <a id="problem-55"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Basic Streams
+
+**Problem Statement:**
+> Given two lists, find: 1) Common elements (intersection), and 2) Elements present in listA but not in listB (difference), in O(N+M) time.
+
+**Solution:**
+```java
+List<Integer> listA = Arrays.asList(1, 2, 3, 4, 5);
+List<Integer> listB = Arrays.asList(3, 4, 5, 6, 7);
+
+// Use a Set for O(1) membership lookups:
+Set<Integer> setB = new HashSet<>(listB);
+
+// 1. Intersection: elements present in both lists
+List<Integer> intersection = listA.stream()
+    .filter(setB::contains)
+    .collect(Collectors.toList());
+System.out.println(intersection); // [3, 4, 5]
+
+// 2. Difference: elements in listA but not in listB
+List<Integer> difference = listA.stream()
+    .filter(x -> !setB.contains(x))
+    .collect(Collectors.toList());
+System.out.println(difference); // [1, 2]
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
 ---
 
 ### Strings <a id="strings"></a>
@@ -788,6 +1031,118 @@ longest.ifPresent(System.out::println); // powerful
 // Get length too:
 int maxLen = Arrays.stream(sentence.split(" "))
     .mapToInt(String::length).max().getAsInt(); // 8
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 57: Parse a comma-separated key-value String into a Map <a id="problem-57"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Strings
+
+**Problem Statement:**
+> Given a string of key-value pairs formatted as 'name=Alice,dept=IT,country=India', parse it directly into a Map<String, String> using Streams.
+
+**Solution:**
+```java
+String input = "name=Alice,dept=IT,country=India,role=Architect";
+
+Map<String, String> resultMap = Arrays.stream(input.split(","))
+    .map(entry -> entry.split("=", 2))
+    .filter(arr -> arr.length == 2)
+    .collect(Collectors.toMap(
+        arr -> arr[0].trim(),
+        arr -> arr[1].trim(),
+        (existing, replace) -> existing // Merge strategy in case of duplicate keys
+    ));
+
+System.out.println(resultMap);
+// {country=India, role=Architect, name=Alice, dept=IT}
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 58: Find first repeating character in a String <a id="problem-58"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Strings
+
+**Problem Statement:**
+> Given a string, find the first repeating character preserving original encounter order.
+
+**Solution:**
+```java
+String text = "interview";
+
+Set<Character> seen = new HashSet<>();
+Optional<Character> firstRepeating = text.chars()
+    .mapToObj(c -> (char) c)
+    .filter(ch -> !seen.add(ch)) // First character for which add() fails
+    .findFirst();
+
+firstRepeating.ifPresent(System.out::println); 
+// Output: 'i' (as 'i' appears again at index 6)
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 59: Word frequency count from multi-line text or file <a id="problem-59"></a>
+
+- **Difficulty:** 🔴 Hard
+- **Category:** Strings
+
+**Problem Statement:**
+> Given a multi-line text string or stream of lines from a file, count word frequencies ignoring case and punctuation, sorted by frequency descending.
+
+**Solution:**
+```java
+List<String> lines = Arrays.asList(
+    "Java 8 Streams are powerful and concise.",
+    "Streams provide functional programming in Java.",
+    "Functional style in Java makes code clean."
+);
+
+Map<String, Long> wordCounts = lines.stream()
+    .flatMap(line -> Arrays.stream(line.toLowerCase().split("\\W+")))
+    .filter(word -> !word.isEmpty())
+    .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+// Sort by frequency descending:
+Map<String, Long> sortedByFreq = wordCounts.entrySet().stream()
+    .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+        .thenComparing(Map.Entry.comparingByKey()))
+    .collect(Collectors.toMap(
+        Map.Entry::getKey,
+        Map.Entry::getValue,
+        (e1, e2) -> e1,
+        LinkedHashMap::new
+    ));
+
+System.out.println(sortedByFreq);
+// Output: {java=3, functional=2, in=2, streams=2, and=1, are=1, clean=1, ...}
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 61: Find the longest palindrome word in a sentence <a id="problem-61"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Strings
+
+**Problem Statement:**
+> Given a sentence, find the longest word that is a palindrome. Return Optional.empty() if no palindrome exists.
+
+**Solution:**
+```java
+String sentence = "radar level noon racecar deified statistics";
+
+Optional<String> longestPalindrome = Arrays.stream(sentence.split("\\s+"))
+    .filter(w -> w.length() > 1)
+    .filter(w -> new StringBuilder(w).reverse().toString().equalsIgnoreCase(w))
+    .max(Comparator.comparingInt(String::length));
+
+longestPalindrome.ifPresent(System.out::println); 
+// Output: "racecar" or "deified" (length 7)
 ```
 
 [↑ Back to Table of Contents](#table-of-contents)
@@ -965,6 +1320,28 @@ List<Integer> prefixSum = nums.stream()
 
 [↑ Back to Table of Contents](#table-of-contents)
 
+#### Problem 54: Find all duplicate elements in a single pass <a id="problem-54"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Numbers
+
+**Problem Statement:**
+> From a list of integers containing duplicates, find all duplicate numbers in a single pass O(n) without full frequency grouping.
+
+**Solution:**
+```java
+List<Integer> numbers = Arrays.asList(1, 2, 3, 2, 4, 5, 3, 6, 1, 7);
+
+Set<Integer> seen = new HashSet<>();
+Set<Integer> duplicates = numbers.stream()
+    .filter(n -> !seen.add(n)) // Set.add returns false if element already exists
+    .collect(Collectors.toSet());
+
+System.out.println(duplicates); // [1, 2, 3]
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
 ---
 
 ### Objects & Employees <a id="objects-employees"></a>
@@ -1128,6 +1505,69 @@ sameSalary.entrySet().stream()
 
 [↑ Back to Table of Contents](#table-of-contents)
 
+#### Problem 53: Find the N-th highest distinct salary <a id="problem-53"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Objects & Employees
+
+**Problem Statement:**
+> Given a list of employees, find the N-th highest distinct salary. If there are fewer than N distinct salaries, handle it gracefully using Optional.
+
+**Solution:**
+```java
+List<Employee> employees = Arrays.asList(
+    new Employee(1, "Alice", "IT", 75000),
+    new Employee(2, "Bob", "HR", 60000),
+    new Employee(3, "Charlie", "IT", 90000),
+    new Employee(4, "David", "IT", 90000), // Duplicate highest
+    new Employee(5, "Eva", "Finance", 80000)
+);
+
+int n = 2; // Find 2nd highest distinct salary
+
+Optional<Double> nthSalary = employees.stream()
+    .map(Employee::getSalary)
+    .distinct()
+    .sorted(Comparator.reverseOrder())
+    .skip(n - 1)
+    .findFirst();
+
+nthSalary.ifPresent(s -> System.out.println(n + "th highest salary: " + s));
+// Output: 80000.0 (Correctly skips duplicate 90000)
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 60: Partition and map only employee names by salary threshold <a id="problem-60"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Objects & Employees
+
+**Problem Statement:**
+> Given a list of employees, partition them by salary > 70000, but collect only a List of Employee names in each partition instead of full Employee objects.
+
+**Solution:**
+```java
+List<Employee> employees = Arrays.asList(
+    new Employee(1, "Alice", "IT", 75000),
+    new Employee(2, "Bob", "HR", 50000),
+    new Employee(3, "Charlie", "IT", 90000),
+    new Employee(4, "Diana", "Finance", 65000)
+);
+
+// Use partitioningBy with downstream mapping collector:
+Map<Boolean, List<String>> partitionedNames = employees.stream()
+    .collect(Collectors.partitioningBy(
+        e -> e.getSalary() > 70000,
+        Collectors.mapping(Employee::getName, Collectors.toList())
+    ));
+
+System.out.println("High Earners: " + partitionedNames.get(true));  // [Alice, Charlie]
+System.out.println("Standard: " + partitionedNames.get(false));     // [Bob, Diana]
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
 ---
 
 ### Maps & Collections <a id="maps-collections"></a>
@@ -1264,6 +1704,33 @@ Map<Character, Long> charFreq = words.stream()
     .mapToObj(c -> (char) c)
     .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 // {h=1, e=1, l=3, o=2, w=1, r=1, d=1, j=1, a=2, v=1}
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 56: Flatten a Map<K, List<V>> into a single distinct List <a id="problem-56"></a>
+
+- **Difficulty:** 🟡 Medium
+- **Category:** Maps & Collections
+
+**Problem Statement:**
+> Given a map where each key contains a list of items (e.g., department to project codes), flatten all values into a single unique list.
+
+**Solution:**
+```java
+Map<String, List<String>> deptProjects = new HashMap<>();
+deptProjects.put("IT", Arrays.asList("Cloud", "AI", "DevOps"));
+deptProjects.put("HR", Arrays.asList("Payroll", "Recruiting"));
+deptProjects.put("R&D", Arrays.asList("AI", "Quantum")); // Note duplicate "AI"
+
+List<String> allDistinctProjects = deptProjects.values().stream()
+    .flatMap(Collection::stream)
+    .distinct()
+    .sorted()
+    .collect(Collectors.toList());
+
+System.out.println(allDistinctProjects);
+// [AI, Cloud, DevOps, Payroll, Quantum, Recruiting]
 ```
 
 [↑ Back to Table of Contents](#table-of-contents)
@@ -1591,6 +2058,46 @@ Map<String, String> immutable = employees.stream()
         Employee::getName,
         e -> e.getDept() + "-" + e.getSalary()
     ));
+```
+
+[↑ Back to Table of Contents](#table-of-contents)
+
+#### Problem 62: Concurrent async service calls with CompletableFuture.allOf() <a id="problem-62"></a>
+
+- **Difficulty:** 🔴 Hard
+- **Category:** EPAM Favorites
+
+**Problem Statement:**
+> Fetch user profile, order history, and loyalty points concurrently from 3 remote services. Combine the results safely with exception fallback.
+
+**Solution:**
+```java
+// Simulated async remote calls:
+Supplier<String> fetchUser = () -> { sleep(100); return "User: Alice"; };
+Supplier<List<String>> fetchOrders = () -> { sleep(120); return Arrays.asList("Order-101", "Order-102"); };
+Supplier<Integer> fetchPoints = () -> { 
+    if (Math.random() > 0.5) throw new RuntimeException("Points Service Timeout");
+    return 450; 
+};
+
+CompletableFuture<String> userFuture = CompletableFuture.supplyAsync(fetchUser);
+CompletableFuture<List<String>> ordersFuture = CompletableFuture.supplyAsync(fetchOrders);
+CompletableFuture<Integer> pointsFuture = CompletableFuture.supplyAsync(fetchPoints)
+    .exceptionally(ex -> {
+        System.err.println("Fallback triggered for points: " + ex.getMessage());
+        return 0; // Graceful fallback value
+    });
+
+// Wait for all 3 futures concurrently:
+CompletableFuture<Void> allDone = CompletableFuture.allOf(userFuture, ordersFuture, pointsFuture);
+
+// Join and assemble aggregate response:
+allDone.thenRun(() -> {
+    String user = userFuture.join();
+    List<String> orders = ordersFuture.join();
+    int points = pointsFuture.join();
+    System.out.println("Aggregated: " + user + ", Orders=" + orders + ", Points=" + points);
+}).join();
 ```
 
 [↑ Back to Table of Contents](#table-of-contents)
