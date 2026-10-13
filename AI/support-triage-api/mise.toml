@@ -1,0 +1,10 @@
+[tools]
+python = "3.13"
+
+[tasks.install]
+description = "Install pinned Python and sync dependencies with uv"
+run = "mise install && uv sync"
+
+[tasks.dev]
+description = "Run the API locally with auto-reload"
+run = "uv run uvicorn main:app --reload --port 8000"
