@@ -1200,3 +1200,748 @@ If you want, I can follow up with a short quiz on this, or trace compression and
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# DSU: Rank vs Size, and Path Compression (Recursion vs Loop)
+
+---
+
+# PART 1: Union by Rank vs Union by Size
+
+## 1.1 The Shared Goal
+
+Both rules answer one question when merging two trees: **which root becomes the parent?**
+
+The goal is to keep trees **short**, because `find` costs the height of the tree.
+
+Both rules say: **"Hang the weaker tree under the stronger tree."** They only differ in how they measure "weaker."
+
+| | Union by Size | Union by Rank |
+|---|---|---|
+| Measures | Number of nodes in the tree | An upper bound on the tree's height |
+| Stored in | `size[root]` | `rank[root]` |
+| Starts at | 1 | 0 |
+| Weaker tree | Fewer nodes | Lower rank |
+
+---
+
+## 1.2 Union by Size
+
+```java
+int[] parent, size;
+
+boolean union(int a, int b) {
+    int ra = find(a), rb = find(b);
+    if (ra == rb) return false;
+
+    if (size[ra] < size[rb]) { int t = ra; ra = rb; rb = t; } // ra = bigger
+    parent[rb] = ra;
+    size[ra] += size[rb];
+    return true;
+}
+```
+
+**Why it keeps trees short (the doubling argument):**
+
+A node gets deeper only when its tree is hung under another root. That only happens when its tree is the smaller one. So the merged tree is at least **2×** the size of the node's old tree.
+
+```
+node's tree size:  1 → 2 → 4 → 8 → ... → n
+node's depth:      0   1   2   3        ≤ log₂ n
+```
+
+**Result:** height ≤ log₂ n.
+
+---
+
+## 1.3 Union by Rank
+
+Rank is like a **height estimate**.
+
+```java
+int[] parent, rank;      // rank starts at 0 for every node
+
+boolean union(int a, int b) {
+    int ra = find(a), rb = find(b);
+    if (ra == rb) return false;
+
+    if (rank[ra] < rank[rb]) {
+        parent[ra] = rb;                 // lower rank goes under higher rank
+    } else if (rank[ra] > rank[rb]) {
+        parent[rb] = ra;
+    } else {                             // tie
+        parent[rb] = ra;
+        rank[ra]++;                      // only a tie increases rank
+    }
+    return true;
+}
+```
+
+**Key rule:** rank goes up **only when two trees of equal rank merge**. If ranks differ, the taller tree's height does not change, so rank stays the same.
+
+### Trace
+
+```
+union(0,1): both rank 0 → tie → parent[1]=0, rank[0]=1
+union(2,3): both rank 0 → tie → parent[3]=2, rank[2]=1
+union(0,2): both rank 1 → tie → parent[2]=0, rank[0]=2
+
+        0  (rank 2)
+       / \
+      1   2  (rank 1)
+          |
+          3
+```
+
+Height is 2, and rank is 2. They match.
+
+### Why Rank Is Only an Upper Bound
+
+Path compression **flattens** trees but never lowers `rank`.
+
+```
+find(3) with compression:
+
+        0  (rank 2)            Real height now = 1
+      / | \                    But rank[0] is still 2
+     1  2  3
+```
+
+So after compression, rank is **not** the real height. It is a "how tall it could have been" number, a kind of age. That is fine, because we only use it to compare roots.
+
+### Why Rank Gives log n
+
+**Claim:** a root with rank `r` has at least **2ʳ nodes**.
+
+- Rank 0: 1 node = 2⁰. ✔
+- Rank only grows to `r+1` when two rank-`r` trees merge. Each has ≥ 2ʳ nodes. So the new tree has ≥ 2·2ʳ = 2ʳ⁺¹. ✔
+
+So 2^rank ≤ n, which means **rank ≤ log₂ n**. Height is bounded the same way.
+
+---
+
+## 1.4 When Rank and Size Choose Differently
+
+```
+Tree A: rank 1, size 5          Tree B: rank 2, size 4
+
+      a                               p
+    / / \ \                          / \
+   b c  d  e                        q   r
+                                        |
+                                        s
+```
+
+**By rank:** A goes under B (rank 1 < 2). Deepest node = depth 2.
+
+```
+        p
+      / | \
+     q  r  a
+        |  /|\ \
+        s  b c d e         height 2
+```
+
+**By size:** B goes under A (4 < 5). Deepest node = depth 3.
+
+```
+          a
+     / / / | \
+    b c d  e  p
+             / \
+            q   r
+                |
+                s           height 3
+```
+
+Size gave a slightly taller tree here. But it is still within the log n bound (log₂ 9 ≈ 3.17), so complexity does not change.
+
+---
+
+## 1.5 Side-by-Side Comparison
+
+| Point | Size | Rank |
+|---|---|---|
+| Complexity (with compression) | O(α(n)) | O(α(n)) |
+| Height bound (alone) | ≤ log₂ n | ≤ log₂ n |
+| Tells you component size? | **Yes, for free** | No (needs a separate array) |
+| Exact after path compression? | **Yes, always exact** | No, only an upper bound |
+| Update rule | Always `size[ra] += size[rb]` | Only on ties |
+| Memory | `int[]` | Can be a `byte[]` (rank ≤ 31) |
+| Used in the classic α(n) proof | Works | **Yes (Tarjan's original analysis)** |
+| Interview preference | **Most common** | Common in textbooks |
+
+**Why size stays exact:** compression changes *who points to whom* inside a set, but it never changes *which nodes are in the set*. So the count of nodes is always right.
+
+### Which One Should You Use?
+
+- **Default: use size.** Many problems need "size of the group" anyway (largest island, component size).
+- Use rank if a textbook or interviewer asks for it, or if you want the smallest memory.
+- If the problem doesn't need sizes and you want less code, either one is fine.
+
+---
+
+## 1.6 Bonus: The Compact "Negative Size" Trick
+
+Store the size **inside the parent array** using a negative number at roots.
+
+```java
+int[] p;     // p[x] < 0 → x is a root, and -p[x] is its size
+
+DSU(int n) { p = new int[n]; Arrays.fill(p, -1); }
+
+int find(int x) {
+    return p[x] < 0 ? x : (p[x] = find(p[x]));
+}
+
+boolean union(int a, int b) {
+    a = find(a); b = find(b);
+    if (a == b) return false;
+    if (p[a] > p[b]) { int t = a; a = b; b = t; }  // p[a] more negative = bigger
+    p[a] += p[b];
+    p[b] = a;
+    return true;
+}
+
+int sizeOf(int x) { return -p[find(x)]; }
+```
+
+One array instead of two. It is popular in competitive programming.
+
+---
+
+## 1.7 Common Rank/Size Mistakes
+
+| Mistake | Fix |
+|---|---|
+| Updating `rank` on every union | Only increment on a **tie** |
+| Updating `size`/`rank` of a non-root | Always work on `ra` and `rb` (the roots) |
+| Reading `rank[x]` for a non-root | Only roots hold meaningful values |
+| Lowering `rank` during compression | Don't. It is an upper bound by design. |
+| Merging before checking `ra == rb` | Always return early, or `size` will double count |
+
+---
+
+# PART 2: Path Compression (Recursion vs While Loop)
+
+## 2.1 The Idea Again
+
+`find(x)` walks up to the root. On the way, we have learned who the root is. So we **reuse that knowledge** and point nodes closer to the root.
+
+There are three popular ways to do it:
+
+| Style | Passes | Result |
+|---|---|---|
+| Recursive full compression | Down then back up | Every node on the path → root |
+| Iterative two-pass | 2 loops | Every node on the path → root |
+| Iterative path halving / splitting | 1 loop | Path length roughly halved |
+
+We'll use one running example. The chain:
+
+```
+5 → 4 → 3 → 2 → 1 → 0      (0 is the root)
+
+parent = [0, 0, 1, 2, 3, 4]
+```
+
+---
+
+## 2.2 Style 1: Recursive Full Compression
+
+```java
+int find(int x) {
+    if (parent[x] != x) {
+        parent[x] = find(parent[x]);   // compress on the way back
+    }
+    return parent[x];
+}
+```
+
+Or as a compact one-liner:
+
+```java
+int find(int x) {
+    return parent[x] == x ? x : (parent[x] = find(parent[x]));
+}
+```
+
+### How It Works: Two Phases
+
+**Phase 1: going down.** Each call asks its parent "who is the root?" Nothing is changed yet.
+
+**Phase 2: coming back up.** The root's answer travels back. Each call **assigns** that answer to `parent[x]`.
+
+```
+find(5)
+ └─ find(4)
+     └─ find(3)
+         └─ find(2)
+             └─ find(1)
+                 └─ find(0)  → parent[0]==0 → returns 0     ← BASE CASE
+
+Coming back:
+   find(1): parent[1] = 0   return 0
+   find(2): parent[2] = 0   return 0
+   find(3): parent[3] = 0   return 0
+   find(4): parent[4] = 0   return 0
+   find(5): parent[5] = 0   return 0
+```
+
+**Result:**
+
+```
+        0
+   / / | \ \
+  1 2  3  4  5          fully flat, height 1
+```
+
+### The Most Common Bug
+
+```java
+// WRONG: no compression happens at all
+int find(int x) {
+    if (parent[x] == x) return x;
+    return find(parent[x]);        // result is never stored
+}
+```
+
+The assignment `parent[x] = ...` is the *entire* compression step.
+
+### The Danger: Stack Overflow
+
+Recursion depth = path length. On a long chain (say 10⁵ or 10⁶ nodes), Java can throw `StackOverflowError`. Default stack depth is typically only some thousands to tens of thousands of frames.
+
+**When recursion is safe:**
+- You also use union by size/rank (height ≤ log n, so depth ≤ ~20-30).
+- Input is small.
+
+**When it is risky:**
+- You use compression **without** union by size/rank.
+- You have a very large input and a skewed union order.
+
+---
+
+## 2.3 Style 2: Iterative Two-Pass (While Loops)
+
+```java
+int find(int x) {
+    // Pass 1: find the root
+    int root = x;
+    while (parent[root] != root) {
+        root = parent[root];
+    }
+    // Pass 2: point everyone on the path to the root
+    while (parent[x] != root) {
+        int next = parent[x];     // save the next node BEFORE overwriting
+        parent[x] = root;
+        x = next;
+    }
+    return root;
+}
+```
+
+### Trace on `find(5)`
+
+```
+Pass 1: 5 → 4 → 3 → 2 → 1 → 0.  root = 0
+
+Pass 2:
+  x=5: parent[5]=4 ≠ 0 → next=4, parent[5]=0, x=4
+  x=4: parent[4]=3 ≠ 0 → next=3, parent[4]=0, x=3
+  x=3: parent[3]=2 ≠ 0 → next=2, parent[3]=0, x=2
+  x=2: parent[2]=1 ≠ 0 → next=1, parent[2]=0, x=1
+  x=1: parent[1]=0 == root → stop
+
+Final: all nodes → 0. Fully flat.
+```
+
+### The Key Detail: Save `next` First
+
+```java
+// WRONG: you lose the way up
+parent[x] = root;
+x = parent[x];          // this is now root! loop ends after one step
+```
+
+You must remember where to go **before** you overwrite the pointer.
+
+**Pros:** no recursion, full flattening.
+**Cons:** two loops, a bit longer code.
+
+---
+
+## 2.4 Style 3: Path Halving (One Pass, Most Popular in Practice)
+
+```java
+int find(int x) {
+    while (parent[x] != x) {
+        parent[x] = parent[parent[x]];   // jump to grandparent
+        x = parent[x];                   // move to that grandparent
+    }
+    return x;
+}
+```
+
+Every other node on the path is skipped, and the path length is about **halved**.
+
+### Trace on `find(5)`
+
+```
+parent: 1→0, 2→1, 3→2, 4→3, 5→4
+
+x=5: parent[5] = parent[4] = 3;  x = 3
+x=3: parent[3] = parent[2] = 1;  x = 1
+x=1: parent[1] = parent[0] = 0;  x = 0
+x=0: root → stop
+
+Result:  5→3, 3→1, 1→0     (4→3 and 2→1 are unchanged)
+
+        0
+        |
+        1
+       / \
+      2   3
+         / \
+        4   5          height 3 (was 5)
+```
+
+It is not fully flat. But the next `find` on this path is even shorter, and the asymptotic bound is the **same** as full compression.
+
+**Pros:** one pass, O(1) extra space, no recursion, very fast in practice.
+**Cons:** a single call does not flatten everything.
+
+---
+
+## 2.5 Style 3b: Path Splitting (Cousin of Halving)
+
+```java
+int find(int x) {
+    while (parent[x] != x) {
+        int next = parent[x];
+        parent[x] = parent[next];     // point to grandparent
+        x = next;                     // move one step (not two)
+    }
+    return x;
+}
+```
+
+Difference from halving: halving moves to the **grandparent**, splitting moves to the **parent**. So splitting updates **every** node on the path (each one now points to its grandparent).
+
+### Trace on `find(5)`
+
+```
+x=5: next=4; parent[5]=parent[4]=3; x=4
+x=4: next=3; parent[4]=parent[3]=2; x=3
+x=3: next=2; parent[3]=parent[2]=1; x=2
+x=2: next=1; parent[2]=parent[1]=0; x=1
+x=1: next=0; parent[1]=parent[0]=0; x=0
+stop
+
+Result: 5→3, 4→2, 3→1, 2→0, 1→0
+
+       0
+      / \
+     1   2
+     |   |
+     3   4
+     |
+     5            height 3
+```
+
+---
+
+## 2.6 All Three Compared on the Same Chain
+
+Start: `5→4→3→2→1→0`
+
+```
+Full compression:     Path halving:         Path splitting:
+
+      0                   0                     0
+ / / | \ \                |                    / \
+1 2  3  4 5               1                   1   2
+                         / \                  |   |
+height 1                2   3                 3   4
+                           / \                |
+                          4   5               5
+                         height 3            height 3
+```
+
+| Style | Passes | Extra space | Recursion? | Flatness after 1 call | Amortized bound |
+|---|---|---|---|---|---|
+| Recursive full | 1 (down + up) | O(h) stack | Yes | Perfect | O(α(n)) |
+| Iterative two-pass | 2 | O(1) | No | Perfect | O(α(n)) |
+| Path halving | 1 | O(1) | No | Partial | O(α(n)) |
+| Path splitting | 1 | O(1) | No | Partial | O(α(n)) |
+
+**All four give the same amortized complexity** when combined with union by size/rank. The choice is about style, safety, and speed.
+
+---
+
+## 2.7 Decision Guide
+
+```mermaid
+flowchart TD
+    A[Writing find] --> B{Need to avoid<br/>recursion depth risk?}
+    B -- Yes --> C{Want max flattening<br/>per call?}
+    B -- No, union by size is used --> R[Recursive one-liner<br/>shortest code]
+    C -- Yes --> T[Iterative two-pass]
+    C -- No --> H[Path halving<br/>fastest and simplest]
+```
+
+**My recommendation:**
+- **Interviews and LeetCode:** use the **recursive one-liner** with union by size. It is short and safe at that depth.
+- **Production or huge inputs:** use **path halving**.
+- **Weighted/parity DSU:** you usually need **recursion** (or a careful two-pass), because you must update a weight using the parent's already-updated weight on the way back up.
+
+---
+
+## 2.8 Why Weighted DSU Likes Recursion
+
+```java
+String find(String x) {
+    String p = parent.get(x);
+    if (!p.equals(x)) {
+        String root = find(p);                         // p is now compressed: weight[p] = p/root
+        weight.put(x, weight.get(x) * weight.get(p));  // x/p * p/root = x/root
+        parent.put(x, root);
+    }
+    return parent.get(x);
+}
+```
+
+The "coming back up" phase is the natural moment to combine weights. A single-pass loop like path halving can't easily do this, because it never has the root's relation ready when it needs it.
+
+---
+
+## 2.9 Does Compression Change `size`, `rank`, or `components`?
+
+| Value | Effect of compression |
+|---|---|
+| `size[root]` | Unchanged (still exact) |
+| `rank[root]` | Unchanged (becomes an upper bound, not the real height) |
+| `components` | Unchanged (no sets merged) |
+| `parent[]` of non-roots | **Changed (this is the point)** |
+| Roots | Never change during `find` |
+
+**Why rollback DSU skips compression:** compression rewrites many `parent` entries. To undo, you would have to log every one. Rollback DSU uses union by size only and accepts O(log n).
+
+---
+
+## 2.10 Quick Self-Test
+
+1. *In rank, when does rank increase?* Only when two trees of **equal** rank merge.
+2. *Why is size exact after compression but rank is not?* Compression does not change set membership, but it does lower real heights.
+3. *Why does the recursive `find` need the assignment?* The assignment `parent[x] = find(parent[x])` is the compression. Without it, you just walk.
+4. *What is the danger of recursive `find`?* Stack overflow on long chains when union by size/rank is missing.
+5. *Path halving vs splitting?* Halving jumps to the grandparent and skips a node. Splitting steps to the parent and updates every node.
+6. *Do all styles have the same big-O?* Yes, with union by size/rank, all are O(α(n)) amortized.
+
+---
+
+## 2.11 One-Page Summary
+
+```
+RANK vs SIZE
+  Size: bigger node-count wins.   Always exact.   Gives component size.   ← default
+  Rank: higher "height bound" wins. Increment ONLY on ties. Upper bound after compression.
+  Both: height ≤ log n.  With compression: O(α(n)).
+
+PATH COMPRESSION
+  Recursive:   parent[x] = find(parent[x])        short, needs depth safety
+  Two-pass:    find root, then re-point everyone  flat, no recursion
+  Halving:     parent[x] = parent[parent[x]]; x = parent[x]    1 pass, fast
+  Splitting:   next = parent[x]; parent[x] = parent[next]; x = next
+
+  Rule: ALWAYS save the "next" node before overwriting a pointer.
+```
+
+If you want to lock this in, I can give you a mini exercise set. For example: predict the parent array after a sequence of unions and finds with both rank and halving, then I check your answer.
+
+
+
+
+
+
+
+
+
+
+
+
+# Making `union` by Size Clear
+
+The confusing part is the **swap trick**. Let's remove it and name things clearly.
+
+## The Original (Why It Confuses)
+
+```java
+if (size[ra] < size[rb]) { int t = ra; ra = rb; rb = t; } // ra = bigger
+parent[rb] = ra;
+size[ra] += size[rb];
+```
+
+Problems:
+- `ra` and `rb` change meaning after the swap. Before: "root of a". After: "bigger root".
+- The three-line swap hides the real idea.
+
+## Clear Version 1: Descriptive Names, No Swap
+
+```java
+boolean union(int a, int b) {
+    int rootA = find(a);
+    int rootB = find(b);
+
+    // Step 1: already in the same group? Nothing to do.
+    if (rootA == rootB) return false;
+
+    // Step 2: smaller tree goes under the bigger tree.
+    if (size[rootA] < size[rootB]) {
+        parent[rootA] = rootB;          // A is smaller → A hangs under B
+        size[rootB] += size[rootA];     // B grew
+    } else {
+        parent[rootB] = rootA;          // B is smaller (or equal) → B hangs under A
+        size[rootA] += size[rootB];     // A grew
+    }
+    return true;
+}
+```
+
+Read it as plain English:
+
+> "Find both leaders. If same, stop. Otherwise, the smaller group's leader points to the bigger group's leader, and the bigger group's size grows."
+
+Each branch does exactly two things: **link**, then **update size**. Names never change meaning.
+
+## Clear Version 2: Use `big` and `small`
+
+This is the same logic, but the swap now has a clear purpose because the names say what they are.
+
+```java
+boolean union(int a, int b) {
+    int big   = find(a);
+    int small = find(b);
+
+    if (big == small) return false;          // already connected
+
+    if (size[big] < size[small]) {           // oops, we guessed wrong → swap
+        int temp = big;
+        big = small;
+        small = temp;
+    }
+
+    parent[small] = big;                     // small hangs under big
+    size[big] += size[small];                // big absorbs small's nodes
+    return true;
+}
+```
+
+Here is the trick to remember: **we guess `a`'s root is bigger, then fix the guess if wrong.** After the `if`, `big` is really the bigger one.
+
+## Clear Version 3: Helper Methods (Cleanest to Read)
+
+```java
+boolean union(int a, int b) {
+    int rootA = find(a);
+    int rootB = find(b);
+    if (rootA == rootB) return false;
+
+    if (size[rootA] < size[rootB]) {
+        attach(rootA, rootB);   // attach smaller under bigger
+    } else {
+        attach(rootB, rootA);
+    }
+    return true;
+}
+
+// child root goes under parent root
+private void attach(int childRoot, int parentRoot) {
+    parent[childRoot] = parentRoot;
+    size[parentRoot] += size[childRoot];
+}
+```
+
+Now `union` reads like a sentence, and `attach` has one job.
+
+## Walk-Through Example
+
+```
+size = [1, 1, 1, 1, 1]     parent = [0, 1, 2, 3, 4]
+```
+
+**`union(0, 1)`**
+```
+rootA = 0, rootB = 1.   size[0]=1, size[1]=1   → not (1 < 1) → else branch
+parent[1] = 0,  size[0] = 2
+
+   0
+   |
+   1
+```
+
+**`union(2, 0)`**
+```
+rootA = 2, rootB = 0.   size[2]=1, size[0]=2   → 1 < 2 → first branch
+parent[2] = 0,  size[0] = 3
+
+     0
+    / \
+   1   2
+```
+
+**`union(3, 4)`**
+```
+equal sizes → else branch → parent[4] = 3, size[3] = 2
+```
+
+**`union(0, 3)`**
+```
+rootA = 0 (size 3), rootB = 3 (size 2).   3 < 2? No → else branch
+parent[3] = 0,  size[0] = 5
+
+       0
+     / | \
+    1  2  3
+          |
+          4
+```
+
+The small group (size 2) went under the big group (size 3). That is exactly the rule.
+
+## Common Confusions, Cleared
+
+| Confusion | Answer |
+|---|---|
+| "Why compare `size[rootA]`, not `size[a]`?" | Size is only valid at **roots**. `a` may be a deep node. |
+| "Why `<` and not `<=`?" | On a tie, either choice is fine. `<` sends ties to the `else` branch (B under A). |
+| "Why `size[big] += size[small]`, not the reverse?" | The big root is the new root. It now owns all the nodes. |
+| "Does `size[small]` need cleanup?" | No. It is never read again, because `small` is no longer a root. |
+| "Why check `rootA == rootB` first?" | Without it, you would add a group's size to itself and corrupt `size`. |
+
+## Pick One and Stick With It
+
+- **Interviews:** Version 1 is the safest. No swap, easy to explain on a whiteboard.
+- **Competitive coding:** the compact swap version is fine once you understand it.
+- **Real projects:** Version 3 with a helper method is the most readable.
+
+Whichever you pick, the idea is one sentence: **link the smaller root under the bigger root, then add the sizes.**
+
