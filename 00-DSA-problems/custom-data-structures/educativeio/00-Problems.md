@@ -189,3 +189,548 @@ My recommendation: solve the 11 core problems in the order given in the final se
 
 One important interview principle: don't memorize each implementation as an isolated solution. For every problem, ask which operations must be fast, which information must be maintained, and which combination of structures provides those guarantees. That reasoning is the real Custom Data Structures pattern.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Since you've already solved those 13 problems, I wouldn't recommend adding dozens of random design problems. Your next step should be to cover the important design techniques that your current list doesn't fully exercise.
+
+For Custom Data Structures, the most valuable missing skills are:
+
+- Designing a structure that supports multiple access patterns efficiently.
+- Maintaining ordered data and retrieving medians or percentiles.
+- Building a cache with expiration or time-based eviction.
+- Maintaining aggregates while elements enter and leave a sliding window.
+- Implementing specialized structures such as a deque, randomized collection, or frequency stack.
+- Understanding when a standard Java collection is sufficient and when you need to augment it.
+
+I'll distinguish genuinely valuable additions from problems that mostly repeat what you've already learned.
+
+## 1. My recommended additions
+
+I'd add 10 problems, ordered by the new concept each teaches. These are additional problems, not replacements for the 13 you have already completed.
+
+| Order | Problem                                                                                                                                                  | Difficulty | Main concept                                  |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --------------------------------------------- |
+| 1     | [Design Circular Queue](https://leetcode.com/problems/design-circular-queue/?utm_source=chatgpt.com)                                                     | Medium     | Circular array, index wrapping                |
+| 2     | [Design Circular Deque](https://leetcode.com/problems/design-circular-deque/?utm_source=chatgpt.com)                                                     | Medium     | Double-ended queue, circular buffer           |
+| 3     | [Design Front Middle Back Queue](https://leetcode.com/problems/design-front-middle-back-queue/?utm_source=chatgpt.com)                                   | Medium     | Two deques and balancing invariants           |
+| 4     | [Maximum Frequency Stack](https://leetcode.com/problems/maximum-frequency-stack/?utm_source=chatgpt.com)                                                 | Hard       | Frequency counting + stacks                   |
+| 5     | [Insert Delete GetRandom O(1) – Duplicates Allowed](https://leetcode.com/problems/insert-delete-getrandom-o1-duplicates-allowed/?utm_source=chatgpt.com) | Hard       | Duplicate values + index sets                 |
+| 6     | [Find Median from Data Stream](https://leetcode.com/problems/find-median-from-data-stream/?utm_source=chatgpt.com)                                       | Hard       | Two heaps, dynamic order statistics           |
+| 7     | [Stock Price Fluctuation](https://leetcode.com/problems/stock-price-fluctuation/?utm_source=chatgpt.com)                                                 | Medium     | Corrections, ordered values, lazy deletion    |
+| 8     | [Data Stream as Disjoint Intervals](https://leetcode.com/problems/data-stream-as-disjoint-intervals/?utm_source=chatgpt.com)                             | Hard       | Ordered intervals and merging                 |
+| 9     | [Design Hit Counter](https://leetcode.com/problems/design-hit-counter/?utm_source=chatgpt.com)                                                           | Medium     | Time windows, queues and aggregation          |
+| 10    | [Design In-Memory File System](https://leetcode.com/problems/design-in-memory-file-system/?utm_source=chatgpt.com)                                       | Hard       | Hierarchical state, tree/trie and path lookup |
+
+This selection covers several distinct techniques found in LeetCode's design and data-stream problem families.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://leetcodejavascript.com\&sz=32)
+
+JavaScript Solutions
+
++2
+
+
+
+## 2. Detailed problem-by-problem roadmap
+
+### 1. Design Circular Queue
+
+LeetCode 622 · Medium
+
+Link: [Problem statement](https://leetcode.com/problems/design-circular-queue/?utm_source=chatgpt.com)
+
+Why solve it: Your earlier problems use stacks, linked lists, and queues, but this teaches you to implement a bounded queue directly using an array.
+
+Operations include `enQueue`, `deQueue`, `Front`, `Rear`, `isEmpty`, and `isFull`.
+
+What you will learn:
+
+- Maintain `head`, `tail`, and `size` (or an equivalent set of indices).
+- Wrap indices using modulo arithmetic.
+- Avoid shifting array elements after removing the front element.
+- Handle empty and full states without confusing them.
+
+Target complexity: \\(O(1)\\) per operation, \\(O(k)\\) space for capacity \\(k\\).
+
+### 2. Design Circular Deque
+
+LeetCode 641 · Medium
+
+Link: [Problem statement](https://leetcode.com/problems/design-circular-deque/?utm_source=chatgpt.com)
+
+Why solve it: It extends the circular queue to support insertion and deletion at both ends.
+
+What you will learn:
+
+- Insert at the front or rear in constant time.
+- Remove from either end.
+- Maintain consistent index wrapping and empty/full conditions.
+- Understand how a circular buffer differs from a linked-list deque.
+
+Target complexity: \\(O(1)\\) per operation, \\(O(k)\\) space.
+
+Dependency: Solve Circular Queue first. Circular Deque is a useful implementation exercise, but it is not essential to solve every later problem.
+
+### 3. Design Front Middle Back Queue
+
+LeetCode 1670 · Medium
+
+Link: [Problem statement](https://leetcode.com/problems/design-front-middle-back-queue/?utm_source=chatgpt.com)
+
+Why solve it: This is a particularly good exercise in maintaining an invariant across multiple operations.
+
+The queue supports insertion and removal at the front, middle, and back.
+
+What you will learn:
+
+- Represent a sequence using two deques.
+- Keep the left and right halves balanced.
+- Define exactly which half owns the middle element.
+- Restore the invariant after every insertion or removal.
+
+Target complexity: \\(O(1)\\) per operation with two balanced deques.
+
+The important lesson is not the deque API itself. It is maintaining a representation that makes every required operation efficient.
+
+### 4. Maximum Frequency Stack
+
+LeetCode 895 · Hard
+
+Link: [Problem statement](https://leetcode.com/problems/maximum-frequency-stack/?utm_source=chatgpt.com)
+
+Why solve it: This is one of the strongest additions to your custom data structure preparation.
+
+A normal stack removes the most recently pushed value. A frequency stack removes the value with the highest frequency; when frequencies tie, it removes the most recently pushed among those values.
+
+What you will learn:
+
+- Track each value's frequency using a `HashMap`.
+- Maintain a stack of values for each frequency.
+- Track the current maximum frequency.
+- Combine frequency tracking with recency ordering.
+
+Target complexity: \\(O(1)\\) average time for `push` and `pop`, with \\(O(n)\\) space.
+
+This is different from LFU Cache: the frequency-stack problem is organized around push/pop history rather than key lookup and eviction.
+
+### 5. Insert Delete GetRandom O(1) — Duplicates Allowed
+
+LeetCode 381 · Hard
+
+Link: [Problem statement](https://leetcode.com/problems/insert-delete-getrandom-o1-duplicates-allowed/?utm_source=chatgpt.com)
+
+Why solve it: You already solved the original randomized-set problem. This variant tests whether you can adapt the design when duplicate values are permitted.
+
+Operations:
+
+- `insert(val)` — insert a value, even if it already exists.
+- `remove(val)` — remove one occurrence if present.
+- `getRandom()` — return a random stored occurrence, so duplicates are proportionally represented.
+
+What you will learn:
+
+- Maintain an `ArrayList<Integer>` of all occurrences.
+- Map each value to a set of its current array indices.
+- Remove an occurrence using swap-and-remove.
+- Update both index sets correctly when swapping elements.
+
+Target complexity: \\(O(1)\\) average time for all operations.
+
+Why it matters: This is an excellent test of whether you genuinely understand the array-plus-hash-map design or have only memorized the original solution.
+
+### 6. Find Median from Data Stream
+
+LeetCode 295 · Hard
+
+Link: [Problem statement](https://leetcode.com/problems/find-median-from-data-stream/?utm_source=chatgpt.com)
+
+Why solve it: Your Finding MK Average problem involves maintaining order statistics over a sliding window. This problem teaches the foundational technique of maintaining the median as values arrive.
+
+What you will learn:
+
+- Use a max-heap for the smaller half of the numbers.
+- Use a min-heap for the larger half.
+- Maintain the invariant that the two heaps differ in size by at most one.
+- Retrieve the median without sorting the entire collection.
+
+Target complexity:
+
+- `addNum`: \\(O(\log n)\\)
+- `findMedian`: \\(O(1)\\)
+- Space: \\(O(n)\\)
+
+For example, when the stream contains `5, 2, 10, 4`, the sorted order is `[2, 4, 5, 10]`. The median is `(4 + 5) / 2 = 4.5`.
+
+This is a strong bridge between heap problems and custom data structure design.
+
+### 7. Stock Price Fluctuation
+
+LeetCode 2034 · Medium
+
+Link: [Problem statement](https://leetcode.com/problems/stock-price-fluctuation/?utm_source=chatgpt.com)
+
+Why solve it: Unlike a normal stream, this problem allows a previous timestamp's price to be corrected.
+
+Operations include updating a timestamp, retrieving the current price, and finding the maximum and minimum prices.
+
+What you will learn:
+
+- Map each timestamp to its latest price.
+- Maintain access to minimum and maximum prices.
+- Handle repeated updates to an existing timestamp.
+- Use lazy deletion with heaps, or an ordered multiset/map alternative.
+
+Target complexity with the common heap approach:
+
+- `update`: typically \\(O(\log n)\\), amortized over heap operations.
+- `current`: \\(O(1)\\).
+- `maximum` and `minimum`: \\(O(\log n)\\) in the worst case when stale heap entries must be removed; often faster in practice.
+- Space: potentially \\(O(u)\\) for the heaps, where \\(u\\) is the number of updates, because stale entries can accumulate.
+
+Important distinction: This is not simply a priority-queue exercise. The key design challenge is that an earlier value can become invalid without being removed immediately from a heap.
+
+### 8. Data Stream as Disjoint Intervals
+
+LeetCode 352 · Hard
+
+Link: [Problem statement](https://leetcode.com/problems/data-stream-as-disjoint-intervals/?utm_source=chatgpt.com)
+
+Why solve it: This introduces a different type of state: a set of non-overlapping intervals that must remain merged as numbers arrive.
+
+For example, inserting `1`, `3`, `2` should result in the interval `[1, 3]`.
+
+What you will learn:
+
+- Maintain intervals in sorted order.
+- Identify adjacent intervals that should be merged.
+- Handle insertion into an existing interval, between intervals, or at an interval boundary.
+- Use a `TreeMap` to locate neighboring intervals efficiently.
+
+Target complexity: \\(O(\log n)\\) per insertion in a suitable ordered-map implementation, with \\(O(n)\\) space in the number of stored intervals.
+
+This is useful preparation for Range Module, calendar problems, and interval-management design questions.
+
+### 9. Design Hit Counter
+
+LeetCode 362 · Medium · Premium
+
+Link: [Problem statement](https://leetcode.com/problems/design-hit-counter/?utm_source=chatgpt.com)
+
+Why solve it: It teaches you to design a time-based counter that returns the number of hits in a recent time window.
+
+What you will learn:
+
+- Maintain timestamps in a queue when requests arrive in chronological order.
+- Remove expired timestamps before answering a query.
+- Trade off storing every event against storing aggregated counts in fixed-size time buckets.
+- Define window boundaries precisely, especially at the 300-second cutoff.
+
+Target complexity:
+
+- Queue-based implementation: amortized \\(O(1)\\) per operation, with space proportional to hits in the active window.
+- Bucket-based implementation: \\(O(1)\\) per operation with fixed-size storage when the assumptions about timestamps are satisfied.
+
+This is a useful extension of Moving Average from Data Stream, where the maintained aggregate changes from a sum to a count of events.
+
+### 10. Design In-Memory File System
+
+LeetCode 588 · Hard · Premium
+
+Link: [Problem statement](https://leetcode.com/problems/design-in-memory-file-system/?utm_source=chatgpt.com)
+
+Why solve it: It combines hierarchical state management with efficient lookup, and is useful for interviews involving API and data structure design.
+
+Typical operations include listing directory contents, creating directories, adding file content, and reading files.
+
+What you will learn:
+
+- Model files and directories as nodes in a tree.
+- Use a `HashMap<String, Node>` for child lookup.
+- Parse paths into components and traverse the hierarchy.
+- Distinguish file nodes from directory nodes.
+- Support operations that have different semantics depending on the final path component.
+
+Target complexity: roughly \\(O(L)\\) for traversing a path of length \\(L\\), plus the cost of listing or returning content. Space depends on the total stored paths and file contents.
+
+This problem overlaps with trie-based design, so it is not essential if you have already mastered file-system and trie implementation problems. Still, it is a worthwhile advanced design exercise.
+
+## 3. Optional problems worth considering later
+
+These are valuable, but I would prioritize the ten above before adding them.
+
+| Problem                           | Difficulty | Link                                                                                                    | Why consider it?                                                                                                   |
+| --------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Design Twitter                    | Medium     | [LeetCode 355](https://leetcode.com/problems/design-twitter/?utm_source=chatgpt.com)                    | Combines per-user timelines, follow relationships, and k-way merge for a news feed.                                |
+| My Calendar III                   | Hard       | [LeetCode 732](https://leetcode.com/problems/my-calendar-iii/?utm_source=chatgpt.com)                   | Maintains booking overlap counts; useful for ordered events and sweep-line techniques.                             |
+| Design Search Autocomplete System | Hard       | [LeetCode 642](https://leetcode.com/problems/design-search-autocomplete-system/?utm_source=chatgpt.com) | Combines a trie, frequency tracking, and ranked suggestions.                                                       |
+| Design Movie Rental System        | Hard       | [LeetCode 1912](https://leetcode.com/problems/design-movie-rental-system/?utm_source=chatgpt.com)       | Uses multiple indexes and ordered result sets to satisfy different query requirements.                             |
+| Design a Number Container System  | Medium     | [LeetCode 2349](https://leetcode.com/problems/design-a-number-container-system/?utm_source=chatgpt.com) | Combines an index-to-number map with ordered sets or heaps to handle updates and find the smallest matching index. |
+| Design a Food Rating System       | Medium     | [LeetCode 2353](https://leetcode.com/problems/design-a-food-rating-system/?utm_source=chatgpt.com)      | Maintains category-based rankings with tie-breaking rules and multiple indexes.                                    |
+
+These extend the same general design mindset to more realistic systems with several query types and overlapping indexes.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://leetcodejavascript.com\&sz=32)
+
+JavaScript Solutions
+
++2
+
+
+
+## 4. What I would prioritize for interview preparation
+
+If your goal is to strengthen DSA interviews rather than solve every LeetCode design problem, my priority would be:
+
+| Priority             | Problems                                                                       | Reason                                              |
+| -------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Must solve           | Maximum Frequency Stack, Find Median from Data Stream, Stock Price Fluctuation | New, highly reusable techniques                     |
+| Strongly recommended | Circular Queue, Circular Deque, Front Middle Back Queue                        | Build confidence with implementation and invariants |
+| Recommended          | Randomized Collection with Duplicates, Data Stream as Disjoint Intervals       | More demanding variants of existing concepts        |
+| Optional             | Design Hit Counter, In-Memory File System                                      | Valuable but more specialized                       |
+| Advanced extension   | Design Twitter, My Calendar III, Movie Rental System                           | Broader combinations of data structures             |
+
+## 5. The checklist to use for every design problem
+
+Before coding in Java, answer these six questions:
+
+1. Operations: What operations must the data structure support?
+2. Complexities: What time complexity is expected for each operation?
+3. Representation: Which standard structures can support those operations?
+4. Additional state: What information must be maintained to avoid recomputation?
+5. Invariants: What must always remain true after every operation?
+6. Edge cases: What happens with empty structures, duplicate values, updates, deletions, ties, and boundary conditions?
+
+For example, in LRU Cache, the invariant is that the doubly linked list represents recency order, while the map points to the corresponding nodes. In LFU Cache, you must additionally maintain frequency buckets and the minimum frequency.
+
+My final recommendation: Start with Circular Queue, then Front Middle Back Queue, Maximum Frequency Stack, Find Median from Data Stream, and Stock Price Fluctuation. These five will broaden your problem-solving toolkit considerably beyond the custom structures you have already implemented.
+
+Use Java 21 or later for your solutions, but prefer standard collections such as `HashMap`, `ArrayDeque`, `PriorityQueue`, and `TreeMap` unless the problem explicitly requires implementing the underlying structure yourself.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Custom Data Structures: Additional Problems for Google / Meta Interviews
+
+Excluding the 13 problems you've already solved, here is the curated list of additional problems worth solving, ordered by learning value and interview relevance.
+
+I've separated the core additions from optional extensions so you can prioritize effectively for Google L4/L5 and Meta interviews.
+
+## 1. Core additions — solve these first
+
+These cover new techniques or meaningful extensions of the custom data structure concepts you already know.
+
+| # | Problem                                                                                                                                                  | Difficulty | Main concepts                    | Priority  |
+| - | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------------------------- | --------- |
+| 1 | [Maximum Frequency Stack](https://leetcode.com/problems/maximum-frequency-stack/?utm_source=chatgpt.com)                                                 | Hard       | HashMap + frequency stacks       | Essential |
+| 2 | [Find Median from Data Stream](https://leetcode.com/problems/find-median-from-data-stream/?utm_source=chatgpt.com)                                       | Hard       | Two heaps, running median        | Essential |
+| 3 | [Stock Price Fluctuation](https://leetcode.com/problems/stock-price-fluctuation/?utm_source=chatgpt.com)                                                 | Medium     | HashMap + heaps + lazy deletion  | Essential |
+| 4 | [Insert Delete GetRandom O(1) — Duplicates Allowed](https://leetcode.com/problems/insert-delete-getrandom-o1-duplicates-allowed/?utm_source=chatgpt.com) | Hard       | ArrayList + HashMap + index sets | High      |
+| 5 | [Data Stream as Disjoint Intervals](https://leetcode.com/problems/data-stream-as-disjoint-intervals/?utm_source=chatgpt.com)                             | Hard       | TreeMap + interval merging       | High      |
+
+### What each problem adds
+
+1\. Maximum Frequency Stack
+
+Design a stack that removes the most frequent value. If multiple values have the same frequency, remove the most recently pushed one.
+
+- Maintain a value-to-frequency map.
+- Maintain a stack for each frequency.
+- Track the maximum frequency.
+- Target: \\(O(1)\\) average time for `push` and `pop`.
+
+2\. Find Median from Data Stream
+
+Continuously insert numbers and return the median efficiently.
+
+- Use a max-heap for the lower half and a min-heap for the upper half.
+- Balance the heaps after every insertion.
+- Target: \\(O(\log n)\\) insertion and \\(O(1)\\) median retrieval.
+
+3\. Stock Price Fluctuation
+
+Support price updates at existing timestamps and queries for the current, minimum, and maximum prices.
+
+- Maintain the latest price per timestamp.
+- Use heaps with lazy deletion or ordered maps.
+- Learn how to handle stale heap entries when previous values are updated.
+
+4\. Insert Delete GetRandom O(1) — Duplicates Allowed
+
+Extend the randomized-set problem to permit repeated values.
+
+- Store all occurrences in an array-backed list.
+- Map each value to its set of indices.
+- Use swap-and-remove while updating the index sets correctly.
+- Target: \\(O(1)\\) average time per operation.
+
+5\. Data Stream as Disjoint Intervals
+
+Maintain a sorted collection of disjoint intervals as numbers arrive.
+
+- Use an ordered map to locate neighboring intervals.
+- Merge adjacent intervals when a new number connects them.
+- Learn to maintain an interval-based representation incrementally.
+
+## 2. Strong additions — implementation and invariant practice
+
+| # | Problem                                                                                                                | Difficulty       | Main concepts                     | Priority    |
+| - | ---------------------------------------------------------------------------------------------------------------------- | ---------------- | --------------------------------- | ----------- |
+| 6 | [Design Circular Queue](https://leetcode.com/problems/design-circular-queue/?utm_source=chatgpt.com)                   | Medium           | Circular array, modulo arithmetic | Recommended |
+| 7 | [Design Circular Deque](https://leetcode.com/problems/design-circular-deque/?utm_source=chatgpt.com)                   | Medium           | Double-ended circular buffer      | Recommended |
+| 8 | [Design Front Middle Back Queue](https://leetcode.com/problems/design-front-middle-back-queue/?utm_source=chatgpt.com) | Medium           | Two deques, balancing invariants  | Recommended |
+| 9 | [Design Hit Counter](https://leetcode.com/problems/design-hit-counter/?utm_source=chatgpt.com)                         | Medium · Premium | Time window, queue, aggregation   | Recommended |
+
+These problems are useful for practising correct implementation under interview pressure.
+
+- Circular Queue: implement enqueue, dequeue, front, rear, and full/empty checks in \\(O(1)\\).
+- Circular Deque: extend the design to insert and remove from either end.
+- Front Middle Back Queue: maintain two balanced deques to support all three positions efficiently.
+- Hit Counter: count events within a rolling time window; compare storing timestamps with fixed-size bucket aggregation.
+
+## 3. Advanced design extensions — solve if time permits
+
+| #  | Problem                                                                                                                      | Difficulty     | Main concepts                                 | Priority |
+| -- | ---------------------------------------------------------------------------------------------------------------------------- | -------------- | --------------------------------------------- | -------- |
+| 10 | [Design Twitter](https://leetcode.com/problems/design-twitter/?utm_source=chatgpt.com)                                       | Medium         | HashMap, feed aggregation, k-way merge        | Optional |
+| 11 | [Design Search Autocomplete System](https://leetcode.com/problems/design-search-autocomplete-system/?utm_source=chatgpt.com) | Hard           | Trie, frequency ranking, top-k                | Optional |
+| 12 | [Design Movie Rental System](https://leetcode.com/problems/design-movie-rental-system/?utm_source=chatgpt.com)               | Hard           | Multiple indexes, ordered sets                | Optional |
+| 13 | [Design In-Memory File System](https://leetcode.com/problems/design-in-memory-file-system/?utm_source=chatgpt.com)           | Hard · Premium | Tree/trie, path traversal, hierarchical state | Optional |
+| 14 | [My Calendar III](https://leetcode.com/problems/my-calendar-iii/?utm_source=chatgpt.com)                                     | Hard           | Interval events, sweep line, ordered maps     | Optional |
+| 15 | [Design a Number Container System](https://leetcode.com/problems/design-a-number-container-system/?utm_source=chatgpt.com)   | Medium         | Multiple indexes, lazy deletion               | Optional |
+| 16 | [Design a Food Rating System](https://leetcode.com/problems/design-a-food-rating-system/?utm_source=chatgpt.com)             | Medium         | HashMap, ordered ranking, tie-breaking        | Optional |
+
+These are broader design exercises. They are worth attempting after the core problems, but they shouldn't take priority over mastering the fundamental patterns.
+
+## 4. Final recommended list
+
+If you're preparing specifically for Google and Meta, use this sequence:
+
+1. Maximum Frequency Stack
+2. Find Median from Data Stream
+3. Stock Price Fluctuation
+4. Insert Delete GetRandom O(1) — Duplicates Allowed
+5. Data Stream as Disjoint Intervals
+6. Design Circular Queue
+7. Design Circular Deque
+8. Design Front Middle Back Queue
+9. Design Hit Counter
+10. Design Twitter
+11. Design Search Autocomplete System
+12. Design Movie Rental System
+13. Design In-Memory File System
+14. My Calendar III
+15. Design a Number Container System
+16. Design a Food Rating System
+
+My recommendation: Complete the first five thoroughly, including dry runs, edge cases, invariants, and Java implementations. Then move to the next four. Treat the final seven as optional extensions rather than mandatory interview preparation.
+
+Use Java 21 or later, with `HashMap`, `ArrayDeque`, `PriorityQueue`, and `TreeMap` where appropriate. The important skill is choosing and coordinating the structures—not implementing everything from scratch when the problem doesn't require it.
+
