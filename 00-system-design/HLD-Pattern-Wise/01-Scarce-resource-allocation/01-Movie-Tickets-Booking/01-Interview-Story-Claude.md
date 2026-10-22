@@ -3361,3 +3361,211 @@ Which one do you want?
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+# Why V0 Uses a Conditional `UPDATE` Instead of Pessimistic Locking
+
+## First, a precise name for what V0 does
+
+V0 never says "optimistic locking," so let's pin it down. V0 uses a **compare-and-set (CAS)** write:
+
+```sql
+UPDATE show_seats
+SET status = 'SOLD', booking_id = :booking_id
+WHERE show_id = 9001 AND seat_id = ANY(...) AND status = 'AVAILABLE';
+-- check rowcount
+```
+
+This is optimistic in spirit. We don't lock anything while the user thinks. We assume the seat is probably still free, try to claim it, and check whether we were right.
+
+It is not lock-free, though. Postgres takes a row lock inside that one statement, for microseconds. The real distinction is **where the lock lives**:
+
+| | Pessimistic | Our CAS |
+|---|---|---|
+| Lock held across | Multiple app round trips (read, think, write) | One statement |
+| Lock duration | Milliseconds to minutes | Microseconds |
+| Who detects a conflict | Nobody, the lock prevents it | The `rowcount` check, after the fact |
+
+## The options we could have chosen
+
+**Option 1: pessimistic, `SELECT ... FOR UPDATE`, then `UPDATE`.**
+
+```sql
+BEGIN;
+SELECT status FROM show_seats WHERE show_id=9001 AND seat_id IN ('F7','F8') FOR UPDATE;
+-- app checks both are AVAILABLE
+UPDATE show_seats SET status='SOLD' ...;
+COMMIT;
+```
+
+Correct, but it costs us:
+- Two network round trips instead of one, and the lock is held across the gap between them.
+- If the app server stalls or GC-pauses between the two statements, the lock stays held.
+- Multi-seat deadlocks. User A locks F7 then F8, user B locks F8 then F7, and Postgres kills one of them. You must sort seat IDs in every code path to avoid this.
+
+**Option 2: optimistic with a version column.**
+
+```sql
+UPDATE show_seats SET status='SOLD', version=version+1
+WHERE show_id=9001 AND seat_id='F7' AND version=:version_i_read;
+```
+
+This is the textbook form. It needs a prior read and a version column. We don't need either, because the **status is the version**. In V0 a seat only moves `AVAILABLE` to `SOLD`, so "status is still AVAILABLE" proves nothing changed. A separate counter adds nothing.
+
+**Option 3: `SERIALIZABLE` isolation.** Postgres detects conflicting transactions and aborts one with error 40001. It would work, but it tracks read/write dependencies across all transactions, which costs memory and CPU. It also forces retry loops everywhere. Our conflict is one predicate on one row, so we can state it directly in the `WHERE` clause.
+
+**Option 4: insert-based claim.** A `booked_seats` table with `PRIMARY KEY (show_id, seat_id)`, where a claim is an `INSERT` that fails on duplicate. This is also correct and arguably the cleanest for a permanent sale. We rejected it because V1 needs seats to move through states (available, held, expired, available again). Updating one row through a state machine fits that better than inserting and deleting rows.
+
+**Option 5: an application-level or Redis lock.** Rejected in V0. Lock state must live where the data lives, otherwise two stores can disagree.
+
+## Why CAS fits this problem
+
+**1. The loser's work is cheap, and the loser doesn't retry.**
+
+Optimistic concurrency hurts when conflicts force expensive retries. Here, if Rahul loses F7, the right answer is "sorry, it's gone." No retry helps. His wasted work is one statement that touched 0 rows. The usual weakness of optimism simply doesn't apply.
+
+**2. Conflicts per row are rare in V0's world.**
+
+Across the platform there are about 20 million new seat rows a day. A given seat is contended by a handful of people, not thousands. Paying for a lock held across user think-time to prevent a rare collision is a bad trade.
+
+**3. The lock must never span something slow.**
+
+A pessimistic design is dangerous if the lock is taken before a slow step. A seat selected, then four minutes of card fumbling, then a lock held for four minutes, means a connection and a row lock tied up per abandoning user. With the CAS, no database resource is held during user time.
+
+**4. It's correct under Postgres's default isolation.**
+
+At `READ COMMITTED`, if our `UPDATE` finds the row locked by another transaction, it waits. When the other commits, Postgres **re-evaluates our `WHERE` clause against the new row version**. It sees `status = 'SOLD'`, the predicate fails, and we update 0 rows. The database does the serialization, and no special isolation level is needed.
+
+**5. One statement means one round trip.**
+
+At our scale that matters. Each avoided round trip is about 1 ms saved and one fewer place for a crash to land between steps.
+
+## Where this decision gets weaker
+
+Being honest about the limits:
+
+- **Hot rows.** If 5,000 people hit F7 at once, optimism isn't free. All 5,000 statements still queue on one row lock, each waking to find 0 rows. That is exactly the V5 break. The cure was admission control, not switching to pessimistic locking, which would queue the same way.
+- **Multi-seat deadlocks still exist in theory.** `seat_id = ANY(...)` in one statement locks rows in scan order. Two overlapping statements could lock in different orders. With a primary-key index scan the order is consistent in practice, but it isn't guaranteed. The robust version sorts `seat_ids` before the call and retries once on a deadlock error (`40P01`). V0's text glossed over this, and it's worth saying in an interview.
+- **The business-level "reservation" is not CAS.** This is the subtle part.
+
+## The deeper point: V1 adds a pessimistic lock back, at the business level
+
+V0 only protects the instant of the claim. It doesn't protect the user's four minutes of payment, and that gap broke V0 for users.
+
+V1's hold is a pessimistic lock in meaning: "this seat is mine for 10 minutes, nobody else may take it." But we implement it with the same optimistic CAS, and we store the lock as data, in `status`, `hold_id`, and `held_until`.
+
+Compare the two ways to get "reserve while paying":
+
+| | DB row lock held during payment | Lease stored in the row |
+|---|---|---|
+| Holds a DB connection | Yes, for minutes | No |
+| Survives server crash | Lock released, no record of intent | Yes, it's data |
+| Expires on its own | Only if the connection dies | Yes, `held_until` |
+| Scales to 50K users | No, exhausts the pool | Yes |
+
+So the pattern is: **use CAS for the atomic moment, and a persisted lease for the human-length wait.** Pessimistic locking at the database level is the wrong tool for anything that waits on a person.
+
+## When pessimistic would have been right
+
+If the problem were different, I'd choose differently:
+
+- **High contention on the same row with expensive, non-retryable work**, such as a bank transfer that must read-modify-write a balance with business logic between read and write.
+- **Work done between read and write that can't be expressed in a `WHERE` clause**, where `FOR UPDATE` is the straightforward tool.
+
+Our decision is a single predicate, "is it still available," which fits in one statement.
+
+## Interview-ready answer
+
+> "I used a conditional UPDATE with a rowcount check, which is compare-and-set. The conflict condition is a single predicate on one row, so the database can check and write atomically in one statement. That holds its lock for microseconds instead of across round trips, avoids deadlocks from two-step locking, and works under the default isolation level because Postgres re-evaluates the WHERE clause after waiting. Optimism's usual downside, wasted retries, doesn't apply, because a loser just gets a 409. For the long wait while someone pays, I don't use a database lock at all. I store a lease in the row, which is a pessimistic reservation implemented with the same CAS."
+
+Want me to drill into the deadlock case next, with the exact ordering fix and retry code, or move to the mock interview?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
