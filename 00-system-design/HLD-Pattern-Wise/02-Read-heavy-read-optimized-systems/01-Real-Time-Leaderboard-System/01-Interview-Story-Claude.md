@@ -846,6 +846,2533 @@ It's the final of a big tournament. The single Redis node holding the 50M-player
 
 
 
+# V3: Replication, So One Dead Node Doesn't Mean a Dead Leaderboard
+
+**The one concern this version fixes:** the ranking index is a single point of failure. Read throughput and top-N hot spots are separate problems. I'll flag them at the end.
+
+## Break it
+
+It's the final of a big tournament. The single Redis node holding the board restarts. Memory is wiped, and the ZSETs are gone.
+
+Here is what recovery looks like with V2 as built.
+
+1. The relay can't help. Every old outbox note is marked published, so there is nothing to replay.
+2. A rebuild job reads the `scores` table and re-adds every player. We have about 8GB of ZSETs across all boards, and the 50M-player board alone is about 5GB.
+3. Bulk loading at roughly 200K rows per second takes **about 4 minutes** for that one board.
+4. About 3,000 rank requests arrive every second during the finale. That is about **900,000 failed requests** before the board comes back.
+
+Meanwhile the outbox keeps growing, because the relay can't write to a node that isn't there. Nothing is lost, but nothing is served.
+
+A second failure is worse. If the machine's disk dies too, even a local snapshot is gone. Only the full rebuild remains.
+
+## Is replication justified here?
+
+We should say this explicitly and not default to yes.
+
+- **Read scaling alone: no.** One Redis node does well over 100K ops/s. Our steady rank and top-N load is far below that. Replicas for throughput aren't needed yet.
+- **Availability: yes.** The finale shows that 4 minutes of downtime on the busiest night is not acceptable.
+
+So we add replicas for **failover**, not for read offload. Reads stay on the primary for now. That avoids adding a second layer of staleness on top of the outbox lag.
+
+## The naive attempts
+
+### Attempt 1: Turn on persistence and restart faster
+
+*Why it looked reasonable:* Redis can write snapshots (RDB) or an append-only log (AOF) to disk. A restart then loads from disk, not from Postgres.
+
+*How it breaks:*
+
+- Loading an 8GB snapshot still takes tens of seconds to a couple of minutes. The board is down that whole time.
+- A snapshot is only as new as its last save. Everything since is missing. Those notes are already marked published, so the relay won't resend them.
+- If the disk or host is lost, the snapshot goes with it.
+
+Persistence helps durability, but it doesn't remove downtime.
+
+### Attempt 2: Rebuild from Postgres on demand
+
+*Why it looked reasonable:* Postgres is the source of truth, so Redis is disposable. We already said so in V1.
+
+*How it breaks:* "Disposable" is true for correctness, but not for latency. The rebuild is exactly the 4-minute outage from the break-it above. A rebuild is the last-resort recovery path. It can't be the first.
+
+### Attempt 3: The relay writes to two independent Redis nodes
+
+> **Meera:** Easy. The relay does `ZADD` to Redis A and Redis B. If A dies, we point at B.
+>
+> **Kabir:** And when B is down for ten minutes and comes back?
+>
+> **Meera:** The relay has to remember what B missed.
+>
+> **Kabir:** So `published_at` becomes one column per target, and every new node needs a backfill. We've rebuilt replication by hand.
+
+*How it breaks:* The outbox tracks one "published" state. With two targets it needs per-target tracking. Any node that was down needs a catch-up job, and the two nodes can differ at any given moment. Redis already ships a tested mechanism for exactly this.
+
+## The real fix: primary with replicas, plus automatic failover
+
+Think of a stage manager and two understudies. The understudies watch every performance. If the lead collapses, someone calls it and the first understudy walks on. The show pauses for seconds, not for a recast.
+
+### How Redis replication works (first time, plain language)
+
+1. A new replica connects to the primary.
+2. The primary sends a **full snapshot** of its memory.
+3. From then on, the primary streams every write command to the replica as it happens.
+4. If the link drops briefly, the replica reconnects and asks for just the commands it missed from the primary's **backlog**. This is a partial resync and it's cheap.
+
+The replica is therefore a live copy that's usually a few milliseconds behind.
+
+### Sync, async or semi-sync?
+
+Redis replication is **asynchronous** by default. The primary acknowledges a write before the replica has it.
+
+| Mode | Write latency | Data lost on failover | Verdict for us |
+|---|---|---|---|
+| Async (default) | Lowest | Last few ms of writes | **Chosen** |
+| Semi-sync (`WAIT 1 0` after each batch) | One replica round trip added | Almost none | Overkill here |
+| Fully sync | Slowest, blocks on any replica | None | Not offered by Redis |
+
+**Why async is acceptable here:** Redis isn't the source of truth, and Postgres is. A few milliseconds of lost writes after a failover can be replayed from the outbox. I'll show that in the implementation.
+
+### Who decides when to fail over?
+
+Detecting that the primary is dead is a famous sub-problem. If two nodes both believe they are the primary, we get **split-brain**. Here are the real candidates.
+
+| Option | Mechanism | Sketch | Fits us? |
+|---|---|---|---|
+| **Redis Sentinel** | 3 small watcher processes vote. A quorum agrees the primary is down, elects a replica and promotes it. | `sentinel monitor lbmaster 10.0.1.10 6379 2` | **Yes, if self-hosted** |
+| **Managed multi-AZ** (e.g. ElastiCache with Multi-AZ failover) | The cloud provider runs the watcher and promotion. | `AutomaticFailoverEnabled=true`, 1 primary + 2 replicas | **Yes, if on AWS** |
+| **Redis Cluster** | Failover is built in, but it also shards keys across nodes. | `redis-cli --cluster create ... --cluster-replicas 1` | Not yet. That is sharding, a later version. |
+
+I'll implement with Sentinel because it shows the mechanics. The managed option is the same design with the operations handled for you.
+
+## Solve it
+
+- ✅ **What we gained:**
+  - Failover in about 10-15 seconds instead of a 4-minute rebuild.
+  - A live copy in a second AZ, so a lost host or AZ doesn't lose the index.
+  - The rebuild from Postgres becomes a rare last resort.
+- ⚠️ **What we gave up:**
+  - **Async means a small loss window.** The last few milliseconds of acknowledged writes can vanish on failover. We heal this by re-publishing recent outbox rows.
+  - **Consistency model:** Redis is now *eventually consistent with Postgres and with its own replicas*. The flow where staleness matters most is a player reading their own rank right after a submit. That already tolerates the outbox lag, and failover widens it only briefly.
+  - **Split-brain risk** if a primary is cut off but still alive. We mitigate this below.
+  - **Cost:** about 3x the memory (1 primary + 2 replicas).
+- ❌ **What we considered and rejected:** Persistence-only restart, rebuild-on-demand, and a hand-rolled dual-write. Also, read replicas for throughput. The numbers don't call for them yet.
+
+## Implement it
+
+### Topology and where things live
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| `lb:{board_id}` ZSET on primary | Outbox Relay | Leaderboard API | Redis primary, AZ-a |
+| `lb:{board_id}` ZSET on replicas | Redis replication stream (not our code) | Sentinel (promotion), nobody else | Redis replicas, AZ-b and AZ-c |
+| Primary address | Sentinel (updates on failover) | Leaderboard API and Outbox Relay, via Sentinel lookup | 3 Sentinel processes, one per AZ |
+
+### Replica config
+
+```conf
+# replica redis.conf
+replicaof 10.0.1.10 6379
+replica-read-only yes
+appendonly yes              # replicas persist so a full outage restarts from disk
+appendfsync everysec
+```
+
+### Primary config (the split-brain guard)
+
+```conf
+repl-backlog-size 256mb       # lets a briefly disconnected replica do a partial resync
+min-replicas-to-write 1       # refuse writes if no replica is reachable
+min-replicas-max-lag 10       # "reachable" means acked within the last 10s
+```
+
+If the primary is partitioned away from every replica, it stops accepting writes. A stranded old primary therefore can't keep taking writes that the new primary never sees. The cost is that the relay's writes fail during that partition, and the outbox simply backs up. That is the safe direction.
+
+### Sentinel config (3 processes, one per AZ)
+
+```conf
+sentinel monitor lbmaster 10.0.1.10 6379 2      # quorum of 2 of 3 must agree
+sentinel down-after-milliseconds lbmaster 5000  # 5s of silence = "subjectively down"
+sentinel failover-timeout lbmaster 30000
+sentinel parallel-syncs lbmaster 1
+```
+
+### Client discovery (API and Relay)
+
+Neither component hardcodes an IP. Both ask Sentinel.
+
+```python
+from redis.sentinel import Sentinel
+
+sentinel = Sentinel(
+    [("s1", 26379), ("s2", 26379), ("s3", 26379)],
+    socket_timeout=0.3,
+)
+redis_primary = sentinel.master_for("lbmaster", socket_timeout=0.3)
+```
+
+After a failover, the next call re-asks Sentinel and lands on the new primary. The API also wraps Redis calls in a **circuit breaker**. During the 10-15 second window it returns `503` with `Retry-After: 5` immediately, instead of piling up timeouts.
+
+### Healing the loss window (outbox re-publish)
+
+When the relay sees a failover event (a Sentinel `+switch-master` message), it re-sends recent notes.
+
+```sql
+UPDATE score_outbox
+SET published_at = NULL
+WHERE published_at > now() - interval '60 seconds';
+```
+
+The relay's normal loop then re-applies them. This is safe because `ZADD GT` is idempotent, as we established in V2. Cleanup keeps rows for an hour, so the 60-second window is always still there.
+
+### Sequence: failover
+
+```mermaid
+sequenceDiagram
+    participant API as Leaderboard API
+    participant S as Sentinels (x3)
+    participant P as Redis Primary (AZ-a)
+    participant R1 as Replica 1 (AZ-b)
+    participant RL as Outbox Relay
+    participant PG as Postgres
+
+    Note over P,R1: normal: P streams writes to replicas
+    P--xS: primary stops responding
+    S->>S: 5s silence, quorum of 2 agrees "down"
+    S->>R1: promote to primary
+    S-->>API: +switch-master (new address)
+    S-->>RL: +switch-master (new address)
+    API->>R1: ZREVRANK (via new address)
+    RL->>PG: UPDATE outbox SET published_at=NULL (last 60s)
+    RL->>R1: re-ZADD GT (idempotent)
+```
+
+## Current State (V3)
+
+```mermaid
+graph LR
+    GS[Game Servers] -->|POST /v1/scores| API[Leaderboard API<br/>stateless + circuit breaker]
+    CL[Clients] -->|GET top / rank / around-me| API
+    API -->|txn: upsert scores + insert outbox| PG[(Postgres Primary<br/>scores + score_outbox)]
+    RL[Outbox Relay<br/>workers] -->|poll pending, mark published| PG
+    RL -->|ZADD GT| RP[(Redis Primary<br/>AZ-a)]
+    API -->|ZREVRANK / ZREVRANGE| RP
+    RP -.->|async replication| RA[(Replica 1<br/>AZ-b)]
+    RP -.->|async replication| RB[(Replica 2<br/>AZ-c)]
+    SN[Sentinels x3<br/>one per AZ] -.->|monitor, elect, promote| RP
+    SN -.->|monitor| RA
+    SN -.->|monitor| RB
+    SN -.->|switch-master address| API
+    SN -.->|switch-master address| RL
+```
+
+New in V3: the two replicas, the three Sentinels, the circuit breaker and the failover re-publish rule.
+
+**Every end-to-end flow right now**
+
+1. **Write path:** Unchanged. The game server calls `POST /v1/scores`. The API upserts `scores` and inserts `score_outbox` rows in one Postgres transaction. It returns 204.
+2. **Outbox relay path:** The relay polls pending notes with `SKIP LOCKED` and pipelines `ZADD GT`. It now writes to the Redis **primary** found via Sentinel, then marks the notes published.
+3. **Top-N path:** Unchanged in shape. The API runs `ZREVRANGE 0 99 WITHSCORES` on the Redis primary. If the circuit breaker is open, it returns 503 with `Retry-After`.
+4. **Exact-rank path:** Unchanged in shape. `ZREVRANK ... WITHSCORES` on the primary, with the same breaker.
+5. **Around-me path:** Unchanged. One `ZREVRANGE r-5 r+5` after the rank lookup.
+6. **Replication path (new):** The Redis primary streams every write to both replicas asynchronously. Replicas use AOF to persist.
+7. **Failover path (new):** Sentinels detect primary silence for 5s and reach quorum. They promote a replica and announce the new address. The API and relay reconnect. The relay marks the last 60s of outbox rows unpublished and re-applies them.
+8. **Window rollover and outbox cleanup:** Unchanged.
+
+## Interview follow-ups
+
+**Q: Why not synchronous replication so nothing is ever lost?**
+Redis doesn't offer true synchronous replication. `WAIT` can approximate it, but it adds a replica round trip to every write batch. Our source of truth is Postgres and the outbox can replay the last minute. Paying write latency to avoid a loss we can already heal is the wrong trade.
+
+**Q: What stops two primaries after a network partition?**
+Two things. Sentinel needs a quorum of 2 of 3, so only the side holding the majority can elect a new primary. And `min-replicas-to-write 1` makes an isolated old primary refuse writes. Between them, the minority side can't take writes that the majority never sees.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Why replicate | Rebuilding from Postgres is correct but takes minutes. A live copy turns an outage into a 10-15s blip. |
+| Replicas for availability | Read throughput didn't justify replicas here. Surviving a node loss did. |
+| Async tradeoff | The last few ms of writes can be lost on failover. Postgres plus an idempotent re-publish heals it. |
+| Split-brain guards | Sentinel quorum plus `min-replicas-to-write` stop a stranded primary from accepting orphan writes. |
+| Client discovery | Clients ask Sentinel for the primary instead of hardcoding an IP, and a circuit breaker fails fast during the switch. |
+
+**Interview arc:** *"A single Redis node turns a restart into a 4-minute rebuild from Postgres, so I run one primary and two async replicas across AZs with Sentinel quorum failover, accept losing a few milliseconds of writes, and heal that by re-publishing the last minute of idempotent outbox notes."*
+
+## Next
+
+It's the tournament finale and 500,000 fans are refreshing the top 100 every second. That's 500K reads per second for the same 100 rows, all hitting one Redis primary that tops out near 100K. The data hardly changes between reads, but every request asks Redis anyway. Say **"next"** for V4: caching the hot reads.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+# V4: Caching the Hot Reads
+
+**The one concern this version fixes:** the same few rows are read hundreds of thousands of times per second. The write burst at tournament end is a different problem. I'll flag it at the end.
+
+## Break it
+
+It's the tournament finale. 500,000 fans are refreshing the top 100 every second.
+
+Here is what that does to V3.
+
+1. 500K requests per second arrive for the **same 100 rows**.
+2. Each one runs `ZREVRANGE lb:ranked:alltime 0 99 WITHSCORES` on the Redis primary.
+3. That command returns 100 members with scores, so it costs far more than a plain `GET`. One primary handles roughly 50K of them per second.
+4. We are at **10x capacity**.
+
+The damage spreads. The relay's `ZADD` writes queue behind these reads. The outbox backs up and the whole board goes stale. Rank lookups for individual players slow down too.
+
+Egress is a problem as well. A top-100 JSON payload is about 4KB. At 500K per second that is **2GB/s** leaving our API fleet.
+
+The data barely changes between reads, yet we recompute it every time.
+
+## Does caching fit this read pattern?
+
+Check the read pattern before adding a cache. Our three read paths look very different.
+
+| Read | Same answer for everyone? | Reads per distinct answer | Cacheable? |
+|---|---|---|---|
+| Top 100 | Yes | Hundreds of thousands per second | **Yes, perfect fit** |
+| Exact rank of one player | No, 50M different answers | Maybe a few per minute | No |
+| Around-me | No, personalized | Maybe a few per minute | No |
+
+Top-100 is one hot key that everybody shares. Rank and around-me are a long tail of keys that each get few reads. A cache would mostly miss on them, so we leave them alone. They already cost O(log N) on Redis.
+
+## The naive attempts
+
+This isn't the crux, so I'll keep the walk short.
+
+### Attempt 1: Add read replicas and spread the load
+
+*Why it looked reasonable:* Replicas are a standard way to scale reads, and we already have two.
+
+*How it breaks:* We'd need about 10 replicas to absorb 500K per second. Every one of them computes the same 100 rows from scratch for every request. We'd pay for 10 copies of 8GB to answer one question. In V3 we decided replicas were for availability, not throughput. The numbers still say that.
+
+### Attempt 2: Put a plain TTL cache in front and call it done
+
+*Why it looked reasonable:* Cache the top-100 for 1 second. One Redis read per second instead of 500K.
+
+*How it breaks:* The cache is correct while the entry is warm. The danger is the instant it expires.
+
+> **Meera:** The key expires at 8:00:01.000. Every request after that is a miss.
+>
+> **Kabir:** And all 25,000 requests that land in the next few milliseconds each go to Redis to refill it.
+>
+> **Meera:** So the cache saves us 999 ms of every second and then stampedes us for the last millisecond.
+
+This is the **cache stampede**. It needs its own fix, covered below.
+
+## The real fix: cache at two layers, and prevent the stampede
+
+### Where to cache (different layers are different decisions)
+
+| Layer | What it removes | Who benefits | Decision |
+|---|---|---|---|
+| Client (`Cache-Control: max-age`) | Repeat requests from one user | Each user | Yes, tiny TTL |
+| CDN / edge | Load on our API fleet and egress | Everyone near an edge | **Yes, for top-N only** |
+| In-process cache in each API pod | Load on Redis | The whole fleet | **Yes** |
+| Redis itself | Already the ranking index | | Unchanged |
+
+**Is a CDN warranted?** Yes, for this one endpoint. The response is public and identical for every viewer. Without a CDN, our API fleet must serve 500K rps and push 2GB/s of egress. With it, the edge absorbs nearly all of that.
+
+We do **not** put rank or around-me behind the CDN cache. Those responses are per-player and go out with `private, no-store`.
+
+### What to cache and for how long
+
+- **What:** the top-100 response, one object per board.
+- **TTL:** short, because top-N changes constantly during a finale.
+- **Invalidation: TTL expiry, not event-driven.** We compare the options below.
+
+| Invalidation strategy | How it works | Fits top-100? |
+|---|---|---|
+| **Short TTL** | Entry expires after 0.5-1s | **Yes.** Staleness is bounded and invalidation needs no code. |
+| Invalidate on write | Each score write that could change the top 100 deletes the cache entry | No. It needs every writer to know the 100th score. During a finale the entry would be invalidated almost constantly, so the cache would barely help. |
+| Versioned key | Writers bump a version, readers fetch `top:v123` | No. Same coordination problem. |
+
+**Freshness budget.** TTLs stack. A score can be up to 0.2s behind in Redis (outbox lag), 0.5s behind in the pod cache, and 1s behind at the CDN. Worst case is about **1.7s**. That fits our 1-2 second target, but it leaves no room for a longer TTL.
+
+### The stampede sub-problem: the real candidate fixes
+
+| Fix | Mechanism | Sketch | Verdict |
+|---|---|---|---|
+| **Single-flight (request coalescing)** | On a miss, the first caller fetches. Everyone else waits on that same fetch. | `fut = INFLIGHT.setdefault(key, fetch(key)); await fut` | **Chosen** |
+| **Stale-while-revalidate** | Serve the expired value immediately while one caller refreshes in the background. | `if age < STALE_OK: refresh_async(); return old` | **Chosen** |
+| Probabilistic early refresh | Each request may refresh slightly before expiry, with probability rising as expiry nears. | `if age > TTL - rand() * beta: refresh()` | Skipped. More tuning than we need. |
+| Background refresher | A timer refreshes hot keys regardless of traffic. | `every 500ms: cache[key] = fetch()` | Skipped. Wastes work on idle boards. |
+
+We combine the first two. Warm entries serve instantly. Slightly expired entries serve stale while one request refreshes. Fully cold entries make everyone share one fetch.
+
+## Solve it
+
+- ✅ **What we gained:**
+  - Redis sees about **2 top-100 reads per second per pod**, not 500K. With 20 pods that is about 40 per second per hot board, before the CDN even helps.
+  - The relay's writes and rank lookups are no longer starved.
+  - Egress comes off our fleet and onto the CDN.
+  - With `stale-if-error`, top-100 keeps serving during a Redis failover. Users won't see the 10-15 second gap from V3.
+- ⚠️ **What we gave up:**
+  - **Top-100 can be up to about 1.7s stale.** A player who just took 3rd place may not see themselves for a moment. Their own rank lookup is uncached, so their personal view stays fresh.
+  - **Stale-if-error shows old data during an outage.** We cap it at 30s so it can't mislead for long.
+  - **Stacked TTLs.** Adding a cache layer later means re-doing this budget.
+- ❌ **What we considered and rejected:** Read replicas for throughput, a plain TTL with no stampede protection, write-triggered invalidation, and caching per-player rank.
+
+## Implement it
+
+### Cache layers: who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| Pod cache `top:{board_id}` (in-process dict) | Leaderboard API, on miss or background refresh | Leaderboard API, same pod | Memory of each API pod |
+| CDN object `GET /v1/boards/{id}/top?n=100` | CDN, from the API's response | CDN, to clients | Edge locations |
+| `lb:{board_id}` ZSET | Outbox Relay | Leaderboard API (on pod-cache miss, rank, around-me) | Redis primary, unchanged |
+
+### Cache key hygiene
+
+A client can ask for any `n`. That would create a different cache key per value. We fix that by only allowing `n` in `{10, 50, 100}`, and always fetching 100 into the pod cache. We then slice for smaller values.
+
+```text
+Pod cache key:  top:{board_id}            e.g.  top:ranked:alltime
+CDN cache key:  path + ?n=                e.g.  /v1/boards/ranked:alltime/top?n=100
+                (cookies and auth headers excluded from the key)
+```
+
+### Response headers
+
+```http
+# GET /v1/boards/{id}/top?n=100
+Cache-Control: public, max-age=1, stale-while-revalidate=2, stale-if-error=30
+
+# GET /v1/boards/{id}/players/{player_id}   (rank and around-me)
+Cache-Control: private, no-store
+```
+
+The CDN must have **request collapsing** turned on. It means many simultaneous misses at one edge become one origin request. That is single-flight at the CDN layer.
+
+### Pod cache with single-flight and stale-while-revalidate
+
+```python
+CACHE, INFLIGHT = {}, {}        # key -> (value, fetched_at) / key -> Future
+TTL, STALE_OK = 0.5, 3.0        # seconds
+
+async def get_top100(board_id):
+    key = f"top:{board_id}"
+    entry = CACHE.get(key)
+    age = time.monotonic() - entry.at if entry else None
+
+    if entry and age < TTL:                      # 1. fresh hit
+        return entry.value
+    if entry and age < STALE_OK:                 # 2. expired, serve stale, refresh once
+        asyncio.ensure_future(single_flight(key, board_id))
+        return entry.value
+    return await single_flight(key, board_id)    # 3. cold: everyone waits on one fetch
+
+async def single_flight(key, board_id):
+    fut = INFLIGHT.get(key)
+    if fut is None:                              # first caller does the real work
+        fut = asyncio.ensure_future(fetch_and_store(key, board_id))
+        INFLIGHT[key] = fut
+        fut.add_done_callback(lambda _: INFLIGHT.pop(key, None))
+    return await fut                             # everyone else shares it
+
+async def fetch_and_store(key, board_id):
+    rows = await redis_primary.zrevrange(f"lb:{board_id}", 0, 99, withscores=True)
+    value = serialize(rows)
+    CACHE[key] = Entry(value, time.monotonic())
+    return value
+```
+
+Three branches, each its own case.
+
+1. **Fresh hit:** return immediately. No Redis call.
+2. **Stale:** return the old value now, and start one background refresh. Callers never wait.
+3. **Cold:** the first caller fetches. The rest wait on the same future, so Redis sees one request.
+
+If `fetch_and_store` raises (Redis failing over), the stale entry stays in `CACHE` and keeps serving until `STALE_OK` passes. After that the circuit breaker from V3 returns 503, and the CDN's `stale-if-error` covers it.
+
+### Sequence: top-100 read
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CDN as CDN edge
+    participant API as Leaderboard API pod
+    participant R as Redis Primary
+
+    C->>CDN: GET /v1/boards/{id}/top?n=100
+    alt CDN fresh hit (age < 1s)
+        CDN-->>C: cached top-100
+    else CDN miss (collapsed to one origin request)
+        CDN->>API: GET /v1/boards/{id}/top?n=100
+        alt pod cache fresh (age < 0.5s)
+            API-->>CDN: cached top-100
+        else pod cache stale or cold (single-flight)
+            API->>R: ZREVRANGE lb:{id} 0 99 WITHSCORES
+            R-->>API: 100 members + scores
+            API-->>CDN: top-100
+        end
+        CDN-->>C: top-100
+    end
+```
+
+## Current State (V4)
+
+```mermaid
+graph LR
+    GS[Game Servers] -->|POST /v1/scores| API[Leaderboard API<br/>stateless + circuit breaker<br/>+ pod cache for top-100]
+    CL[Clients] -->|GET top / rank / around-me| CDN[CDN edge<br/>caches top-100 only]
+    CDN -->|miss, or no-store passthrough| API
+    API -->|txn: upsert scores + insert outbox| PG[(Postgres Primary<br/>scores + score_outbox)]
+    RL[Outbox Relay<br/>workers] -->|poll pending, mark published| PG
+    RL -->|ZADD GT| RP[(Redis Primary<br/>AZ-a)]
+    API -->|ZREVRANK / ZREVRANGE| RP
+    RP -.->|async replication| RA[(Replica 1<br/>AZ-b)]
+    RP -.->|async replication| RB[(Replica 2<br/>AZ-c)]
+    SN[Sentinels x3<br/>one per AZ] -.->|monitor, elect, promote| RP
+    SN -.->|monitor| RA
+    SN -.->|monitor| RB
+    SN -.->|switch-master address| API
+    SN -.->|switch-master address| RL
+```
+
+New in V4: the CDN edge, the pod cache inside the API, and the cache headers.
+
+**Every end-to-end flow right now**
+
+1. **Write path:** Unchanged. The game server calls `POST /v1/scores`. The API upserts `scores` and inserts `score_outbox` rows in one Postgres transaction. It returns 204. Game servers call the API directly, not through the CDN.
+2. **Outbox relay path:** Unchanged. The relay applies pending notes with `ZADD GT` to the Redis primary, then marks them published.
+3. **Top-N path:** Changed. The client asks the CDN. On a hit, the CDN answers. On a miss it makes one collapsed request to an API pod. The pod serves from its cache (fresh or stale), or does one single-flight `ZREVRANGE 0 99` on Redis.
+4. **Exact-rank path:** Unchanged in logic. It passes through the CDN uncached (`private, no-store`). The API runs `ZREVRANK ... WITHSCORES` on the Redis primary.
+5. **Around-me path:** Unchanged in logic. Same passthrough, then one `ZREVRANGE r-5 r+5`.
+6. **Replication path:** Unchanged. The primary streams writes to both replicas asynchronously.
+7. **Failover path:** Changed. Sentinels promote a replica as before. During the window, top-100 keeps serving from pod cache and CDN (`stale-if-error=30`). Rank and around-me return 503 until the switch completes.
+8. **Window rollover and outbox cleanup:** Unchanged. A new window uses a new `board_id`, so it gets its own cache key.
+
+## Interview follow-ups
+
+**Q: Why not invalidate the cache when a score changes, instead of waiting for the TTL?**
+Because almost every write during a finale could change the top 100. We'd invalidate constantly and the cache would hit rarely. It also requires every writer to know the current 100th score. A 0.5-1s TTL gives a hard staleness bound with no coordination.
+
+**Q: Why not cache per-player rank too?**
+50M possible keys, each read only occasionally, so the hit rate would be low. Rank also changes the moment anyone passes you. And those lookups are already O(log N) on Redis. Caching them would add staleness for almost no load saved.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Cache the shared read | Top-100 is one hot key read by everyone. Per-player rank is a long tail and is not worth caching. |
+| Layer choice | The CDN removes API load and egress for a public response. The pod cache removes Redis load. Each is a separate decision. |
+| TTL over invalidation | Constant churn makes write-triggered invalidation useless. A short TTL bounds staleness with no coordination. |
+| Stacked TTLs | Outbox lag plus pod TTL plus CDN TTL add up (about 1.7s here). Budget them together. |
+| Stampede fixes | Single-flight plus stale-while-revalidate means an expiry never sends a crowd to Redis. |
+
+**Interview arc:** *"500K reads per second for the same top-100 would crush one Redis primary, so I cache that one public response at the CDN and in each pod with a short TTL, using single-flight and stale-while-revalidate so expiry never stampedes, and I leave per-player rank uncached because it has 50M distinct keys."*
+
+## Next
+
+The finale ends and 50,000 players submit scores in the same second. Each submission writes three boards, which means about 150,000 upserts per second hitting one Postgres primary, and one Redis primary behind it. The outbox backlog grows into minutes. We can shard by board easily, but one 50M-player board can't be split without breaking the one thing we built this system for: exact global rank. Say **"next"** for V5: sharding.
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+# V5: Sharding Postgres, the Source of Truth
+
+**The one concern this version fixes:** Postgres can't absorb the write burst. Redis is also near its write ceiling, but that is a separate problem, and I'll flag it at the end.
+
+## Break it
+
+It's 8:00pm and the finale ends. Arjun's match finishes along with 49,999 others. All 50,000 players submit scores in the same second, and the flood lasts about 30 seconds.
+
+Each submit is one Postgres transaction. It does 3 upserts into `scores` and 3 inserts into `score_outbox`. That's 6 row writes per submit, so about **300K row writes per second**.
+
+One well-tuned Postgres primary sustains roughly 5K of these transactions per second. We are asking for 50K. That's **10x over**.
+
+Here is what happens next.
+
+1. The connection pool fills within a few hundred milliseconds.
+2. Write latency climbs from about 5ms to tens of seconds.
+3. Game servers time out and retry. The `GT` upsert makes retries safe, but they still add load.
+4. The outbox lives on the same drowning primary, so Redis gets nothing to apply. Rank freshness collapses too.
+
+This is **not a size problem**. All boards together hold about 80M rows, roughly 15GB. That fits on one machine. It's a write-throughput problem, so we need more primaries accepting writes.
+
+Redis has its own ceiling on this burst. It comes next, once Postgres is no longer the bottleneck.
+
+## What sharding is
+
+Sharding splits rows across several databases. Each database owns a slice and takes writes only for that slice.
+
+Think of a supermarket with 16 checkout lanes instead of one. A fixed rule decides each shopper's lane. All of one shopper's items go through the same lane, so one receipt covers everything.
+
+Two things matter. The rule must be deterministic, so the same shopper always lands in the same lane. And one shopper's items should never be split across lanes.
+
+## Choosing the shard key
+
+Our write is "one player, three boards, plus three outbox rows, in one transaction." The key must keep that transaction on one shard.
+
+| Shard key | What it optimizes | What it breaks | Verdict |
+|---|---|---|---|
+| `board_id` | All rows of a board sit together | Every score hits the all-time board, so one shard takes 100% of writes. One submit touches 3 boards, so 3 shards. | Rejected |
+| `hash(board_id, player_id)` | Perfectly even spread | A player's 3 rows scatter. The write becomes a cross-shard transaction, so the outbox is no longer atomic with the score. | Rejected |
+| `hash(player_id)` | Even spread. A player's 3 boards and outbox rows land on one shard. | Cross-player queries in Postgres need scatter-gather. | **Chosen** |
+
+The last cost is cheap here. Since V1, Redis answers every cross-player question: top-N, rank and around-me. Postgres only has to be good at writes, so we shard for the write path.
+
+**Do our traffic patterns create hot shards?** No. One player submits at human pace, with minutes between matches. A bot hammering one ID would pin one shard. A per-player rate limit at the API edge prevents that.
+
+**How many shards?** 50K transactions per second at peak, divided by about 5K per shard, is 10. We add headroom and take **16**.
+
+## How do we route, and what does resharding cost?
+
+### Attempt: `shard = player_id % 16`
+
+*Why it looked reasonable:* It's one line, it's even, and it's deterministic.
+
+*How it breaks:* One day we grow from 16 to 20 shards. Almost every row's `% N` result changes. A row stays put only when `id % 16 == id % 20`, which is true for 20% of IDs. **80% of rows, about 64M, must move**, and each move is a live migration.
+
+### The fix: a bucket map
+
+Hash each player into one of **1,024 fixed buckets**. A small lookup table maps each bucket to a shard. Buckets never change, and only the map does.
+
+Adding 4 shards means handing 4/20 of the buckets to the new ones. That moves **20% of rows**, in small pieces of about 80K rows. Each bucket moves independently.
+
+## Solve it
+
+- ✅ **What we gained:**
+  - Write capacity scales to about 80K transactions per second across 16 shards, against a 50K peak.
+  - Load is even, with no hot shard.
+  - **The transactional outbox from V2 survives intact.** Each shard has its own outbox in the same transaction as its own scores.
+  - Growth is bounded. Adding a shard moves 20% of data, one bucket at a time.
+- ⚠️ **What we gave up:**
+  - 16 primaries to run, migrate and monitor, plus 16 relay pools. Each shard needs its own standby and failover, following the V3 pattern. I'm not re-deriving it.
+  - A down shard stops writes for about 1/16 of players. Those get a 503 and the game server retries. Nothing is lost, because the failure happens before any commit.
+  - Cross-player queries in Postgres become scatter-gather. Only audits and rebuilds use them.
+  - A shard map that every API pod must agree on. A stale map writes to the wrong shard, so we add an ownership guard below.
+- ❌ **What we considered and rejected:**
+  - **A bigger single box.** 10x write capacity doesn't exist on one machine, and it stays a single point of failure.
+  - **Batching into multi-row upserts.** That might buy about 3x, not 10x, and it still ends at one primary.
+  - **A Kafka queue in front of Postgres.** It absorbs the burst but adds no drain capacity.
+  - **`% N` routing.** It moves 80% of rows on every resize.
+  - **A managed distributed SQL database.** It's a valid production choice, but the mechanism is the same. We build it by hand so the mechanism is visible.
+
+## Implement it
+
+### Schema delta (first time on each shard)
+
+Every shard gets the same V2 schema, plus these changes.
+
+```sql
+-- on each of the 16 shards
+ALTER TABLE scores ADD COLUMN bucket SMALLINT NOT NULL;
+CREATE INDEX idx_scores_bucket ON scores (bucket, updated_at);
+
+CREATE TABLE bucket_ownership (
+  bucket SMALLINT PRIMARY KEY,
+  owned  BOOLEAN  NOT NULL      -- true on exactly one shard per bucket
+);
+```
+
+The routing table lives in a small replicated config store. It is separate from the 16 shards.
+
+```sql
+CREATE TABLE shard_map (
+  bucket   SMALLINT PRIMARY KEY,   -- 0..1023
+  shard_id SMALLINT NOT NULL,      -- 0..15
+  version  BIGINT   NOT NULL
+);
+-- initial fill: shard_id = bucket % 16, so each shard owns 64 buckets
+```
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| `scores` (per shard) | Leaderboard API, write path | Rebuild and audit jobs, resharding tool | The owning Postgres shard |
+| `score_outbox` (per shard) | Leaderboard API, same transaction as `scores` | That shard's Relay pool | Same shard |
+| `bucket_ownership` | Resharding tool | Leaderboard API (guard in every write) | Each Postgres shard |
+| `shard_map` | Resharding tool only | Leaderboard API pods (in-memory copy, refreshed every ~5s) | Config store |
+| `lb:{board_id}` ZSET | All 16 Relay pools | Leaderboard API read paths | Redis primary, unchanged |
+
+### Routing function
+
+```python
+import hashlib
+NUM_BUCKETS = 1024
+
+def bucket_of(player_id: int) -> int:
+    digest = hashlib.md5(str(player_id).encode()).digest()
+    return int.from_bytes(digest[:4], "big") % NUM_BUCKETS
+
+def shard_of(player_id: int) -> int:
+    return SHARD_MAP[bucket_of(player_id)]     # in-memory list of 1,024 ints
+```
+
+Don't use Python's built-in `hash()`. It is randomized per process, so two API pods would route the same player to different shards.
+
+### Write path
+
+`POST /v1/scores` is unchanged. Routing uses only `player_id`.
+
+1. **Leaderboard API** computes `b = bucket_of(98231)` and `k = SHARD_MAP[b]`.
+2. It opens a transaction on **Postgres shard k only**.
+3. First statement, the ownership guard:
+
+```sql
+SELECT 1 FROM bucket_ownership WHERE bucket = $1 AND owned FOR SHARE;
+```
+
+4. **Branch: no row returned.** The map was stale. The API rolls back, refreshes `SHARD_MAP` and retries once. If it still fails, it returns 503.
+5. **Branch: row returned.** The API runs the V2 statement three times, once per board. The only change is that `bucket` is now in the insert.
+
+```sql
+WITH improved AS (
+  INSERT INTO scores (board_id, player_id, bucket, score)
+  VALUES ($1, $2, $3, $4)
+  ON CONFLICT (board_id, player_id)
+  DO UPDATE SET score = EXCLUDED.score, updated_at = now()
+  WHERE EXCLUDED.score > scores.score
+  RETURNING board_id, player_id, score
+)
+INSERT INTO score_outbox (board_id, player_id, score)
+SELECT board_id, player_id, score FROM improved;
+```
+
+6. It commits and returns `204`. All six writes happened on one shard in one transaction.
+
+### Relay path (delta)
+
+The V2 loop is unchanged. We run **one worker pool per shard**. Each pool reads only its own shard's `score_outbox`. All pools write to the same Redis primary through Sentinel.
+
+Two V3 rules now apply per shard. The re-publish after a Redis failover runs on all 16 shards. The outbox cleanup also runs on all 16 shards.
+
+### Live resharding: moving bucket `b` from shard A to shard B
+
+1. **Backfill.** Copy `WHERE bucket = b` from A to B with a max-merge upsert:
+
+```sql
+INSERT INTO scores (board_id, player_id, bucket, score, updated_at)
+VALUES (...)
+ON CONFLICT (board_id, player_id)
+DO UPDATE SET score = EXCLUDED.score, updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.score > scores.score;
+```
+
+2. **Catch up.** Re-copy `WHERE bucket = b AND updated_at >= $last_copy`. Repeat until it takes under a second.
+3. **Fence on A.** `UPDATE bucket_ownership SET owned = false WHERE bucket = $b;` waits for in-flight writes holding the `FOR SHARE` lock. Then it blocks new ones. Stale writers hit the guard and retry.
+4. **Final delta copy.** A handful of rows.
+5. **Open on B.** `UPDATE bucket_ownership SET owned = true WHERE bucket = $b;`
+6. **Flip the map.** `UPDATE shard_map SET shard_id = B, version = version + 1 WHERE bucket = b;`. API pods pick it up within about 5 seconds and retry in the meantime.
+7. **Cleanup.** After a grace period, delete bucket `b`'s rows from A.
+
+Redis is untouched throughout. The ZSET is keyed by board, not by shard. Pending outbox rows on A are still drained by A's relay. The copy is safe against concurrent writes because the max-merge is idempotent, which is the same property V2 relied on.
+
+### Sequence: write path
+
+```mermaid
+sequenceDiagram
+    participant GS as Game Server
+    participant API as Leaderboard API
+    participant PGk as Postgres Shard k
+    participant RLk as Relay pool k
+    participant R as Redis Primary
+
+    GS->>API: POST /v1/scores (player 98231)
+    API->>API: bucket = md5(98231) % 1024, k = SHARD_MAP[bucket]
+    API->>PGk: BEGIN; ownership check FOR SHARE
+    API->>PGk: 3x (upsert scores + insert score_outbox); COMMIT
+    PGk-->>API: ok
+    API-->>GS: 204
+
+    loop every ~100ms
+        RLk->>PGk: SELECT pending FOR UPDATE SKIP LOCKED
+        PGk-->>RLk: up to 500 notes
+        RLk->>R: pipeline ZADD GT
+        R-->>RLk: ok
+        RLk->>PGk: UPDATE published_at; COMMIT
+    end
+```
+
+## Current State (V5)
+
+```mermaid
+graph LR
+    GS[Game Servers] -->|POST /v1/scores| API[Leaderboard API<br/>stateless + circuit breaker<br/>+ pod cache for top-100<br/>+ in-memory shard map]
+    CL[Clients] -->|GET top / rank / around-me| CDN[CDN edge<br/>caches top-100 only]
+    CDN -->|miss, or no-store passthrough| API
+    SM[(Shard Map<br/>config store<br/>new in V5)] -.->|bucket to shard, refreshed ~5s| API
+
+    subgraph PGS["Postgres shards, by player_id bucket (new in V5)"]
+        S0[(Shard 0<br/>scores + outbox + ownership)]
+        S1[(Shard 1)]
+        S15[(Shard 15)]
+    end
+
+    subgraph RLS["Outbox Relay pools, one per shard (changed in V5)"]
+        R0[Relay 0]
+        R1[Relay 1]
+        R15[Relay 15]
+    end
+
+    API -->|single-shard txn| S0
+    API -->|single-shard txn| S1
+    API -->|single-shard txn| S15
+    R0 -->|poll, mark published| S0
+    R1 -->|poll, mark published| S1
+    R15 -->|poll, mark published| S15
+    R0 -->|ZADD GT| RP[(Redis Primary<br/>AZ-a)]
+    R1 -->|ZADD GT| RP
+    R15 -->|ZADD GT| RP
+    API -->|ZREVRANK / ZREVRANGE| RP
+    RP -.->|async replication| RA[(Replica 1<br/>AZ-b)]
+    RP -.->|async replication| RB[(Replica 2<br/>AZ-c)]
+    SN[Sentinels x3<br/>one per AZ] -.->|monitor, elect, promote| RP
+    SN -.->|monitor| RA
+    SN -.->|monitor| RB
+    SN -.->|switch-master address| API
+    SN -.->|switch-master address| RLS
+```
+
+Shards 2 through 14 and relays 2 through 14 are identical and omitted for space. New in V5: the 16 Postgres shards, the shard map and the per-shard relay pools.
+
+**Every end-to-end flow right now**
+
+1. **Write path:** Game server calls `POST /v1/scores`. The API hashes `player_id` to a bucket, looks up the shard in its in-memory `shard_map`, and opens one transaction on that Postgres shard. It checks `bucket_ownership`, upserts `scores` and inserts `score_outbox` for each board, then commits and returns 204. *(Changed in V5.)*
+2. **Outbox relay path:** Each shard's Relay pool polls its own `score_outbox` with `SKIP LOCKED`. It pipelines `ZADD GT` into the Redis primary found via Sentinel, then marks the notes published. *(Changed: 16 pools, one per shard.)*
+3. **Top-N path:** Unchanged. Client to CDN, then on a miss to an API pod, then pod cache or single-flight `ZREVRANGE 0 99` on the Redis primary.
+4. **Exact-rank path:** Unchanged. Through the CDN uncached, then `ZREVRANK ... WITHSCORES` on the Redis primary.
+5. **Around-me path:** Unchanged. One `ZREVRANGE r-5 r+5` after the rank lookup.
+6. **Replication path:** Unchanged. The Redis primary streams writes asynchronously to both Redis replicas.
+7. **Failover path:** The Redis failover is unchanged, except the re-publish of the last 60 seconds of outbox rows now runs on all 16 Postgres shards.
+8. **Window rollover and outbox cleanup:** Rollover is unchanged. Cleanup now runs per shard.
+9. **Resharding path (new, operator-driven):** The resharding tool backfills a bucket from shard A to shard B. It then fences A through `bucket_ownership`, opens B and updates `shard_map`. Redis is not involved.
+
+## Interview follow-ups
+
+**Q: Why shard by `player_id` and not `board_id`? Isn't a leaderboard naturally per-board?**
+Reads are served from Redis, so Postgres only needs to be good at writes. Sharding by `board_id` sends every score to the all-time board's shard, which is a hot shard. It also splits one submit across three shards. With `player_id`, a player's three boards and their outbox rows share one shard, so the write stays a local transaction.
+
+**Q: How do you get the global top 100 when players are spread across 16 shards?**
+We don't ask Postgres. The single global ZSET in Redis holds it. For an audit, take the top 100 from each shard and k-way merge 1,600 rows. That is slow, but it's off the hot path.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Write throughput, not size | 80M rows fit on one box. 50K transactions per second don't, so we add primaries instead of partitioning for size. |
+| Shard key follows the write path | `player_id` keeps a player's three boards and outbox rows in one single-shard transaction. |
+| Bucket map | Hash to 1,024 fixed buckets, then map buckets to shards. Growing from 16 to 20 shards moves 20% of rows instead of 80%. |
+| Outbox survives sharding | Each shard owns its own outbox in the same transaction, so V2's guarantee holds without 2PC. |
+| Live moves | The max-merge upsert makes copy-while-writing safe. The ownership guard fences stale writers. |
+
+**Interview arc:** *"One Postgres primary tops out near 5K of our score transactions per second against a 50K-per-second finale, so I shard by hash of player_id into 1,024 buckets mapped onto 16 primaries, which keeps a player's three boards and outbox rows in one local transaction, spreads load evenly, and lets me add shards by moving buckets instead of rehashing everything."*
+
+## Next
+
+Postgres now takes the burst, and 16 relay pools push 150K `ZADD` per second into the one Redis primary. That primary tops out near 100K. Over a 30-second finale the outbox backlog grows by about 1.5M notes, and Redis runs about 15 seconds behind Postgres.
+
+We can't just split the ZSET by player. `ZREVRANK` on one shard would only give your rank among that shard's players. Say **"next"** for V6: sharding the ranking index itself, where exact global rank is the hard part.
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+# V6: Sharding the Ranking Index
+
+**The one concern this version fixes:** one Redis primary can't absorb the write burst that V5 now delivers. Rank availability across shards is a related concern, which I'll cover in the trade-offs.
+
+## Break it
+
+It's 8:00:30pm, the end of the 30-second finale burst. V5 fixed Postgres, so 16 relay pools now drain the outbox at full speed.
+
+Each submit produces up to 3 notes (daily, weekly and all-time), so 50K submits per second means about **150K `ZADD` per second**. All of it goes into one Redis primary. That node runs commands on a single thread, and it tops out near 100K ops per second.
+
+The excess is 50K notes per second. Over the 30-second burst, **1.5M notes** pile up in the outboxes. Draining them takes 15 seconds.
+
+Arjun posts 51,000 at 8:00:30. His note sits behind 1.5M others. At 8:00:40 he refreshes and still sees rank 20,000,413. He sees the new rank at about 8:00:45, which is **15 seconds** later. Our target was 1-2 seconds.
+
+Memory is not the problem. All the ZSETs total about 8GB. This is another write-throughput problem, like V5. Replicas can't help, because they are read-only copies of the same stream.
+
+## The crux, again: exact global rank
+
+We covered what sharding is in V5. The new question is which shard key to use for a structure that answers a *global* question.
+
+A ZSET answers "what's my rank among the members I hold?" Once we split the members, each shard holds only part of the picture. Your exact rank depends on players in every shard.
+
+### Attempt 1: Shard by `hash(player_id)` and run `ZREVRANK` on the owner
+
+*Why it looked reasonable:* It's the same routing that worked in V5. It's even, deterministic and one line of code.
+
+*How it breaks:* Arjun's global rank is 20,000,413. With 8 shards, his shard holds about 6M players, and his shard sees only about 2.5M of them above him.
+
+> **Meera:** Same trick as Postgres. Hash the player, ask that shard for `ZREVRANK`.
+>
+> **Kabir:** Arjun is 20,000,413th overall. What does his shard say?
+>
+> **Meera:** About 2.5 million. It only knows the players it holds.
+>
+> **Kabir:** So it's his rank among one-eighth of the players. Wrong by 8x.
+
+The shard key was fine. The query was wrong.
+
+### Attempt 2: Shard by score range
+
+*Why it looked reasonable:* If shard 0 holds scores above 60K, shard 1 holds 50-60K, and so on, then rank is exact with one command. Rank is the sum of the sizes of all higher shards, plus `ZREVRANK` inside your own shard. Sizes can be cached.
+
+*How it breaks:* Three ways.
+
+1. **Players cross boundaries.** When Arjun goes from 48,200 to 51,000, he moves from one shard to another. That is a `ZREM` on one node and a `ZADD` on another. The two are not atomic, so there is a window where he's in both shards or in neither.
+2. **Hot band.** The finale scores cluster. Say 80% of the 150K writes per second land between 40K and 60K. That band lives on one shard, so it takes 120K writes per second. We're back to the original ceiling.
+3. **Hot reads.** Every top-100 refresh hits the top-range shard.
+
+### Considered and rejected: shard by `board_id`
+
+It's the same hot shard as in V5. The all-time board takes nearly all the traffic, and one board can't be split.
+
+### The real fix: shard by `hash(player_id)`, then add the counts
+
+Think of a school with 8 exam halls. Priya wants her rank among everyone. She asks each hall, "How many of your students scored above 48,200?" She adds the 8 answers and then adds one.
+
+No hall needs to know about the others. Each keeps its own papers sorted with running counts, so each answers instantly.
+
+This is exact for a simple reason. **Every player lives in exactly one shard.** The partitions don't overlap, so the counts add up without double counting.
+
+```text
+rank = 1 + Σ over shards j of  ZCOUNT(shard_j, (my_score, +inf)
+```
+
+Each `ZCOUNT` is O(log N). It uses the span counts in the skip list from V1.
+
+**Ties:** The `(` makes the lower bound exclusive. Players with equal scores now share a rank, like V0 and unlike V1. V1's distinct tie ranks were an accident of `ZREVRANK`. The shared rank is the intended behavior.
+
+### Top-N and around-me work the same way
+
+- **Top-N:** Take the top 100 from each shard and merge the 8 lists. The global top 100 is always inside the union of the per-shard top 100s. Any player in the global top 100 is also in the top 100 of their own shard.
+- **Around-me:** Take the 5 nearest higher and 5 nearest lower scores from each shard. Merge them and keep the nearest 5 on each side.
+
+### Comparing the options
+
+| Option | Exact rank? | Write spread | Rank cost | Verdict |
+|---|---|---|---|---|
+| One ZSET per board (V1) | Yes | None | One O(log N) command | Over its ceiling at 150K/s |
+| Shard by `board_id` | Yes | None for the big board | One O(log N) command | Hot shard |
+| Shard by score range | Only if boundaries hold | Hot score band, cross-shard moves | One command plus cached sizes | Rejected |
+| Approximate rank (histogram) | No | n/a | O(1) | Breaks the exact-rank P0 |
+| **`hash(player_id)` + scatter `ZCOUNT`** | **Yes (sum)** | **Even** | **8 parallel O(log N)** | **Chosen** |
+
+### How many shards?
+
+Our numbers drive this one. We have 150K writes per second against a 100K ceiling per node.
+
+- **8 shards** gives about 19K writes per second each, around 20% of a node's ceiling. That leaves room for roughly 4x growth.
+- **Don't over-shard.** Every rank read fans out to all shards, so each extra shard adds one more call to the slowest-of-N latency.
+- **Hotspots:** None from the key. Writes are per player and hash evenly. The per-player rate limit stops one bot from pinning one shard.
+
+### What resharding costs
+
+The index is **derived** from Postgres, so we never rehash it in place. We build the new layout off to the side and flip a pointer. The blast radius is one board, and the old layout keeps serving until the flip. The cost is temporary extra memory for that board.
+
+## Solve it
+
+- ✅ **What we gained:**
+  - Write capacity of about 8 x 100K per second against a 150K peak, with even load.
+  - Exact global rank, kept exact by the "partitions don't overlap" property.
+  - Each shard is only about 1GB, so failover and rebuilds get cheaper.
+  - A bulkhead on the outbox. One sick index shard no longer blocks the other seven (shown below).
+- ⚠️ **What we gave up:**
+  - **Reads fan out.** A rank read costs 1 `ZSCORE` plus 8 parallel `ZCOUNT`, instead of one `ZREVRANK`. At about 3,000 rank reads per second that is about 27K commands per second in total, or about 3.4K per shard. Cheap, but not free.
+  - **Not a global snapshot.** Each `ZCOUNT` is exact for its shard, but the 8 calls land at slightly different instants. Error is bounded by the few writes that land during the 1-2ms scatter. That's invisible next to our 1-2 second freshness budget.
+  - **Rank availability depends on all 8 shards.** If shard 3 is failing over (10-15 seconds, from V3), an exact rank is impossible. Rank and around-me return 503 with `Retry-After` for that window. Top-100 keeps serving stale from the V4 caches (`stale-if-error`), because a top-100 merged from 7 shards would be wrong.
+  - **24 Redis nodes** (8 primaries and 16 replicas), but small ones.
+  - Neighbour ranks in around-me are assumed to be `r ± position`, which holds when scores are mostly distinct.
+- ❌ **What we considered and rejected:**
+  - **A faster single node.** Command execution is single-threaded, so we'd gain maybe 30%, not 4x headroom.
+  - **Coalescing duplicate notes per batch.** A finale has about one note per player per board, so there is little to merge.
+  - **Redis Cluster slot placement.** It would work, but it doesn't merge `ZCOUNT` across shards, so we'd still write the scatter-gather. It would also replace the Sentinel setup from V3. We stay on replica sets.
+  - **Approximate rank.** We keep it as an escape hatch for boards 10x larger. It violates the exact-rank requirement today.
+
+## Implement it
+
+### Redis key shape (first time for a sharded index)
+
+```text
+Key:    lb:{board_id}:g{gen}:s{i}        e.g.  lb:ranked:alltime:g1:s3
+Type:   ZSET   member = player_id, score = best score
+Holds:  only players where index_shard(player_id) == i
+Lives:  index shard i = its own Redis primary + 2 async replicas (V3 pattern, x8)
+```
+
+The `g{gen}` part is the layout generation. It's what makes resharding a pointer flip.
+
+### Shard function
+
+```python
+def index_shard(player_id: int, shards: int) -> int:
+    digest = hashlib.md5(str(player_id).encode()).digest()
+    return int.from_bytes(digest[4:8], "big") % shards    # bytes 4..8, not 0..4
+```
+
+V5's `bucket_of` uses bytes 0 to 4. We use different bytes so that Postgres placement and index placement are independent. Moving a Postgres bucket never moves a player's index shard.
+
+### Schema deltas
+
+```sql
+-- on each of the 16 Postgres shards
+ALTER TABLE score_outbox ADD COLUMN index_shard SMALLINT NOT NULL DEFAULT 0;
+DROP INDEX idx_outbox_pending;
+CREATE INDEX idx_outbox_pending ON score_outbox (index_shard, id) WHERE published_at IS NULL;
+```
+
+```sql
+-- in the config store, next to shard_map
+CREATE TABLE board_index_config (
+  board_id   TEXT PRIMARY KEY,
+  shards     SMALLINT NOT NULL,   -- 1 for small boards, 8 for big ones
+  gen        SMALLINT NOT NULL,   -- active layout generation
+  next_gen   SMALLINT,            -- set only while a rebuild is running
+  next_shards SMALLINT
+);
+-- boards with no row default to shards=1, gen=1
+```
+
+Small boards stay on one shard. Fanning a 10K-player board out to 8 shards would only add latency.
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| `score_outbox.index_shard` | Leaderboard API, in the same transaction as `scores` | Relay loops (poll filter) | Postgres shards |
+| `lb:{board_id}:g{gen}:s{i}` ZSET | Relay loops. Each note goes to the one shard its player hashes to. | Leaderboard API: `ZSCORE` on the owner shard, scatter reads on all | Index shard i's primary |
+| `board_index_config` | Operator or resharding tool | API pods and relay pools (in-memory, refreshed about every 5s) | Config store |
+
+### Write path (delta only)
+
+`POST /v1/scores` is unchanged. The outbox insert gains one column, and the value differs per board because shard counts differ per board.
+
+```sql
+INSERT INTO score_outbox (board_id, player_id, score, index_shard)
+SELECT board_id, player_id, score, $5 FROM improved;
+-- $5 = index_shard(player_id, shards_for_this_board)
+```
+
+### Relay path: one loop per (Postgres shard, index shard)
+
+```python
+rows = pg.fetch("""
+  SELECT id, board_id, player_id, score FROM score_outbox
+  WHERE published_at IS NULL AND index_shard = %s
+  ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED""", [i])
+
+pipe = redis_primary[i].pipeline()            # Sentinel name: lbmaster{i}
+for r in rows:
+    pipe.zadd(f"lb:{r.board_id}:g{cfg(r.board_id).gen}:s{i}",
+              {str(r.player_id): r.score}, gt=True)
+pipe.execute()                                # then mark published, as in V2
+```
+
+Each loop has its own backoff with jitter from V2. If index shard 3 is down, only the loops for `index_shard = 3` back off. Its notes wait, and the other seven shards keep draining. Without the `index_shard` filter, one failed shard's notes would fill every batch and starve the healthy ones.
+
+**Failover re-publish from V3, now scoped:**
+
+```sql
+UPDATE score_outbox SET published_at = NULL
+WHERE index_shard = $X AND published_at > now() - interval '60 seconds';
+```
+
+This runs on all 16 Postgres shards, but only for the one index shard that failed over.
+
+### Sentinel (delta)
+
+```conf
+sentinel monitor lbmaster0 10.0.1.10 6379 2
+sentinel monitor lbmaster1 10.0.1.11 6379 2
+# ... lbmaster2 to lbmaster7 the same shape.
+# Each master gets the same down-after, failover-timeout and
+# min-replicas-to-write settings as V3.
+```
+
+The same 3 Sentinels now watch 8 masters.
+
+### Read path 1: exact rank
+
+```http
+GET /v1/boards/ranked:alltime/players/98231
+```
+
+1. **Leaderboard API** computes `owner = index_shard(98231, 8)`, say 3.
+2. It runs `ZSCORE lb:ranked:alltime:g1:s3 98231` and gets `48200`. A nil result means the player has no score on this board, so it returns 404.
+3. It scatters to all 8 shards in parallel:
+
+```text
+ZCOUNT lb:ranked:alltime:g1:s0 (48200 +inf     → 2500061
+ZCOUNT lb:ranked:alltime:g1:s1 (48200 +inf     → 2499870
+ZCOUNT lb:ranked:alltime:g1:s2 (48200 +inf     → 2500112
+ZCOUNT lb:ranked:alltime:g1:s3 (48200 +inf     → 2500034
+ZCOUNT lb:ranked:alltime:g1:s4 (48200 +inf     → 2499955
+ZCOUNT lb:ranked:alltime:g1:s5 (48200 +inf     → 2500078
+ZCOUNT lb:ranked:alltime:g1:s6 (48200 +inf     → 2499990
+ZCOUNT lb:ranked:alltime:g1:s7 (48200 +inf     → 2500312
+```
+
+4. It computes `rank = 1 + sum = 1 + 20,000,412 = 20,000,413`.
+5. **Branch:** if any shard doesn't answer within about 50ms, the API returns 503 with `Retry-After: 5`. It does not return a partial sum.
+
+```python
+async def rank_of(board, player_id):
+    cfg = board_cfg(board)
+    owner = index_shard(player_id, cfg.shards)
+    score = await redis[owner].zscore(key(board, cfg, owner), str(player_id))
+    if score is None:
+        raise NotRanked
+    counts = await asyncio.gather(*[
+        redis[j].zcount(key(board, cfg, j), f"({int(score)}", "+inf")
+        for j in range(cfg.shards)])
+    return score, 1 + sum(counts)
+```
+
+### Read path 2: top-N (V4's `fetch_and_store` changes, the rest does not)
+
+The pod cache, single-flight and stale-while-revalidate logic from V4 are unchanged. Only the fetch changes.
+
+```python
+async def fetch_and_store(key_, board):
+    cfg = board_cfg(board)
+    parts = await asyncio.gather(*[
+        redis[j].zrevrange(key(board, cfg, j), 0, 99, withscores=True)
+        for j in range(cfg.shards)])                     # 8 x 100 candidates
+    merged = heapq.merge(*parts, key=lambda t: -t[1])    # each part is sorted by score desc
+    top = list(itertools.islice(merged, 100))
+    ...  # serialize and store exactly as in V4
+```
+
+Ties at the same score come out in no promised order. A refresh costs 8 commands per pod per 0.5s, which is negligible.
+
+### Read path 3: around-me
+
+1. Get `score` with `ZSCORE` on the owner shard, as in the rank path.
+2. On each of the 8 shards, run two commands, pipelined as one round trip per shard:
+
+```text
+ZRANGEBYSCORE    lb:ranked:alltime:g1:s{j} (48200 +inf WITHSCORES LIMIT 0 5
+ZREVRANGEBYSCORE lb:ranked:alltime:g1:s{j} (48200 -inf WITHSCORES LIMIT 0 5
+```
+
+3. Merge the 40 higher candidates ascending and keep the nearest 5. Merge the 40 lower candidates descending and keep the nearest 5.
+4. Return the player's rank (from the rank path) with these 10 neighbours and their scores.
+
+### Sequence: exact rank read
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as Leaderboard API
+    participant S3 as Index shard 3 (owner)
+    participant S0 as Index shard 0
+    participant S7 as Index shard 7
+
+    C->>API: GET /v1/boards/ranked:alltime/players/98231
+    API->>S3: ZSCORE lb:ranked:alltime:g1:s3 98231
+    S3-->>API: 48200
+    par scatter to all 8 shards (3 shown)
+        API->>S0: ZCOUNT lb:ranked:alltime:g1:s0 (48200 +inf
+        S0-->>API: 2500061
+    and
+        API->>S3: ZCOUNT lb:ranked:alltime:g1:s3 (48200 +inf
+        S3-->>API: 2500034
+    and
+        API->>S7: ZCOUNT lb:ranked:alltime:g1:s7 (48200 +inf
+        S7-->>API: 2500312
+    end
+    Note over API: rank = 1 + sum of 8 counts = 20,000,413
+    API-->>C: rank 20000413, score 48200
+```
+
+### Resharding the index: rebuild off to the side, then flip
+
+This also moves V5's existing single-ZSET boards into the 8-shard layout.
+
+1. Provision the new shards. Set `next_gen` and `next_shards` on the board's config row. Relay loops now dual-write every note to both layouts with `ZADD GT`.
+2. A backfill job streams `SELECT player_id, score FROM scores WHERE board_id = $1` from each Postgres shard and runs `ZADD GT` into the new layout.
+3. Verify that the sum of `ZCARD` across the new shards equals the sum of `COUNT(*)` across the Postgres shards, and that outbox lag is near zero.
+4. Flip: `UPDATE board_index_config SET gen = 2, shards = 16, next_gen = NULL, next_shards = NULL WHERE board_id = $1`. Pods adopt it within about 5 seconds. Both layouts are complete, so either answers correctly during the switch.
+5. Delete the old keys after a grace period.
+
+This is safe to repeat because `ZADD GT` is an idempotent max, the property V2 established.
+
+## Current State (V6)
+
+```mermaid
+graph LR
+    GS[Game Servers] -->|POST /v1/scores| API[Leaderboard API<br/>stateless + circuit breaker<br/>+ pod cache for top-100<br/>+ in-memory shard map<br/>+ board index config, new in V6]
+    CL[Clients] -->|GET top / rank / around-me| CDN[CDN edge<br/>caches top-100 only]
+    CDN -->|miss, or no-store passthrough| API
+    CFG[(Config store<br/>shard_map + board_index_config<br/>changed in V6)] -.->|refreshed ~5s| API
+    CFG -.->|index layout| RLS
+
+    subgraph PGS["Postgres shards, by player_id bucket"]
+        S0[(Shard 0<br/>scores + outbox with index_shard + ownership)]
+        S1[(Shard 1)]
+        S15[(Shard 15)]
+    end
+
+    subgraph RLS["Outbox Relay pools, loop per Postgres shard x index shard (changed in V6)"]
+        R0[Relay 0]
+        R1[Relay 1]
+        R15[Relay 15]
+    end
+
+    subgraph IDX["Redis index shards, by hash of player_id (new in V6)"]
+        I0[(Index shard 0<br/>primary + 2 async replicas)]
+        I1[(Index shard 1<br/>primary + 2 async replicas)]
+        I7[(Index shard 7<br/>primary + 2 async replicas)]
+    end
+
+    API -->|single-shard txn| S0
+    API -->|single-shard txn| S1
+    API -->|single-shard txn| S15
+    R0 -->|poll, mark published| S0
+    R1 -->|poll, mark published| S1
+    R15 -->|poll, mark published| S15
+    R0 -->|ZADD GT to the player's index shard| IDX
+    R1 -->|ZADD GT| IDX
+    R15 -->|ZADD GT| IDX
+    API -->|ZSCORE, then scatter ZCOUNT / ZREVRANGE / ZRANGEBYSCORE| IDX
+    SN[Sentinels x3<br/>one per AZ<br/>monitor 8 masters] -.->|monitor, elect, promote per shard| IDX
+    SN -.->|switch-master address| API
+    SN -.->|switch-master address| RLS
+```
+
+Postgres shards 2 through 14, relays 2 through 14 and index shards 2 through 6 are identical and omitted for space.
+
+**Every end-to-end flow right now**
+
+1. **Write path:** The game server calls `POST /v1/scores`. The API hashes `player_id` to a bucket, finds the Postgres shard and opens one transaction there. It checks `bucket_ownership`, upserts `scores`, and inserts `score_outbox` rows. Each row now carries `index_shard`. It commits and returns 204. *(Changed in V6: the outbox row has `index_shard`.)*
+2. **Outbox relay path:** Each relay pool runs one loop per index shard. A loop polls pending notes for its index shard with `SKIP LOCKED` and pipelines `ZADD GT` to that shard's primary, found through Sentinel. It then marks the notes published. A down index shard only stalls its own loops. *(Changed in V6.)*
+3. **Top-N path:** The client asks the CDN, which on a miss asks one API pod. The pod serves its cache if fresh or stale. If cold, it runs one single-flight scatter of 8 `ZREVRANGE 0 99`, merges and caches the result. *(Changed in V6: scatter and merge.)*
+4. **Exact-rank path:** The request passes through the CDN uncached. The API runs `ZSCORE` on the owner shard, then 8 parallel `ZCOUNT`. Rank is 1 plus the sum. *(Changed in V6.)*
+5. **Around-me path:** After the score lookup, the API runs 2 range queries per shard, merges 80 candidates and keeps the nearest 5 on each side. *(Changed in V6.)*
+6. **Replication path:** Unchanged in mechanism. It now happens inside each of the 8 index shards.
+7. **Failover path:** Each index shard fails over independently using the V3 mechanism. During one shard's 10-15 seconds, top-100 serves stale (V4), and rank and around-me return 503 with `Retry-After`. The 60-second outbox re-publish runs only for that index shard. *(Changed in V6.)*
+8. **Window rollover and outbox cleanup:** Unchanged. A new window is a new `board_id`, so its ZSET keys appear on first `ZADD`.
+9. **Postgres resharding path:** Unchanged. It never touches Redis.
+10. **Index resharding path (new, operator-driven):** Dual-write through the relay, backfill from Postgres, verify counts, then flip `gen` in `board_index_config`.
+
+## Interview follow-ups
+
+**Q: Why not shard by score range, so rank is one command plus an offset?**
+Because players cross shard boundaries whenever their score improves. That is a non-atomic `ZREM` plus `ZADD` across two nodes. Scores also cluster. In a finale, most writes land in one band, so one shard takes them. Every top-N refresh hits the top shard too. Hashing by player spreads the load evenly and keeps each player in one place. We pay for it with 8 parallel counts per rank read.
+
+**Q: Doesn't scatter-gather stop scaling as you add shards?**
+Yes. Rank latency is the slowest of N calls, and total read load multiplies by N. At 8 shards each call is cheap and parallel, so it's fine. At hundreds of shards I'd stop summing exactly. I'd keep the exact top K in a small ZSET and answer ranks below K from a score histogram, which is approximate. That would be a product decision, since it trades away exact rank for the tail.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Why shard Redis | Command execution is single-threaded. 150K writes per second against a 100K ceiling means a 15-second lag. |
+| Rank is additive | Every player lives in one shard, so global rank is `1 + Σ ZCOUNT` across shards, with no double counting. |
+| Top-N merge | The global top K always sits inside the union of each shard's top K. |
+| Shard key | `hash(player_id)` spreads writes evenly. Score range creates a hot band and non-atomic moves between shards. |
+| Bulkhead | Tagging outbox rows with `index_shard` means one sick shard stalls only its own slice. |
+| New costs | Reads fan out to all shards, and exact rank is unavailable while any one shard fails over. |
+
+**Interview arc:** *"One Redis primary can't take 150K ZADDs per second, and splitting the ZSET by player breaks rank because each shard only sees its own slice, so I shard by hash of player_id and compute rank as one plus the sum of ZCOUNT across all eight shards, which stays exact because the partitions don't overlap, and I merge per-shard top-100s for the leaderboard."*
+
+## Next
+
+Arjun lives in Hyderabad. Every game server, Postgres shard and Redis node is in us-east-1. Each rank read crosses the planet, about 220ms round trip, before any work starts. If us-east-1 has a bad hour, the whole leaderboard goes with it. Say **"next"** for V7: multi-region.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+# V7: Multi-Region
+
+**The one concern this version fixes:** every read pays a trip to us-east-1, and one regional incident takes reads down worldwide. Surviving the loss of a region's *write* side is a separate problem, and I'll flag it at the end.
+
+## Break it
+
+Arjun lives in Hyderabad. Everything we've built runs in us-east-1.
+
+He taps "my rank". The request path is client to CDN, then past the CDN (rank is `no-store`) to an API pod in Virginia. Round trip to Virginia is about 220ms.
+
+- **Cold connection:** TCP, then TLS, then the request. That is 3 round trips, so about **700ms**.
+- **Warm connection:** one round trip, so about **230ms**.
+- **Inside Virginia** the whole `ZSCORE` plus 8 parallel `ZCOUNT` takes under 10ms. The work is cheap and the distance is the whole cost.
+
+About 60% of players are outside the Americas, so most of the player base pays this.
+
+The second failure is worse. Say us-east-1 has a 47-minute networking incident. Every rank and around-me read worldwide returns 503. Arjun's data is fine, but his reads depend on a region 13,000km away. Top-100 survives on `stale-if-error=30` for 30 seconds, then that goes too.
+
+Both failures have the same root. One region holds everything.
+
+## What multi-region is
+
+Think of a bank with branches in three cities and one vault. Every customer, wherever they are, queues at the vault's city. A branch with its own copy of the ledger can answer "what's my balance?" down the street.
+
+The hard part is keeping the ledgers in step when deposits happen at any branch. So the key question is who is allowed to write.
+
+## Write ownership: the real options
+
+Our writes are scores. They have a property that helps us a lot. A score update is "keep the maximum." Applying a max twice changes nothing, and applying maxes in any order gives the same answer. That is a max register, and it's the reason ownership can be simple here.
+
+| Option | Who owns a player's writes | Index conflicts | Region-loss blast radius (writes) | Verdict |
+|---|---|---|---|---|
+| Single write region, remote Redis read replicas | us-east-1, for everyone | None | **All** writes stop | Valid and simpler. Fixes reads only. |
+| **Per-player home region, full index copy in every region** | The player's home region | None by construction | Only that region's players | **Chosen** |
+| Any region writes any player (active-active Postgres) | Whoever receives the request | Two rows for one player to reconcile | Small | Needs multi-master Postgres. Home region avoids that. |
+| Per-board home region | One region per board | None | One board | The all-time board is hot again, like V5 and V6. |
+
+### How conflicts are avoided, and resolved if they happen
+
+Two layers.
+
+1. **Postgres has one writer per row.** A player's rows live only in their home region. Two regions can't create competing versions.
+2. **The index merges safely.** Every note is `ZADD GT`, a max. Duplicates, reordering, relay replays and even two writers all converge to the same value.
+
+Layer 2 depends on a scoping answer from the start: best score wins, scores don't go down. If scores could decrease, a max would be wrong and we'd need version numbers.
+
+### Which region is a player's home?
+
+Chosen once at signup from the country, and encoded in the top bits of `player_id`. Routing needs no lookup. A player who moves countries keeps their home. Only their writes cross an ocean, and their reads are local anyway.
+
+## Solve it
+
+Three changes, all one mechanism: a full copy of the ranking index in every region, fed by the player's home region.
+
+1. Three regions: `us-east-1` (code 0), `eu-west-1` (1), `ap-south-1` (2).
+2. Each region runs the V5 Postgres shards for its own players, and the V6 index shards holding **all** players.
+3. Each home region's relay delivers every note to all three regions' indexes. Reads are served from the nearest region.
+
+- ✅ **What we gained:**
+  - Arjun's rank tap drops from 230-700ms to about **20-60ms**, since both client and index are in Mumbai.
+  - A region outage no longer takes down reads worldwide. DNS steers clients to the next-nearest region.
+  - A dead region stops only the writes of players homed there, about 1/3 of players at worst, not everyone.
+  - Each region's Postgres carries only its own players' write load.
+- ⚠️ **What we gave up:**
+  - **Cross-region staleness.** A note takes the outbox lag (about 0.2s) plus a WAN trip (about 0.2-0.3s). Two users in different regions can see slightly different top-100s for about a second.
+  - **The V4 staleness budget gets one more term.** Worst case for a remote top-100 is about 0.2 outbox + 0.3 WAN + 0.5 pod + 0.5 CDN = **about 1.5s**. To stay inside it, the CDN `max-age` drops from 1s to 0.5s.
+  - **Per-target delivery tracking.** In V3 I rejected hand-rolled dual-write because the outbox tracks one published state. With three targets that need returns, so we add a per-region delivery bitmask.
+  - **3x the index memory.** About 72 small Redis nodes, 24 per region.
+  - **Loops contend on the same rows.** `SKIP LOCKED` makes them take turns, costing at most one poll interval.
+  - **Non-home writes cross the WAN.** A traveling player's submit takes an extra 200ms hop. The game server isn't waiting on a human, so that's fine.
+  - **A home region's write side is still a single point of failure.** That is the next version.
+- ❌ **What we considered and rejected:**
+  - **Redis `replicaof` across regions.** A replica can only follow one primary, so remote indexes couldn't accept notes from all three home regions.
+  - **Multi-master Postgres.** The max rule would make it converge, but we'd run bidirectional replication to avoid a problem that home-region ownership removes.
+  - **Approximate remote ranks.** The exact-rank requirement still holds.
+
+## Implement it
+
+### Player ID layout and home region
+
+```text
+player_id (64-bit):  [ 8 bits region code | 56 bits sequence ]
+region_of(player_id) = player_id >> 56          # 0=us-east-1, 1=eu-west-1, 2=ap-south-1
+```
+
+```python
+def region_of(player_id: int) -> int:
+    return player_id >> 56
+```
+
+This is a third, independent split. V5's `bucket_of` uses md5 bytes 0-4, V6's `index_shard` uses bytes 4-8, and region comes from the ID bits.
+
+### Schema delta (every Postgres shard)
+
+```sql
+ALTER TABLE score_outbox ADD COLUMN delivered_mask SMALLINT NOT NULL DEFAULT 0;
+-- bit 0 = us-east-1, bit 1 = eu-west-1, bit 2 = ap-south-1; 7 = delivered everywhere
+
+DROP INDEX idx_outbox_pending;
+CREATE INDEX idx_outbox_pending ON score_outbox (index_shard, id)
+  WHERE delivered_mask <> 7;
+```
+
+`published_at` now means "delivered to all three." The V2 cleanup job is unchanged.
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| `scores`, `score_outbox` | Leaderboard API in the player's **home** region | Relay loops, rebuild jobs | Home region's Postgres shards |
+| `score_outbox.delivered_mask` | Relay loops, one bit per target | Relay loops, cleanup job | Same shard |
+| `lb:{board_id}:g{gen}:s{i}` ZSET, in **each** region | Relay loops from **all** home regions, via `ZADD GT` | Leaderboard API in that region only | That region's Redis index shards |
+| `board_index_config` | Operator or resharding tool | API pods and relays in every region | Config store, replicated to all regions (small, changes rarely) |
+| Latency-routing DNS records | Operator | Clients' resolvers | GeoDNS |
+
+### Write path
+
+`POST /v1/scores` keeps the same body. The API adds one decision.
+
+1. **Leaderboard API** (in the region that received it) computes `home = region_of(player_id)`.
+2. **Branch: home equals this region.** Run the V5/V6 write unchanged: ownership guard, 3 upserts, 3 outbox inserts (with `index_shard` and `delivered_mask = 0`), commit, return `204`.
+3. **Branch: home differs.** Forward the request to the home region's API:
+
+```http
+POST https://api.ap-south-1.internal/v1/scores
+X-Forwarded-Region: us-east-1
+{ "player_id": 2305843009213693952, "match_id": "m_7f3a", "score": 48200, ... }
+```
+
+4. If the home region answers, return its status to the game server.
+5. **Branch: the home region is unreachable.** Return `503`. The game server retries later. Retries are safe because the upsert only applies a higher score.
+
+Board IDs come from the match's UTC end time in the request body, not from any server's clock. Two regions can never disagree about which daily board a match belongs to.
+
+### Relay: one loop per (Postgres shard, index shard, target region)
+
+```python
+POLL_SQL = """
+  SELECT id, board_id, player_id, score FROM score_outbox
+  WHERE index_shard = %s AND (delivered_mask & %s) = 0
+  ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED"""
+
+MARK_SQL = """
+  UPDATE score_outbox
+  SET delivered_mask = delivered_mask | %s,
+      published_at = CASE WHEN (delivered_mask | %s) = 7 THEN now() END
+  WHERE id = ANY(%s)"""
+
+def run_loop(pg_shard, index_shard, target):          # target = 0, 1 or 2
+    bit = 1 << target
+    with pg[pg_shard].transaction():
+        rows = pg[pg_shard].fetch(POLL_SQL, [index_shard, bit])
+        if rows:
+            pipe = redis_primary[target][index_shard].pipeline()   # that region's Sentinel
+            for r in rows:
+                pipe.zadd(f"lb:{r.board_id}:g{cfg(r.board_id).gen}:s{index_shard}",
+                          {str(r.player_id): r.score}, gt=True)
+            pipe.execute()                           # one WAN round trip per batch
+            pg[pg_shard].execute(MARK_SQL, [bit, bit, [r.id for r in rows]])
+```
+
+Four details:
+
+- **Discovery:** the relay asks the *target region's* Sentinels for that region's master, so a remote failover is handled the V3 way.
+- **Bulkhead:** each target has its own backoff, jitter and circuit breaker. A dead region stalls only its own bit. The other two keep delivering.
+- **Throughput:** a batch of 500 per WAN round trip gives about 2K notes per second per loop, and there are 128 loops per target. That clears a 150K per second peak with room to spare. Loops sleep when idle.
+- **Retention:** rows stay until all three bits are set. If a region is down for hours, the outbox grows. Past a size cap, we rebuild that region's index (V6's rebuild path, using a temporary `replicaof` from a healthy peer to seed it) and clear its bit.
+
+### Failover re-publish (V3 rule, now per target)
+
+When region X's index shard `s` fails over, re-send only to that region and shard:
+
+```sql
+UPDATE score_outbox
+SET delivered_mask = delivered_mask & ~$bit_x, published_at = NULL
+WHERE index_shard = $s AND created_at > now() - interval '60 seconds';
+```
+
+### Reads: everything stays local
+
+The API in each region reads only its own index. The V6 rank, top-N and around-me code is **unchanged**. Only the routing in front of it changes.
+
+```text
+api.leaderboard.example  latency-based records
+  ap-south-1  → ALB-ap    health check: GET /healthz/ready, every 10s, fail after 3 misses
+  eu-west-1   → ALB-eu    same
+  us-east-1   → ALB-us    same
+```
+
+`/healthz/ready` fails when the API is down or its remote-delivery lag is over 30 seconds. Three misses (30s) are required before DNS flips, so a normal 10-15 second shard failover doesn't make traffic leave the region.
+
+### CDN header delta
+
+```http
+Cache-Control: public, max-age=0.5, stale-while-revalidate=2, stale-if-error=30
+```
+
+### Sequence: write in the home region, fan out, read locally
+
+```mermaid
+sequenceDiagram
+    participant GS as Game Server (Mumbai)
+    participant API as API ap-south-1
+    participant PG as Postgres shard (ap-south-1)
+    participant RL as Relay loops (ap-south-1)
+    participant IA as Index ap-south-1
+    participant IU as Index us-east-1
+    participant IE as Index eu-west-1
+    participant C as Client (Hyderabad)
+
+    GS->>API: POST /v1/scores (player homed ap-south-1)
+    API->>PG: BEGIN; guard; 3x (upsert + outbox, mask=0); COMMIT
+    API-->>GS: 204
+    par three loops, one per target
+        RL->>IA: ZADD GT (about 5 ms)
+        IA-->>RL: ok
+        RL->>PG: mask |= 4
+    and
+        RL->>IU: ZADD GT (WAN, about 220 ms)
+        IU-->>RL: ok
+        RL->>PG: mask |= 1
+    and
+        RL->>IE: ZADD GT (WAN, about 130 ms)
+        IE-->>RL: ok
+        RL->>PG: mask |= 2, published_at = now() when mask is 7
+    end
+    C->>API: GET /players/{id} (latency routing picks ap-south-1)
+    API->>IA: ZSCORE, then 8x ZCOUNT in parallel
+    IA-->>API: score, counts
+    API-->>C: rank (about 30 ms end to end)
+```
+
+## Current State (V7)
+
+```mermaid
+graph TB
+    CL[Clients worldwide] --> DNS["GeoDNS latency routing<br/>+ health checks (new in V7)"]
+    DNS --> CDN["CDN edges<br/>top-100 only, max-age 0.5s"]
+    CDN --> APIA
+    CDN --> APIB
+    CDN --> APIC
+    CFG[("Config store replicated to all regions<br/>shard_map per region<br/>board_index_config global")]
+
+    subgraph R0["us-east-1, region code 0"]
+        GSA[Game servers] -->|POST /v1/scores| APIA["Leaderboard API<br/>breaker, pod cache, shard map<br/>forwards non-home writes"]
+        APIA --> PGA[("Postgres 16 shards<br/>players homed here<br/>scores + outbox with delivered_mask")]
+        RLA["Outbox Relay loops<br/>per pg shard, index shard, target"] --> PGA
+        APIA --> IDXA[("Redis index, 8 shards<br/>ALL players, primary + 2 replicas")]
+        SNA["Sentinels x3"] -.-> IDXA
+    end
+
+    subgraph R1["eu-west-1, region code 1 (same stack)"]
+        GSB[Game servers] --> APIB[Leaderboard API]
+        APIB --> PGB[("Postgres 16 shards<br/>players homed here")]
+        RLB[Outbox Relay loops] --> PGB
+        APIB --> IDXB[("Redis index, 8 shards<br/>ALL players")]
+        SNB["Sentinels x3"] -.-> IDXB
+    end
+
+    subgraph R2["ap-south-1, region code 2 (same stack)"]
+        GSC[Game servers] --> APIC[Leaderboard API]
+        APIC --> PGC[("Postgres 16 shards<br/>players homed here")]
+        RLC[Outbox Relay loops] --> PGC
+        APIC --> IDXC[("Redis index, 8 shards<br/>ALL players")]
+        SNC["Sentinels x3"] -.-> IDXC
+    end
+
+    RLA -->|ZADD GT, WAN| IDXB
+    RLA -->|ZADD GT, WAN| IDXC
+    RLB -->|ZADD GT, WAN| IDXA
+    RLB -->|ZADD GT, WAN| IDXC
+    RLC -->|ZADD GT, WAN| IDXA
+    RLC -->|ZADD GT, WAN| IDXB
+    RLA -->|ZADD GT, local| IDXA
+    RLB -->|ZADD GT, local| IDXB
+    RLC -->|ZADD GT, local| IDXC
+    APIA -.->|forward non-home write| APIB
+    APIB -.->|forward non-home write| APIC
+    APIC -.->|forward non-home write| APIA
+    CFG -.-> APIA
+    CFG -.-> APIB
+    CFG -.-> APIC
+```
+
+Inside each region, the 16 Postgres shards, the 8 index shards and the relay pools are exactly the V5/V6 layout. New in V7: the regions, GeoDNS, the home-region rule, WAN delivery with `delivered_mask`, and request forwarding.
+
+**Every end-to-end flow right now**
+
+1. **Write path, home region:** The game server calls `POST /v1/scores` on its local API. The API sees that `region_of(player_id)` matches its own region. It opens one transaction on the right Postgres shard, checks `bucket_ownership`, upserts `scores`, inserts outbox rows (`delivered_mask = 0`) and commits. It returns 204. *(Unchanged from V6 apart from the mask column.)*
+2. **Write path, non-home region (new):** The local API sees that the home region differs. It forwards the request to the home region's API, which runs flow 1. If that region is unreachable it returns 503 and the game server retries.
+3. **Relay delivery path (changed):** Each home region runs one loop per (Postgres shard, index shard, target region). Each loop polls rows whose bit for its target is unset, pipelines `ZADD GT` to that region's index shard primary, then sets the bit. `published_at` is set when all three bits are set.
+4. **Top-N path:** Unchanged in logic. The client reaches the nearest CDN edge, which on a miss asks a pod in the nearest region. The pod serves its cache or does one single-flight 8-shard scatter on its **local** index. CDN `max-age` is now 0.5s. *(Changed.)*
+5. **Exact-rank path:** Unchanged in logic. GeoDNS sends the client to the nearest healthy region. The API runs `ZSCORE` plus 8 parallel `ZCOUNT` on its local index. *(Changed: local, not Virginia.)*
+6. **Around-me path:** Unchanged in logic and local, with the same merge as V6.
+7. **Replication path:** Unchanged in mechanism. Each index shard replicates within its own region.
+8. **Index failover path:** Unchanged in mechanism, per region. The 60-second re-publish now clears only the failed region's bit and only for that index shard.
+9. **Region-unhealthy path (new):** A region that fails 3 health checks is removed from DNS. Clients are steered to the next-nearest region, which serves from its own full index copy. Writes for players homed in the dead region return 503 until it returns.
+10. **Window rollover and outbox cleanup:** Unchanged. Board IDs use the match's UTC end time.
+11. **Postgres resharding path:** Unchanged, within one region.
+12. **Index resharding path:** Unchanged in steps. It runs in all three regions and the `gen` flip is one replicated config row.
+
+## Interview follow-ups
+
+**Q: Why not one write region with Redis replicas in the other two? It's much simpler.**
+For a read-latency problem alone, it is, and I'd pick it. It needs no delivery tracking and no home-region logic. I chose per-player home regions for write-side reasons. A region outage stops 1/3 of players' writes instead of all of them. Each region's Postgres carries only its own load. And most submits stay local with no WAN hop in the transaction. It's safe because scores are max registers, so the index tolerates multiple writers.
+
+**Q: What happens if two regions write the same player at the same time?**
+Postgres can't see this, because only the home region writes a player's row. If a forwarded write somehow lands twice, or a relay replays, the index receives two `ZADD GT`. A max is idempotent, commutative and associative, so both orders give the same score. This relies on scores never decreasing. If they could, I'd add a version number and compare `(version, score)` instead of taking a max.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Why go multi-region | Distance dominates. The rank work takes 10ms and the trip to Virginia takes 220ms. One region is also one failure domain. |
+| Ownership by home region | One writer per player's Postgres rows, so there is nothing to reconcile in the source of truth. |
+| Max register | `ZADD GT` is idempotent and order-independent, so every region's index converges without coordination. |
+| Per-target delivery | `delivered_mask` gives each region its own progress, and a dead region stalls only its own bit. |
+| Staleness budget | Outbox, WAN, pod and CDN lags add up to about 1.5s. We cut the CDN TTL to stay inside the target. |
+
+**Interview arc:** *"Serving every rank read from one region costs 700ms for a player in Hyderabad and takes reads down worldwide when that region fails, so I give each player a home region that owns their writes and keep a full copy of the ranking index in every region fed by idempotent max-merge notes, which makes reads local and conflict-free without needing multi-master Postgres."*
+
+## Next
+
+The ap-south-1 region goes dark for 4 hours. Reads everywhere are fine, because the other two regions hold full indexes. But the 15M players homed in Mumbai can't submit a score, and their scores in the dead region's Postgres are unreachable. When the region returns, every game server retries at once. Say **"next"** for V8: surviving the loss of a home region's write side.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+# V8: Surviving the Loss of a Home Region's Write Side
+
+**The one concern this version fixes:** each home region's Postgres lives in one region only. That hurts both write availability and durability. Knowing the system is healthy and fresh is a separate problem, and I'll flag it at the end.
+
+## Break it
+
+It's 3:10pm and ap-south-1 goes dark. It stays dark for 4 hours. Reads are fine, because eu-west-1 and us-east-1 hold full index copies.
+
+Writes are not fine. Three things break.
+
+**1. Writes for 15M players fail.**
+- Average load is about 2,000 submits per second worldwide.
+- One third of players are homed in ap-south-1, so about **670 submits per second** return 503.
+- Over 4 hours that is **9.6M rejected submits**.
+- Nobody homed in Mumbai moves on the leaderboard all afternoon.
+
+**2. Committed scores are stranded.**
+- Arjun posted 51,000 at 3:09:59.8pm. It committed in Mumbai's Postgres.
+- Delivery to the eu and us indexes takes about 0.3s, so it never arrived.
+- DNS sends him to eu-west-1, whose index still says 48,200.
+- His accepted score is invisible until Mumbai returns.
+
+**3. If the region is lost for good, so is the data.**
+- Mumbai's Postgres is the only copy of about **27M rows**, one third of the 80M total.
+- The other regions' Redis indexes hold roughly the same scores. But they are derived, asynchronous and best-effort, and they're not a database.
+
+Both the outage and the loss have one root. The source of truth for a home region exists in exactly one region.
+
+## Is replication justified here?
+
+Yes, but for durability and failover, not read scaling. Postgres reads are rare, because Redis serves every rank read. These standbys will serve no reads.
+
+This is the same async replication idea from V3, now applied to Postgres. The primary streams its write-ahead log (WAL) to a standby, which replays it.
+
+## The naive attempts
+
+This isn't the crux, so I'll keep the walk short.
+
+### Attempt 1: Game servers buffer and retry until the region returns
+
+*Why it looked reasonable:* Nothing is lost if every submit is eventually retried.
+
+*How it breaks:*
+- Buffered submits live in game-server memory. A deploy or crash loses them.
+- Buffering 4 hours is 9.6M submits, about 3GB fleet-wide.
+- At recovery every server retries at once. Drained in 60 seconds, that is about **160K submits per second** into a cold region whose 16 shards sustain about 80K.
+- If the disks are gone, retries accomplish nothing.
+
+### Attempt 2: A surviving region accepts writes for the dead region's players
+
+*Why it looked reasonable:* eu-west-1 is healthy, so let it take the writes.
+
+*How it breaks:* eu's shards hold none of these players' history. The best-score guard compares a new score against nothing, so a worse score is accepted as an improvement. When Mumbai returns, two diverging copies exist, and nothing in eu was ever a durable copy of the old data.
+
+### Attempt 3: Rebuild the dead region's Postgres from the surviving Redis indexes
+
+*Why it looked reasonable:* The indexes already hold every player's best score.
+
+*How it breaks:* The indexes are asynchronous and derived. They hold no outbox, no `updated_at` and no match history. A rebuild from them looks complete but quietly drops whatever the indexes hadn't received. This is a last-resort path, not a plan.
+
+## The real fix: an asynchronous standby in another region, plus a controlled promotion
+
+Think of a bank's disaster-recovery site. A second branch keeps a near-live copy of the ledger. If the main branch burns down, the manager makes one deliberate call, and the second branch starts serving. The hard part is making sure the old branch can never open again as if nothing happened.
+
+### Sync or async?
+
+| Mode | Commit latency | Data lost on region loss | If the standby is unreachable | Verdict |
+|---|---|---|---|---|
+| **Async** | +0 | Last 0.1-1s of commits | Writes continue | **Chosen** |
+| Synchronous to one remote standby | +130ms per commit. At 5K tps that is about 650 commits in flight per shard instead of about 25. | None | Commits block | Rejected |
+| Quorum (`ANY 1` of two remote standbys) | +130ms to the nearer one | None | Continues if one remote is up | Rejected: latency on every write |
+
+**Why async is acceptable here:** A lost score is a max register. The game backend keeps recent match results, so lost submits can be replayed. I show that in the implementation. We accept a loss window of under a second to avoid adding 130ms to every write.
+
+### Where do standbys live?
+
+Each home region's standbys sit in the nearest other region.
+
+| Home region | Standby region | Round trip |
+|---|---|---|
+| us-east-1 | eu-west-1 | about 75ms |
+| eu-west-1 | us-east-1 | about 75ms |
+| ap-south-1 | eu-west-1 | about 130ms |
+
+### Who decides to fail over? This is a known sub-problem, so here are the real options
+
+| Option | Mechanism | Sketch | Fits us? |
+|---|---|---|---|
+| **Operator-approved runbook with fencing** | A human confirms the outage. A script promotes the standbys, bumps an epoch and flips the region map. | `failover-region --home 2 --to 1` | **Chosen** |
+| Patroni plus etcd across 3 regions | A cross-region quorum elects and promotes automatically. | leader key in etcd, `patronictl failover` | Valid later. Every leader renewal then depends on WAN quorum. |
+| Managed global database | The provider promotes a secondary cluster. | the provider's global-cluster failover API | Valid on a managed platform. Same mechanism, hidden. |
+
+**Why a human decides:** A false positive costs a data-loss window and a failback. A blip shorter than 15 minutes is absorbed by game-server retries. So a rare, expensive decision gets a person. The cost is about 10 extra minutes of downtime.
+
+### Fencing: making sure the old region can't write after the flip
+
+Two guards.
+
+1. **A write lease.** A pod that can't refresh the region map within 30 seconds refuses writes. By the time an operator promotes, at 5+ minutes, every pod in the dead region has already stopped.
+2. **An epoch in the database.** Every write transaction checks that the shard's epoch matches the one in the region map. After promotion the epoch is higher. A stale writer hitting an old primary is rejected once that primary comes back.
+
+Even if a split brain slipped through, V7's property saves us. Scores are max registers. Two diverged copies reconcile with the same max-merge upsert used for resharding in V5.
+
+## Solve it
+
+- ✅ **What we gained:**
+  - **Write recovery in about 10-15 minutes**, not 4 hours or forever.
+  - **Durability:** a lost region loses under a second of commits, and those are replayable.
+  - **No write-path latency cost.** Replication is async and off the commit path.
+  - **Contained blast radius.** Only one region's players are affected, and the other two regions never notice.
+- ⚠️ **What we gave up:**
+  - **A loss window (RPO) of about 0.1-1s.** Acked submits in that window can vanish from Postgres. We heal them with replay.
+  - **Another consistency subtlety.** The surviving indexes can be *ahead* of the promoted Postgres, because index delivery is faster than WAL shipping. So we never rebuild an index from the promoted Postgres before replay completes.
+  - **About 100% more Postgres cost.** That is 48 more shard nodes across the three regions. eu-west-1 hosts standbys for both us-east-1 and ap-south-1.
+  - **A slot-retention risk.** A standby that is down makes its primary keep WAL until the disk fills. We cap this, and past the cap the standby must be re-seeded.
+  - **Operational weight.** Failback is a real procedure, shown below.
+  - **In-region failover touches the stream.** When V5's AZ standby takes over, the cross-region stream must re-point.
+- ❌ **What we considered and rejected:**
+  - Synchronous or quorum replication.
+  - Game-server buffering as the only defense.
+  - Writing into another region's existing shards.
+  - Rebuilding from Redis.
+  - Multi-master Postgres, which V7 already rejected.
+  - Automatic cross-region promotion, for now.
+
+## Implement it
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| WAL stream of each home shard | Postgres primary (not our code) | Its standby shard | Primary's region, to the paired region |
+| Standby shards | Postgres replication | Nobody until promotion | Paired region |
+| `region_epoch` (per shard) | Promotion script | Leaderboard API (guard inside every write transaction) | Each Postgres shard, replicated to its standby |
+| `region_map` and `shard_hosts` | Promotion script only | API pods and relay pools in all regions (about 5s refresh) | Config store |
+| Replayed match results | Game backend | Leaderboard API, through `POST /v1/scores` | Game backend's durable match log |
+
+### Cross-region replication config
+
+On each ap-south-1 primary shard:
+
+```conf
+wal_level = replica
+max_wal_senders = 4
+synchronous_commit = on                  # local durability only
+# synchronous_standby_names unset        -> remote standby is async
+max_slot_wal_keep_size = 50GB            # cap on WAL held for a lagging standby
+```
+
+```sql
+SELECT pg_create_physical_replication_slot('standby_eu_k');   -- k = shard number
+```
+
+On the matching standby in eu-west-1:
+
+```conf
+primary_conninfo  = 'host=pg-ap-k.internal user=replicator'
+primary_slot_name = 'standby_eu_k'
+hot_standby       = on
+```
+
+Replication lag is read on the standby with `SELECT now() - pg_last_xact_replay_timestamp();`. The outbox and `delivered_mask` are ordinary tables, so they replicate too.
+
+### Schema deltas
+
+On each Postgres shard:
+
+```sql
+CREATE TABLE region_epoch (
+  home_region SMALLINT PRIMARY KEY,
+  epoch       BIGINT   NOT NULL
+);
+```
+
+In the config store, next to `shard_map`:
+
+```sql
+CREATE TABLE region_map (
+  home_region    SMALLINT PRIMARY KEY,   -- 0, 1, 2
+  serving_region SMALLINT NOT NULL,      -- who currently serves its writes
+  epoch          BIGINT   NOT NULL,
+  version        BIGINT   NOT NULL
+);
+
+CREATE TABLE shard_hosts (
+  home_region SMALLINT NOT NULL,
+  shard_id    SMALLINT NOT NULL,
+  host        TEXT     NOT NULL,         -- where this shard currently runs
+  epoch       BIGINT   NOT NULL,
+  PRIMARY KEY (home_region, shard_id)
+);
+-- initially serving_region = home_region and host = the home region's own primary
+```
+
+### Write path (delta only)
+
+`POST /v1/scores` is unchanged. Routing now asks who is *serving*, not who is home.
+
+```python
+async def submit(req):
+    home = region_of(req.player_id)
+    m = REGION_MAP[home]                              # refreshed every ~5s
+    if m.serving_region != MY_REGION:
+        return await forward(m.serving_region, req)   # V7 forwarding, to the serving region
+    if time.monotonic() - m.refreshed_at > 30:        # write lease: cannot prove ownership
+        return Response(503, headers={"Retry-After": "5"})
+    shard = SHARD_MAP[home][bucket_of(req.player_id)]
+    dsn = SHARD_HOSTS[(home, shard)]
+    # run the V6 transaction on dsn, with the guard below as its first statement
+```
+
+The guard extends V5's ownership check with the epoch:
+
+```sql
+SELECT 1
+FROM bucket_ownership b, region_epoch e
+WHERE b.bucket = $1 AND b.owned
+  AND e.home_region = $2 AND e.epoch = $3
+FOR SHARE OF b, e;
+```
+
+**Branch:** no row means the API holds a stale map, or it's talking to a fenced old primary. It rolls back, refreshes the map and retries once. If that still fails, it returns 503.
+
+### Short-outage layer: game-server retry and admission control
+
+```python
+delay = min(60, 2 ** attempt) * random.uniform(0.5, 1.5)    # backoff with jitter
+# queue up to 15 min in memory, then rely on the game backend's durable match log
+```
+
+The serving region runs a token bucket for each promoted home region, at about 40K submits per second. Excess gets `429` with `Retry-After`. After a 15-minute outage the backlog is about 600K submits, which drains in about 15 seconds.
+
+### Promotion runbook: ap-south-1 to eu-west-1
+
+1. **Confirm.** The region has failed health checks for 5+ minutes. Check that the 30-second lease has long expired for every ap-south-1 pod.
+2. **Promote each of the 16 standbys:** `SELECT pg_promote();`
+3. **Bump the epoch on each promoted shard:**
+
+```sql
+UPDATE region_epoch SET epoch = epoch + 1 WHERE home_region = 2;
+```
+
+4. **Flip the map**, in one config-store transaction:
+
+```sql
+UPDATE shard_hosts SET host = 'pg-eu-ap-' || shard_id, epoch = epoch + 1 WHERE home_region = 2;
+UPDATE region_map  SET serving_region = 1, epoch = epoch + 1, version = version + 1
+WHERE home_region = 2;
+```
+
+5. **Within about 5 seconds** every API pod and relay pool adopts the new map. Pods in eu start accepting writes for home-2 players. Pods elsewhere forward them to eu.
+6. **Start relay loops** next to the promoted shards. They deliver any outbox rows with unset bits to all three index regions. No reset is needed. A bit is set only after its `ZADD` succeeds, so bits only ever lag the truth. The loops for ap-south-1's own index stall on their bit and everything else keeps flowing, which is V7's bulkhead.
+7. **Replay.** The game backend re-sends match results from `detected_at - 10 min` for affected players. Same body and same `match_id`. The max upsert makes each one a no-op unless it recovers a lost score.
+8. **Only after replay finishes**, allow any index rebuild from the promoted Postgres.
+
+### Failback
+
+1. When ap-south-1 returns, its old primaries are **never** put back into service. They may hold a diverged tail.
+2. Re-seed them as standbys of the promoted shards in eu-west-1 (`pg_rewind`, or a fresh `pg_basebackup`). The diverged tail is discarded, and replay already covered it.
+3. Wait until lag is near zero.
+4. During a quiet hour, do a planned switchover. Fence writes for a few seconds, promote the ap-south-1 copies, bump the epoch again and flip `region_map` back.
+5. The index in ap-south-1 catches up by itself. Every outbox row with the ap-south-1 bit unset is delivered, with no operator action.
+
+### Sequence: home-region failover
+
+```mermaid
+sequenceDiagram
+    participant GS as Game servers
+    participant AE as API eu-west-1
+    participant OP as Operator
+    participant SB as Standby shards (eu-west-1)
+    participant CF as Config store
+    participant RL as Relay loops (eu-west-1)
+    participant IX as Indexes (us, eu)
+    participant GB as Game backend match log
+
+    GS->>AE: POST /v1/scores (player homed ap-south-1)
+    AE->>AE: forward to ap-south-1 times out
+    AE-->>GS: 503 Retry-After 5
+    Note over GS: backoff with jitter, queue up to 15 min
+    OP->>OP: region down 5+ min, lease expired everywhere
+    OP->>SB: pg_promote(), epoch + 1
+    OP->>CF: region_map serving=eu, shard_hosts to promoted hosts
+    CF-->>AE: new map within about 5s
+    GS->>AE: retry POST /v1/scores
+    AE->>SB: guard with new epoch, upsert, outbox, COMMIT
+    SB-->>AE: ok
+    AE-->>GS: 204
+    RL->>SB: poll rows with unset delivered bits
+    RL->>IX: ZADD GT (idempotent)
+    GB->>AE: replay last 10 min of match results
+    AE->>SB: max upsert, no-op unless a lost score is recovered
+```
+
+## Current State (V8)
+
+```mermaid
+graph TB
+    CL[Clients worldwide] --> DNS["GeoDNS latency routing<br/>health checks"]
+    DNS --> CDN["CDN edges<br/>top-100 only, max-age 0.5s"]
+    CDN --> APIA
+    CDN --> APIB
+    CDN --> APIC
+    CFG[("Config store replicated to all regions<br/>shard_map, board_index_config<br/>region_map and shard_hosts, new in V8")]
+
+    subgraph R0["us-east-1, home region 0"]
+        GSA[Game servers] -->|POST /v1/scores| APIA["Leaderboard API<br/>breaker, pod cache, maps<br/>forwards to serving region<br/>epoch guard and 30s lease, new in V8"]
+        APIA --> PGA[("Postgres 16 primary shards<br/>home 0 players<br/>scores, outbox, region_epoch")]
+        RLA["Outbox Relay loops"] --> PGA
+        APIA --> IDXA[("Redis index, 8 shards<br/>ALL players, primary + 2 replicas")]
+        SNA["Sentinels x3"] -.-> IDXA
+        SBU[("Standby shards for home 1<br/>async WAL, new in V8")]
+    end
+
+    subgraph R1["eu-west-1, home region 1"]
+        GSB[Game servers] --> APIB["Leaderboard API"]
+        APIB --> PGB[("Postgres 16 primary shards<br/>home 1 players")]
+        RLB["Outbox Relay loops"] --> PGB
+        APIB --> IDXB[("Redis index, 8 shards<br/>ALL players")]
+        SNB["Sentinels x3"] -.-> IDXB
+        SBE0[("Standby shards for home 0<br/>new in V8")]
+        SBE2[("Standby shards for home 2<br/>new in V8")]
+    end
+
+    subgraph R2["ap-south-1, home region 2"]
+        GSC[Game servers] --> APIC["Leaderboard API"]
+        APIC --> PGC[("Postgres 16 primary shards<br/>home 2 players")]
+        RLC["Outbox Relay loops"] --> PGC
+        APIC --> IDXC[("Redis index, 8 shards<br/>ALL players")]
+        SNC["Sentinels x3"] -.-> IDXC
+    end
+
+    PGA -.->|async WAL| SBE0
+    PGB -.->|async WAL| SBU
+    PGC -.->|async WAL| SBE2
+
+    RLA -->|ZADD GT, local| IDXA
+    RLA -->|ZADD GT, WAN| IDXB
+    RLA -->|ZADD GT, WAN| IDXC
+    RLB -->|ZADD GT, local| IDXB
+    RLB -->|ZADD GT, WAN| IDXA
+    RLB -->|ZADD GT, WAN| IDXC
+    RLC -->|ZADD GT, local| IDXC
+    RLC -->|ZADD GT, WAN| IDXA
+    RLC -->|ZADD GT, WAN| IDXB
+
+    APIA -.->|forward to serving region| APIB
+    APIB -.->|forward to serving region| APIC
+    APIC -.->|forward to serving region| APIA
+    CFG -.-> APIA
+    CFG -.-> APIB
+    CFG -.-> APIC
+```
+
+Inside each region, the 16 Postgres shards, 8 index shards, relay pools and Sentinels follow the V5-V7 layout. New in V8: the cross-region standbys, `region_map`, `shard_hosts`, `region_epoch`, the write lease and the promotion procedure.
+
+**Every end-to-end flow right now**
+
+1. **Write path, this region is serving:** The game server calls `POST /v1/scores`. The API looks up `REGION_MAP[home].serving_region` and sees its own region. It checks the 30s lease. It opens one transaction on the right Postgres shard, runs the combined ownership and epoch guard, upserts `scores`, inserts outbox rows (`delivered_mask = 0`), commits and returns 204. *(Changed in V8: serving region, lease, epoch guard.)*
+2. **Write path, another region is serving:** The local API forwards to the serving region's API. If that region is unreachable, it returns 503 with `Retry-After`. Game servers back off with jitter. *(Changed: forwards to serving, not home.)*
+3. **Relay delivery path:** Unchanged. Each loop polls rows whose bit for its target is unset, pipelines `ZADD GT` to that region's index shard, then sets the bit. `published_at` is set when all three bits are set.
+4. **Top-N path:** Unchanged. CDN, then a pod in the nearest region, then pod cache or one single-flight 8-shard scatter on the local index.
+5. **Exact-rank path:** Unchanged. `ZSCORE` on the owner shard, then 8 parallel `ZCOUNT` on the local index.
+6. **Around-me path:** Unchanged.
+7. **Redis replication path:** Unchanged, inside each index shard.
+8. **Redis index failover path:** Unchanged.
+9. **Region-unhealthy path:** Reads steer to the next-nearest region, as in V7. Writes for the dead region's players get 503 with backoff for up to about 15 minutes, until step 11 completes. *(Changed.)*
+10. **Postgres replication path (new):** Every primary shard streams WAL asynchronously to its standby in the paired region. Outbox and mask state replicate with it.
+11. **Home-region failover path (new, operator-driven):** Promote the 16 standbys, bump the epoch, flip `region_map` and `shard_hosts`, start relay loops beside the promoted shards, then replay the last 10 minutes of match results.
+12. **Failback path (new):** Re-seed the old primaries as standbys. Then switch over in a quiet window.
+13. **Window rollover and outbox cleanup:** Unchanged. Cleanup deletes run on the primary and replicate.
+14. **Postgres and index resharding paths:** Unchanged in steps. Postgres bucket moves replicate to standbys through WAL.
+
+## Interview follow-ups
+
+**Q: Why not synchronous replication so you lose nothing?**
+Because it puts 130ms of cross-ocean latency on every commit. At 5K transactions per second per shard, that is about 650 commits waiting at once instead of about 25. It also makes writes depend on the standby being reachable. A score is a max register, and the game backend keeps recent match results. So I take a loss window under a second and replay it, which is cheaper than slowing every write.
+
+**Q: How do you stop the old region writing after you promote?**
+Two layers. A write lease makes every pod stop writing if it can't refresh the region map within 30 seconds. We promote only after 5+ minutes, so the old pods are already silent. The epoch guard inside every transaction then rejects any stale writer that reaches a fenced primary. If both failed, max-merge reconciles the two copies, because scores only go up.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Home region as a single copy | One region holding the only Postgres for its players is both an availability gap and a durability gap. |
+| Async standby in another region | Costs nothing on the write path. The price is a loss window of under a second. |
+| Replay is safe | Max upserts and `match_id` make re-sending the last 10 minutes harmless. |
+| Fencing | A write lease plus a database epoch means the old region can't write after the flip. |
+| Human in the loop | A rare, expensive decision gets a person. Retries absorb the short blips. |
+
+**Interview arc:** *"Each home region's Postgres was the only copy of its players' scores, so a regional outage meant 4 hours of rejected writes and a regional disaster meant data loss, so I stream WAL asynchronously to a standby in another region, promote it by an operator-approved runbook that fences the old region with a write lease and an epoch, and replay the last ten minutes of match results through idempotent max upserts to heal the sub-second loss window."*
+
+## Next
+
+It's 9:40am the next Tuesday. Arjun's rank has been 40 seconds behind for ten minutes. A relay loop is silently stuck on one index shard. Every dashboard is green, because we alert on uptime and not on freshness. Say **"next"** for V9: observability and freshness SLOs.
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# V9: Observability and Freshness SLOs
+
+**The one concern this version fixes:** we can't tell when the leaderboard is stale. A poison note that blocks a lane is a separate problem, and I'll cover it in the follow-ups.
+
+## Break it
+
+It's 9:40am on a Tuesday. One relay lane has stalled. The lane is Postgres shard 7 in ap-south-1, delivering to index shard 3 in us-east-1.
+
+The cause is a gap in V7. The relay's remote Redis clients were built with library defaults, which means no socket timeout. A packet-loss event on the Mumbai-to-Virginia link left a half-open connection. Each batch now waits about 40 seconds for the OS to give up. The loop reconnects and hits the same problem again.
+
+Here is the damage.
+
+- The lane covers 1/16 of Postgres shards and 1/8 of index shards. That is **1/128** of Mumbai-homed players, about **117K players**.
+- That slice submits about 5 scores per second. In 10 minutes, about **3,100 submits** reach the us-east-1 index 40 seconds late.
+
+Who notices? Meera in New York looks up her friend Arjun's rank. Arjun posted a new high score 10 minutes ago. Meera still sees the old rank. Arjun, in Hyderabad, sees the new one. The same player has two answers, depending on who is looking.
+
+Every dashboard is green. All processes are up and API 5xx is 0.0%. Redis and Postgres are healthy. We alert on uptime, not on freshness. The first signal is a support ticket at 9:50.
+
+There are three blind spots.
+
+1. **Nothing alerts on staleness.** V2 named the metric "oldest unpublished note" and we never wired it to anything.
+2. **The relay is the only thing that knows its own lag.** When a loop hangs, it can't report that it's hung.
+3. **Nobody reads from all three regions.** A check run from Mumbai would have passed.
+
+## What "fresh" means
+
+Freshness is the time between the API returning `204` and the new score being visible through the public read path in region R. Every signal below is judged against that definition.
+
+## Options for detecting staleness
+
+| Signal | What it catches | What it misses | Verdict |
+|---|---|---|---|
+| Component health (up, 5xx) | A process that is down | Stalls. Every process on Tuesday was up. | Keep, but not enough |
+| Outbox queue **depth** | A growing backlog | A steady trickle behind a stall. About 200 pending notes looks normal. | Dashboard only |
+| Relay-exported lag | The lag the relay can see | A hung loop that stops reporting | Not on its own |
+| Replication lag (Redis, WAL) | One hop of the pipeline | The lane between outbox and index | Keep for the V8 RPO |
+| **Oldest pending note age, from an independent exporter** | Any stalled lane, with its location | A note marked delivered but not applied | **Chosen (white-box)** |
+| **Canary players read through the real public path, from every region** | End-to-end staleness, including CDN and caches | Slices with no canary in them | **Chosen (black-box)** |
+| Real-user monitoring | Slow pages | It has no ground truth for "is this rank correct?" | Rejected |
+
+Depth counts items and age measures delay. The Tuesday stall had a normal depth and a 40-second age. So we alert on age.
+
+## Solve it
+
+Three layers, each answering a different question.
+
+1. **Black-box canaries** answer "what do users feel?" They define the SLI and the SLO.
+2. **White-box lane ages** answer "where is it stuck?" They catch slices too small for the SLO to notice.
+3. **Self-heal and watch the watchers** answer "who monitors the monitor?" They add timeouts, a watchdog and a dead-man's switch.
+
+### The SLOs
+
+| SLI | Good event | SLO (30 days) |
+|---|---|---|
+| Rank freshness | Canary score visible through the rank API in the reader's region within **2s** of submit | 99% |
+| Top-100 freshness | Canary visible in top-100 through the CDN within **3s** | 99% |
+| Write availability | `POST /v1/scores` returns no 5xx and no timeout. A 429 is good, because admission control is intentional. | 99.9% |
+| Rank read speed | `GET .../players/{id}` returns 200 within 100ms | 99% within 100ms |
+
+**Why 2s:** the P0 target was 1-2 seconds. Typical remote lag is about 0.5s. A 10-15s Redis failover costs well under 1% of the budget.
+
+**Error budget:** 1% of probes over 30 days. If more than half the budget burns in a month, we pause risky changes such as resharding.
+
+**A trade-off to state out loud:** a stuck 1/128 slice makes about 0.8% of probes bad. That is under the 1% budget, so the SLO won't page. This is why the lane alert exists.
+
+- ✅ **What we gained:**
+  - Staleness is measured as users feel it, from every region.
+  - A stalled lane is detected in about 90 seconds, not 10 minutes.
+  - Loops that stop making progress restart themselves.
+  - We can state an SLO with numbers in an interview.
+- ⚠️ **What we gave up:**
+  - **Synthetic traffic in production.** 48 canary players and one board. The load is about 720 reads per second fleet-wide, which is negligible.
+  - **Clock dependence.** The canary score is a timestamp, so writer and reader clocks must agree. We alert if clock offset exceeds 100ms.
+  - **Canary coverage is partial.** One canary per Postgres shard cannot cover all 128 lanes. The lane exporter covers the rest.
+  - **A new storage class** and a pager integration to run and keep healthy.
+  - **Alert fatigue risk.** Thresholds must be tuned so a normal Redis failover warns without paging.
+- ❌ **What we considered and rejected:**
+  - Alerting on depth or component health alone.
+  - Relying on relay self-reporting.
+  - Real-user monitoring as the freshness signal.
+  - A canary on every lane, 128 per home region. It would multiply read load for little gain over the exporter.
+  - Tracing every request. Cost is high and it doesn't answer "is it fresh?"
+
+## Implement it
+
+### New storage class: time-series
+
+Metrics are append-only samples keyed by labels. We read them as rates and quantiles over time windows. A time-series store (Prometheus) is built for that. Postgres could hold them but would fight the query shape. It would also be the system under measurement. If Postgres or Redis is sick, the instrument must not depend on them.
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| Canary rows and `canary:freshness` ZSET | Canary writer, via `POST /v1/scores` | Canary readers, via the public read paths | Same stores as real data, reserved IDs |
+| `lb_probe_total{kind,home,reader,outcome}` | Canary prober in each region | Prometheus, burn-rate rules | Prober memory, scraped into regional Prometheus |
+| `lb_outbox_oldest_pending_seconds{home,pg_shard,index_shard,target}` | Lane-age exporter | Prometheus, lane alerts, heatmap | Exporter, scraped into regional Prometheus |
+| `lb_relay_last_success_timestamp{lane}` | Relay loops | Prometheus, each loop's own watchdog | Relay memory |
+| Regional Prometheus (2 nodes per region) | Scrapes | Alertmanager, global store | Each region |
+| Global metrics store | Remote write from the 3 Prometheus | 30-day SLO rules, dashboards | Queryable from all regions |
+| Alertmanager and pager | Prometheus and global rules | On-call engineer | External SaaS, so it survives our regions |
+
+**Label rule:** never use `player_id` or `board_id` as labels for real traffic. Cardinality stays bounded.
+
+### Reserved canary players
+
+Real signups start at sequence 1000. Sequences 1 to 999 are reserved for canaries. We pick 16 per home region, one per Postgres shard.
+
+```python
+def pick_canaries(region, pg_shards=16):
+    chosen = {}
+    for seq in range(1, 1000):
+        pid = (region << 56) | seq
+        chosen.setdefault(shard_of(pid), pid)      # shard_of from V5
+        if len(chosen) == pg_shards:
+            break
+    return list(chosen.values())
+```
+
+With 16 players over 8 index shards, each index shard is hit about twice. We verify coverage when we pick, and re-run the picker after a Postgres reshard.
+
+The canary board uses the real scatter path.
+
+```sql
+INSERT INTO board_index_config (board_id, shards, gen) VALUES ('canary:freshness', 8, 1);
+```
+
+### Canary writer (one per home region)
+
+The score is the tick timestamp in milliseconds. That is about 1.7e12, exact in a double and increasing, so `GT` always accepts it.
+
+```python
+while True:
+    tick = (int(time.time() // 10) + 1) * 10_000          # next 10s boundary, in ms
+    sleep_until(tick / 1000)
+    for p in CANARIES[HOME]:                              # 16 players
+        r = post("/v1/scores", {"player_id": p, "match_id": f"canary-{p}-{tick}",
+                                "score": tick, "boards": ["canary:freshness"]})
+        WRITE_TOTAL.labels(HOME, "ok" if r.status < 500 else "error").inc()
+```
+
+### Canary readers (one set per region)
+
+Each region reads all 48 canaries through its own regional hostname, not through GeoDNS. They use the real rank path, polling every 200ms.
+
+```python
+def judge(st, now_ms, seen_ms):
+    st.seen = max(st.seen, seen_ms or 0)
+    while st.next_tick <= now_ms:
+        if st.next_tick <= st.seen:                       # visible: judge by when we saw it
+            lag = (now_ms - st.next_tick) / 1000          # 200ms poll, so error <= 0.2s
+            emit("fresh" if lag <= 2.0 else "late")
+        elif now_ms - st.next_tick > 10_000:              # still invisible past the deadline
+            emit("missed")
+        else:
+            break                                         # too early to judge
+        st.next_tick += 10_000
+```
+
+`emit` increments `lb_probe_total{kind="rank", home, reader, outcome}`. Each tick is judged exactly once. The reader needs no coordination with the writer, because the tick times are deterministic.
+
+A second reader checks top-100. It calls `GET /v1/boards/canary:freshness/top?n=100` through the CDN. It runs the same `judge` with `seen_ms = max(score)` and a 3.0s threshold, labelled `kind="top"`.
+
+### Lane-age exporter (independent of the relay)
+
+It runs as its own process in each home region. It finds each shard's current host through `shard_hosts`, so it survives a V8 promotion. It queries every Postgres primary every 5 seconds.
+
+```sql
+SELECT index_shard,
+       min(created_at) FILTER (WHERE (delivered_mask & 1) = 0) AS oldest_us,
+       min(created_at) FILTER (WHERE (delivered_mask & 2) = 0) AS oldest_eu,
+       min(created_at) FILTER (WHERE (delivered_mask & 4) = 0) AS oldest_ap,
+       count(*)        FILTER (WHERE delivered_mask <> 7)      AS pending
+FROM score_outbox
+WHERE delivered_mask <> 7
+GROUP BY index_shard;
+```
+
+The `WHERE` clause matches the partial index from V7, so it scans only pending rows. The exporter turns each `oldest_*` into `now() - oldest`, or 0 if none. It sets one gauge per (home, pg_shard, index_shard, target). That is 1,152 series.
+
+On each standby it also exports `lb_wal_replay_lag_seconds`, from `now() - pg_last_xact_replay_timestamp()`. That backs the V8 under-a-second loss-window claim.
+
+### Relay hardening: the actual fix for Tuesday's cause
+
+```python
+remote = Redis(host=h, socket_timeout=2.0, socket_connect_timeout=1.0,
+               socket_keepalive=True, health_check_interval=15)
+
+# inside run_loop, after each poll (a successful batch OR an empty poll)
+LAST_SUCCESS.labels(lane).set_to_current_time()
+
+# separate watchdog thread, so a hung call cannot block it
+def watchdog():
+    while True:
+        sleep(10)
+        if STATE.pending_exists and time.time() - STATE.last_success > 60:
+            log.error("lane stalled, exiting", lane=lane)
+            os._exit(1)                                   # supervisor restarts the loop
+```
+
+An empty poll counts as success. Idle lanes never restart. Only a lane with pending rows and no progress for 60 seconds does.
+
+### Alert rules
+
+```yaml
+# page: one lane has not delivered for a while (catches a 1/128 slice)
+- alert: LaneStalled
+  expr: max by (home,pg_shard,index_shard,target) (lb_outbox_oldest_pending_seconds) > 30
+  for: 1m
+  labels: {severity: page}
+
+# warn: soft threshold, so a 10-15s Redis failover warns but does not page
+- alert: LaneSlow
+  expr: max by (home,pg_shard,index_shard,target) (lb_outbox_oldest_pending_seconds) > 5
+  for: 5m
+  labels: {severity: ticket}
+
+# SLO burn rates: bad ratio vs a 1% budget
+- record: lb:bad_ratio:5m
+  expr: sum(rate(lb_probe_total{outcome!="fresh"}[5m])) / sum(rate(lb_probe_total[5m]))
+# (same rule for 30m, 1h and 6h)
+- alert: FreshnessFastBurn            # burns 2% of the monthly budget in 1 hour
+  expr: lb:bad_ratio:5m > 0.144 and lb:bad_ratio:1h > 0.144
+  for: 2m
+  labels: {severity: page}
+- alert: FreshnessSlowBurn
+  expr: lb:bad_ratio:30m > 0.06 and lb:bad_ratio:6h > 0.06
+  labels: {severity: ticket}
+
+# standby is too far behind to keep the V8 loss-window promise
+- alert: StandbyLag
+  expr: lb_wal_replay_lag_seconds > 5
+  for: 5m
+  labels: {severity: ticket}
+
+# the probes themselves died
+- alert: ProbesBlind
+  expr: sum(rate(lb_probe_total[5m])) == 0
+  for: 5m
+  labels: {severity: page}
+```
+
+**What a burn rate means:** a burn rate of 14.4 means the bad ratio is 14.4 times the 1% budget. At that pace the monthly budget lasts about 2 days. Requiring both a short and a long window stops a brief blip from paging.
+
+### Watching the watchers
+
+Prometheus always fires an alert called `Watchdog`. Alertmanager forwards it to the external pager as a heartbeat. If the heartbeat stops for 5 minutes, the pager pages. A second Prometheus in another region also scrapes each region's Prometheus, so a region that goes dark is noticed by its neighbours.
+
+### Sequence: the Tuesday stall, caught
+
+```mermaid
+sequenceDiagram
+    participant CW as Canary writer (ap-south-1)
+    participant API as API ap-south-1
+    participant PG as Postgres shard 7 (ap)
+    participant RL as Relay lane (pg 7, idx 3, us)
+    participant IX as Index us-east-1 shard 3
+    participant CR as Canary reader (us-east-1)
+    participant PM as Prometheus
+    participant PG2 as Pager
+
+    CW->>API: POST /v1/scores (canary p, score = tick T)
+    API->>PG: txn: upsert scores + outbox
+    API-->>CW: 204
+    RL--xIX: ZADD GT stalls (half-open connection)
+    loop every 200 ms
+        CR->>IX: rank read: ZSCORE + 8x ZCOUNT
+        IX-->>CR: old score (below T)
+    end
+    CR->>CR: tick T not visible within 10 s, emit "missed"
+    CR->>PM: lb_probe_total{outcome="missed"}++
+    PM->>PM: lane age above 30s for 1 min, LaneStalled fires
+    PM->>PG2: page (about 90 s after the stall)
+    RL->>RL: watchdog: pending rows, no success for 60 s, exit and restart
+```
+
+## Current State (V9)
+
+```mermaid
+graph TB
+    CL[Clients worldwide] --> DNS["GeoDNS latency routing<br/>health checks"]
+    DNS --> CDN["CDN edges<br/>top-100 only, max-age 0.5s"]
+    CDN --> APIA
+    CDN --> APIB
+    CDN --> APIC
+    CFG[("Config store replicated to all regions<br/>shard_map, board_index_config<br/>region_map and shard_hosts")]
+    GL[("Global metrics store<br/>30-day SLO rules, dashboards<br/>new in V9")]
+    AM["Alertmanager<br/>burn-rate, lane, dead-man rules<br/>new in V9"]
+    PAGER["External pager and heartbeat<br/>new in V9"]
+
+    subgraph R0["us-east-1, home region 0"]
+        GSA[Game servers] -->|POST /v1/scores| APIA["Leaderboard API<br/>breaker, pod cache, maps<br/>forwards to serving region<br/>epoch guard and 30s lease"]
+        APIA --> PGA[("Postgres 16 primary shards<br/>home 0 players<br/>scores, outbox, region_epoch")]
+        RLA["Outbox Relay loops<br/>timeouts, heartbeat, watchdog<br/>changed in V9"] --> PGA
+        APIA --> IDXA[("Redis index, 8 shards<br/>ALL players, primary + 2 replicas")]
+        SNA["Sentinels x3"] -.-> IDXA
+        SBU[("Standby shards for home 1<br/>async WAL")]
+        CPA["Canary prober<br/>writer + readers<br/>new in V9"] -->|canary writes| APIA
+        CPA -->|rank and top-100 reads| CDN
+        EXA["Lane-age exporter<br/>new in V9"] -->|oldest pending per lane| PGA
+        PMA[("Prometheus<br/>new in V9")] -.->|scrape| CPA
+        PMA -.->|scrape| EXA
+        PMA -.->|scrape| APIA
+        PMA -.->|scrape| RLA
+    end
+
+    subgraph R1["eu-west-1, home region 1"]
+        GSB[Game servers] --> APIB["Leaderboard API"]
+        APIB --> PGB[("Postgres 16 primary shards<br/>home 1 players")]
+        RLB["Outbox Relay loops<br/>timeouts, heartbeat, watchdog"] --> PGB
+        APIB --> IDXB[("Redis index, 8 shards<br/>ALL players")]
+        SNB["Sentinels x3"] -.-> IDXB
+        SBE0[("Standby shards for home 0")]
+        SBE2[("Standby shards for home 2")]
+        CPB["Canary prober"] -->|canary writes| APIB
+        CPB -->|rank and top-100 reads| CDN
+        EXB["Lane-age exporter"] -->|oldest pending per lane| PGB
+        PMB[("Prometheus")] -.->|scrape| CPB
+        PMB -.->|scrape| EXB
+        PMB -.->|scrape| APIB
+        PMB -.->|scrape| RLB
+    end
+
+    subgraph R2["ap-south-1, home region 2"]
+        GSC[Game servers] --> APIC["Leaderboard API"]
+        APIC --> PGC[("Postgres 16 primary shards<br/>home 2 players")]
+        RLC["Outbox Relay loops<br/>timeouts, heartbeat, watchdog"] --> PGC
+        APIC --> IDXC[("Redis index, 8 shards<br/>ALL players")]
+        SNC["Sentinels x3"] -.-> IDXC
+        CPC["Canary prober"] -->|canary writes| APIC
+        CPC -->|rank and top-100 reads| CDN
+        EXC["Lane-age exporter"] -->|oldest pending per lane| PGC
+        PMC[("Prometheus")] -.->|scrape| CPC
+        PMC -.->|scrape| EXC
+        PMC -.->|scrape| APIC
+        PMC -.->|scrape| RLC
+    end
+
+    PGA -.->|async WAL| SBE0
+    PGB -.->|async WAL| SBU
+    PGC -.->|async WAL| SBE2
+
+    RLA -->|ZADD GT, local| IDXA
+    RLA -->|ZADD GT, WAN| IDXB
+    RLA -->|ZADD GT, WAN| IDXC
+    RLB -->|ZADD GT, local| IDXB
+    RLB -->|ZADD GT, WAN| IDXA
+    RLB -->|ZADD GT, WAN| IDXC
+    RLC -->|ZADD GT, local| IDXC
+    RLC -->|ZADD GT, WAN| IDXA
+    RLC -->|ZADD GT, WAN| IDXB
+
+    APIA -.->|forward to serving region| APIB
+    APIB -.->|forward to serving region| APIC
+    APIC -.->|forward to serving region| APIA
+    CFG -.-> APIA
+    CFG -.-> APIB
+    CFG -.-> APIC
+
+    PMA -.->|remote write| GL
+    PMB -.->|remote write| GL
+    PMC -.->|remote write| GL
+    PMA -.->|lane alerts| AM
+    PMB -.->|lane alerts| AM
+    PMC -.->|lane alerts| AM
+    GL --> AM
+    AM --> PAGER
+```
+
+Inside each region, the 16 Postgres shards, 8 index shards, relay pools and Sentinels follow the V5-V8 layout. New in V9: the canary probers, lane-age exporters, regional Prometheus, the global metrics store, Alertmanager, the external pager, and the relay hardening.
+
+**Every end-to-end flow right now**
+
+1. **Write path, this region is serving:** Unchanged from V8. The API checks the lease, runs the epoch and ownership guard, upserts `scores`, inserts outbox rows and returns 204.
+2. **Write path, another region is serving:** Unchanged. The local API forwards to the serving region, or returns 503 with `Retry-After`.
+3. **Relay delivery path:** Changed. Remote clients now have socket timeouts. Each loop records `lb_relay_last_success_timestamp`. A watchdog thread restarts any loop that has pending rows and no progress for 60 seconds.
+4. **Top-N path:** Unchanged. CDN, then a pod, then the pod cache or one single-flight 8-shard scatter on the local index.
+5. **Exact-rank path:** Unchanged. `ZSCORE` on the owner shard, then 8 parallel `ZCOUNT` on the local index.
+6. **Around-me path:** Unchanged.
+7. **Redis replication path:** Unchanged, inside each index shard.
+8. **Redis index failover path:** Unchanged. Lane ages rise for up to about 15 seconds. That trips `LaneSlow` at most and never `LaneStalled`.
+9. **Region-unhealthy path:** Unchanged. GeoDNS steers reads away from the failed region. The probes keep measuring from the others.
+10. **Postgres replication path:** Unchanged. Standby replay lag is now exported and alerted.
+11. **Home-region failover and failback paths:** Unchanged. The exporter and the probers pick up the new `shard_hosts` and `region_map` within about 5 seconds.
+12. **Window rollover, outbox cleanup, resharding:** Unchanged. Re-run the canary picker after a Postgres reshard.
+13. **Canary freshness path (new):** Each region's writer submits 16 canary scores every 10 seconds through the real write path. Readers in all three regions poll the real rank and top-100 paths and emit `lb_probe_total` outcomes.
+14. **Lane-age path (new):** Each exporter queries its Postgres primaries every 5 seconds and sets the oldest-pending-age gauge per lane.
+15. **Alert path (new):** Regional Prometheus evaluates lane rules. The global store evaluates SLO burn rules. Alertmanager sends pages and tickets through the external pager.
+16. **Dead-man path (new):** The always-firing `Watchdog` alert acts as a heartbeat to the external pager. If it stops for 5 minutes, the pager pages. Neighbouring regions also scrape each other's Prometheus.
+
+## Interview follow-ups
+
+**Q: Why not just alert when the outbox backlog gets big?**
+Depth counts items and the problem is delay. A steady 5 submits per second behind a stalled lane gives about 200 pending notes, which looks normal. Age is the number that matters. It also maps directly to the user-facing promise, since oldest pending age is a lower bound on staleness.
+
+**Q: What if a single poison note blocks a lane?**
+The oldest-age alert fires for it too, so detection is already covered. The fix is a dead-letter table. After 5 failed attempts, the relay moves the note into `score_outbox_dead` in the same transaction and carries on. A count of dead notes pages a human. The rest of the lane keeps flowing, and the dead note can be fixed and replayed later because delivery is an idempotent max.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Uptime is not freshness | Every process was up while 117K players had stale ranks. Define the SLI as time from 204 to visible, per region. |
+| Age beats depth | A trickle behind a stall has a normal backlog and a 40-second age. Alert on the age of the oldest note. |
+| Black-box plus white-box | Canaries show what users feel. The lane exporter shows where it is stuck and catches slices the SLO can't see. |
+| Canary design | The score is the tick timestamp, so no coordination is needed. IDs are reserved, one per Postgres shard, and reads use the real public path. |
+| Burn-rate alerts | Page on how fast the error budget is burning over two windows, not on a raw threshold. |
+| Watch the watchers | Timeouts and a watchdog restart stuck loops. A dead-man's heartbeat to an external pager catches a silent monitoring system. |
+
+**Interview arc:** *"Uptime dashboards stayed green while a stalled relay lane left 117K players with stale ranks, so I define freshness as time from the 204 to visible in each region, measure it with canary players through the real read path against a 2-second SLO with burn-rate alerts, watch every outbox lane's oldest-note age from an independent exporter, and make the relay restart itself when a lane stops making progress."*
+
+## Next
+
+Every failure we scoped now has a mechanism and a detector. The design is interview-complete. Say **"next"** for the final wrap-up: the full architecture, every path, the "why not X" arsenal, the master recap, and an offer to run a mock interview.
 
 
 
@@ -880,140 +3407,332 @@ It's the final of a big tournament. The single Redis node holding the 50M-player
 
 
 
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
+# Final Wrap-Up: Real-Time Leaderboard
+
+## 1. The full architecture
+
+One diagram, with the read and write paths together. Each region is shown once in detail. The other two follow the same layout.
+
+```mermaid
+graph TB
+    CL[Clients worldwide] --> DNS["GeoDNS latency routing<br/>+ health checks"]
+    DNS --> CDN["CDN edges<br/>top-100 only, max-age 0.5s<br/>rank and around-me: no-store"]
+    CDN --> API
+
+    GS[Game servers] -->|POST /v1/scores| API
+
+    CFG[("Config store, replicated to all regions<br/>shard_map, board_index_config<br/>region_map, shard_hosts")] -.->|refreshed ~5s| API
+    CFG -.-> RL
+
+    subgraph REGION["Each of 3 regions: us-east-1 (0), eu-west-1 (1), ap-south-1 (2)"]
+        API["Leaderboard API (stateless)<br/>circuit breaker, pod cache for top-100<br/>forwards to serving region<br/>30s lease + epoch guard"]
+        PG[("Postgres, 16 primary shards<br/>players homed in this region<br/>scores + score_outbox + bucket_ownership + region_epoch")]
+        RL["Outbox Relay loops<br/>per pg shard x index shard x target region<br/>timeouts + watchdog"]
+        IDX[("Redis index, 8 shards<br/>ALL players, any home<br/>each shard: primary + 2 replicas")]
+        SN["Sentinels x3"]
+        SB[("Standby Postgres shards<br/>for a neighbour region's players<br/>async WAL")]
+        CP["Canary prober<br/>writer + readers"]
+        EX["Lane-age exporter"]
+        PM[("Regional Prometheus")]
+
+        API -->|"single-shard txn: guard, upsert scores, insert outbox"| PG
+        RL -->|"poll pending, set delivered_mask bit"| PG
+        RL -->|"ZADD GT, local target"| IDX
+        API -->|"ZSCORE, scatter ZCOUNT / ZREVRANGE / ZRANGEBYSCORE"| IDX
+        SN -.->|"monitor, elect, promote per shard"| IDX
+        SN -.->|switch-master| API
+        SN -.->|switch-master| RL
+        CP -->|canary writes and reads| API
+        EX -->|oldest pending per lane| PG
+        PM -.->|scrape| CP
+        PM -.->|scrape| EX
+        PM -.->|scrape| API
+        PM -.->|scrape| RL
+    end
+
+    RL -->|"ZADD GT over WAN to the 2 other regions"| IDX2[("Index in the other 2 regions")]
+    API -.->|"forward write to the serving region"| API2["API in another region"]
+    PG -.->|"async WAL to paired region"| SB2[("Standby in the paired region")]
+    PM -.->|remote write| GL[("Global metrics store")]
+    GL --> AM["Alertmanager"]
+    AM --> PAGER["External pager + dead-man heartbeat"]
+```
+
+**Key placement rules**
+
+| Concern | Rule |
+|---|---|
+| Source of truth | Postgres, in the player's **home region**, sharded by `hash(player_id)` into 1,024 buckets over 16 primaries. |
+| Ranking index | Redis ZSETs, one full copy **per region**, split into 8 shards by a different hash of `player_id`. |
+| Home region | The top 8 bits of `player_id`. It decides who writes. |
+| Write rule | Best score wins. Postgres upsert and `ZADD GT` are both max registers. |
+
+## 2. Every end-to-end path
+
+### Path 1: Write, this region is serving
+
+1. Game server calls `POST /v1/scores` with `player_id`, `match_id`, `score` and the three board IDs.
+2. The API reads `REGION_MAP[home].serving_region` and sees its own region. It checks that its 30-second lease is fresh.
+3. It hashes `player_id` to a bucket, finds the Postgres shard and opens one transaction there.
+4. First statement: the ownership and epoch guard. No row back means a stale map, so it refreshes and retries once.
+5. For each board, one statement upserts `scores` (only if the score is higher) and inserts a `score_outbox` row for improved scores. Each outbox row carries `index_shard` and `delivered_mask = 0`.
+6. It commits and returns `204`.
+
+### Path 2: Write, another region is serving
+
+1. The local API sees `serving_region` is not its own.
+2. It forwards the request to the serving region's API.
+3. If that region answers, the answer goes back to the game server.
+4. If it doesn't, the API returns `503` with `Retry-After`. The game server backs off with jitter and retries. Retries are safe because the upsert only applies a higher score.
+
+### Path 3: Relay delivery
+
+1. One loop runs per (Postgres shard, index shard, target region).
+2. It selects up to 500 rows with its bit unset, using `FOR UPDATE SKIP LOCKED`.
+3. It pipelines `ZADD GT` into the target region's index shard, found through that region's Sentinel.
+4. It sets its bit in `delivered_mask`. When all three bits are set, it sets `published_at`.
+5. On failure it backs off with jitter. A dead target stalls only its own bit. A watchdog restarts any loop with pending rows and no progress for 60 seconds.
+
+```mermaid
+sequenceDiagram
+    participant GS as Game Server
+    participant API as API (home region)
+    participant PG as Postgres shard
+    participant RL as Relay loops (3 targets)
+    participant IL as Index (local)
+    participant IR as Index (2 remote regions)
+
+    GS->>API: POST /v1/scores
+    API->>PG: BEGIN; guard; 3x (upsert + outbox); COMMIT
+    API-->>GS: 204
+    par per-target loops
+        RL->>PG: poll rows with this bit unset (SKIP LOCKED)
+        RL->>IL: ZADD GT (about 5 ms)
+        RL->>PG: set bit
+    and
+        RL->>IR: ZADD GT over WAN (about 130-220 ms)
+        RL->>PG: set bit, published_at when mask = 7
+    end
+```
+
+### Path 4: Exact rank
+
+1. Client asks for `GET /v1/boards/{id}/players/{player_id}`. GeoDNS picks the nearest healthy region. The CDN passes it through (`no-store`).
+2. The API computes the owner index shard and runs `ZSCORE` there. A nil result is a 404.
+3. It scatters `ZCOUNT lb:{board}:g{gen}:s{j} (score +inf` to all 8 shards in parallel.
+4. Rank is `1 + sum of the 8 counts`.
+5. If any shard doesn't answer within about 50ms, it returns `503` with `Retry-After`. It never returns a partial sum.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as API (nearest region)
+    participant S3 as Index shard (owner)
+    participant SN as Index shards 0..7
+
+    C->>API: GET /players/98231
+    API->>S3: ZSCORE
+    S3-->>API: 48200
+    par scatter
+        API->>SN: ZCOUNT (48200 +inf on every shard
+        SN-->>API: 8 counts
+    end
+    Note over API: rank = 1 + sum
+    API-->>C: rank + score
+```
+
+### Path 5: Around-me
+
+1. Get the score with `ZSCORE`, as in path 4.
+2. On each of the 8 shards, pipeline one `ZRANGEBYSCORE (score +inf LIMIT 0 5` and one `ZREVRANGEBYSCORE (score -inf LIMIT 0 5`.
+3. Merge the 40 higher candidates and keep the nearest 5. Do the same for the 40 lower candidates.
+4. Return the player's rank, plus 5 above and 5 below.
+
+### Path 6: Top-N
+
+1. Client calls `GET .../top?n=100` and reaches the nearest CDN edge.
+2. On a fresh hit (under 0.5s old), the CDN answers. On a miss it makes one collapsed request to an API pod.
+3. The pod serves its cache if fresh (under 0.5s). If stale (under 3s), it serves the old value and refreshes once in the background.
+4. If cold, one single-flight call scatters `ZREVRANGE 0 99` to all 8 shards and merges the 8 lists. Everyone else waits on that one call.
+5. During a Redis failover, `stale-if-error=30` keeps serving the cached list.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CDN as CDN edge
+    participant API as API pod
+    participant IX as Index shards 0..7
+
+    C->>CDN: GET /top?n=100
+    alt CDN fresh hit
+        CDN-->>C: cached list
+    else miss (collapsed to one origin call)
+        CDN->>API: GET /top?n=100
+        alt pod cache fresh or stale
+            API-->>CDN: cached list
+        else cold (single-flight)
+            API->>IX: ZREVRANGE 0 99 on all 8 shards
+            IX-->>API: 8 sorted lists
+            Note over API: merge, keep best 100
+            API-->>CDN: list
+        end
+        CDN-->>C: list
+    end
+```
+
+### Path 7: Redis index shard failover
+
+1. Sentinels notice the primary is silent for 5 seconds and reach a quorum of 2 of 3.
+2. They promote a replica and announce the new address. The API and relay reconnect.
+3. For about 10-15 seconds, rank and around-me return `503` with `Retry-After`. Top-100 serves stale from caches.
+4. The relay clears that region's bit on the last 60 seconds of outbox rows for that index shard and re-applies them. Idempotent max makes this safe.
+
+### Path 8: Region unhealthy (reads)
+
+1. A region that fails 3 health checks (30 seconds) leaves DNS.
+2. Clients go to the next-nearest region, which holds a full index.
+3. Writes for the dead region's players now fail with `503` until path 9 completes.
+
+### Path 9: Home-region failover (operator-driven)
+
+1. Confirm the region has been down 5+ minutes. Every pod's 30-second lease has long expired.
+2. Run `pg_promote()` on the 16 standbys in the paired region.
+3. Bump `region_epoch` on each promoted shard.
+4. Update `shard_hosts` and `region_map` in one config transaction.
+5. Pods adopt the map within about 5 seconds. Writes flow again, throttled by a per-region token bucket.
+6. Start relay loops beside the promoted shards. Unset bits are delivered with no reset.
+7. The game backend replays the last 10 minutes of match results. Max upserts make this safe.
+8. Only after replay, allow any index rebuild from the promoted Postgres.
+
+```mermaid
+sequenceDiagram
+    participant GS as Game servers
+    participant API as API (serving region)
+    participant OP as Operator
+    participant SB as Standby shards
+    participant CF as Config store
+    participant GB as Game backend match log
+
+    GS->>API: POST /v1/scores
+    API-->>GS: 503, Retry-After
+    OP->>SB: pg_promote(), epoch + 1
+    OP->>CF: region_map + shard_hosts flip
+    CF-->>API: new map in about 5 s
+    GS->>API: retry
+    API->>SB: guard with new epoch, upsert, outbox
+    API-->>GS: 204
+    GB->>API: replay last 10 min (idempotent)
+```
+
+### Path 10: Failback
+
+1. Never reuse the old primaries. They may hold a diverged tail.
+2. Re-seed them as standbys of the promoted shards (`pg_rewind` or a fresh base backup).
+3. Wait for lag to reach near zero.
+4. In a quiet hour, fence writes briefly, promote, bump the epoch and flip `region_map` back.
+5. The index in the returning region catches up on its own from unset bits.
+
+### Path 11: Resharding
+
+- **Postgres bucket move:** backfill with a max-merge upsert, catch up, fence the old shard through `bucket_ownership`, final delta copy, open the new shard, flip `shard_map`, clean up later.
+- **Index resharding:** dual-write through the relay into a new generation, backfill from Postgres with `ZADD GT`, verify `ZCARD` against `COUNT(*)`, flip `gen` in `board_index_config`, delete the old keys later.
+
+### Path 12: Housekeeping
+
+1. **Window rollover:** a new window is a new `board_id`, taken from the match's UTC end time. There is no rollover job.
+2. **Outbox cleanup:** delete rows with `published_at` older than an hour, every few minutes.
+
+### Path 13: Freshness monitoring
+
+1. Each region's canary writer submits 16 canary scores every 10 seconds through the real write path. The score is the tick timestamp.
+2. Canary readers in all three regions poll the real rank and top-100 paths and emit `fresh`, `late` or `missed`.
+3. The lane-age exporter reports the oldest pending note per lane.
+4. Prometheus rules page on `LaneStalled` (over 30s for 1 min) and on SLO burn rates. Alertmanager sends them to an external pager.
+5. An always-firing `Watchdog` heartbeat pages if it ever stops.
+
+## 3. The "why not X" arsenal
+
+| Interviewer asks | One-line defensible answer |
+|---|---|
+| Why not just `COUNT(*)` in Postgres? | Rank cost grows with the number of players above you, about 1 second for a mid-table player on 50M rows, and a finale makes that thousands of times per second. A skip list with spans gives rank in O(log N). |
+| Why not write to Redis directly after the Postgres commit? | A crash between the two leaves them different and nothing remembers the debt. A transactional outbox commits the score and the owed update together, and an idempotent `ZADD GT` makes retries harmless. |
+| Why shard Postgres by `player_id` and not `board_id`? | Reads come from Redis, so Postgres only needs good writes. `board_id` creates a hot shard on the all-time board and splits one submit across three shards. `player_id` keeps a player's three boards and outbox in one local transaction. |
+| Why not shard the index by score range, so rank is one command? | Players cross shard boundaries as they improve, which is a non-atomic remove and add. Finale scores cluster in one band, which makes a hot shard. Hash by player and sum `ZCOUNT` instead. The partitions don't overlap, so the sum is exact. |
+| Why a TTL cache and not invalidation on write? | During a finale almost every write could change the top 100, so the cache would be invalidated constantly. A 0.5s TTL bounds staleness with no coordination. Single-flight and stale-while-revalidate stop expiry from stampeding Redis. |
+| Why home regions and not one write region or active-active? | A single write region is simpler and fixes read latency, but one outage stops all writes. Active-active needs multi-master Postgres. A home region gives one writer per row, and max registers make the shared index converge. |
+| Why async cross-region replication and not synchronous? | Sync adds about 130ms to every commit and ties writes to the standby's reachability. A score is a max register and the game backend keeps match results, so a sub-second loss window is replayable. |
+| Why alert on oldest-note age and not queue depth? | Depth counts items and the problem is delay. A stalled lane with a steady trickle still has a normal-looking backlog and a 40-second age. |
+
+## 4. Master recap table
+
+| Version | Concept | The Insight |
+|---|---|---|
+| V0 | Best-score upsert | `ON CONFLICT ... WHERE EXCLUDED.score > scores.score` makes "keep the best" one atomic statement. |
+| V0 | Window in the key | Putting the time window into `board_id` removes rollover jobs entirely. |
+| V0 | Rank is derived | Never store rank. One score change would shift millions of others. |
+| V0 | Count-based rank | `COUNT(score > mine) + 1` is always exact, but its cost grows with how many players are above you. |
+| V0 | V0's guarantee | Strong consistency and exact rank. Later versions trade some of this away. |
+| V1 | Why counting fails | Rank cost in a B-tree grows with how many players are above you. |
+| V1 | Skip list with spans | Each pointer stores how many items it jumps, so rank is a sum of spans along the search path. |
+| V1 | ZSET commands | `ZADD GT`, `ZREVRANK`, `ZREVRANGE` give write, rank and around-me, all in O(log N). |
+| V1 | Derived index | Postgres stays the source of truth. Redis holds only what's needed to answer rank. |
+| V1 | New cost | Two stores means one write can reach only one of them. |
+| V2 | Dual-write problem | Two stores can't commit atomically, so a crash between them always leaves a mismatch. |
+| V2 | Transactional outbox | Write the "owed update" note in the same transaction as the data. The commit is the only moment the write becomes real. |
+| V2 | Idempotent max | `ZADD GT` makes retries, duplicates and reordering harmless. |
+| V2 | `SKIP LOCKED` | Lets many relay workers share one outbox without blocking each other. |
+| V2 | New trade | Redis now lags Postgres by about 100-200ms. The oldest unpublished note measures that lag exactly. |
+| V3 | Why replicate | Rebuilding from Postgres is correct but takes minutes. A live copy turns an outage into a 10-15s blip. |
+| V3 | Replicas for availability | Read throughput didn't justify replicas. Surviving a node loss did. |
+| V3 | Async tradeoff | The last few ms of writes can be lost on failover. Postgres plus an idempotent re-publish heals it. |
+| V3 | Split-brain guards | Sentinel quorum plus `min-replicas-to-write` stop a stranded primary from accepting orphan writes. |
+| V3 | Client discovery | Clients ask Sentinel for the primary instead of hardcoding an IP, and a circuit breaker fails fast during the switch. |
+| V4 | Cache the shared read | Top-100 is one hot key read by everyone. Per-player rank is a long tail and not worth caching. |
+| V4 | Layer choice | The CDN removes API load and egress. The pod cache removes Redis load. Each is a separate decision. |
+| V4 | TTL over invalidation | Constant churn makes write-triggered invalidation useless. A short TTL bounds staleness with no coordination. |
+| V4 | Stacked TTLs | Outbox lag plus pod TTL plus CDN TTL add up. Budget them together. |
+| V4 | Stampede fixes | Single-flight plus stale-while-revalidate means an expiry never sends a crowd to Redis. |
+| V5 | Write throughput, not size | 80M rows fit on one box. 50K transactions per second don't. |
+| V5 | Shard key follows the write path | `player_id` keeps a player's three boards and outbox rows in one single-shard transaction. |
+| V5 | Bucket map | Hash to 1,024 fixed buckets, then map buckets to shards. Growing from 16 to 20 shards moves 20% of rows instead of 80%. |
+| V5 | Outbox survives sharding | Each shard owns its own outbox in the same transaction, so V2's guarantee holds without 2PC. |
+| V5 | Live moves | The max-merge upsert makes copy-while-writing safe. The ownership guard fences stale writers. |
+| V6 | Why shard Redis | Command execution is single-threaded. 150K writes per second against a 100K ceiling means a 15-second lag. |
+| V6 | Rank is additive | Every player lives in one shard, so global rank is `1 + Σ ZCOUNT` across shards. |
+| V6 | Top-N merge | The global top K always sits inside the union of each shard's top K. |
+| V6 | Shard key | `hash(player_id)` spreads writes evenly. Score range creates a hot band and non-atomic moves. |
+| V6 | Bulkhead | Tagging outbox rows with `index_shard` means one sick shard stalls only its own slice. |
+| V6 | New costs | Reads fan out to all shards, and exact rank is unavailable while any one shard fails over. |
+| V7 | Why go multi-region | Distance dominates. Rank work takes 10ms and the trip to Virginia takes 220ms. One region is also one failure domain. |
+| V7 | Ownership by home region | One writer per player's Postgres rows, so there is nothing to reconcile in the source of truth. |
+| V7 | Max register | `ZADD GT` is idempotent and order-independent, so every region's index converges without coordination. |
+| V7 | Per-target delivery | `delivered_mask` gives each region its own progress. A dead region stalls only its own bit. |
+| V7 | Staleness budget | Outbox, WAN, pod and CDN lags add up to about 1.5s. The CDN TTL was cut to stay inside the target. |
+| V8 | Home region as a single copy | One region holding the only Postgres for its players is both an availability and a durability gap. |
+| V8 | Async standby in another region | Costs nothing on the write path. The price is a loss window of under a second. |
+| V8 | Replay is safe | Max upserts and `match_id` make re-sending the last 10 minutes harmless. |
+| V8 | Fencing | A write lease plus a database epoch means the old region can't write after the flip. |
+| V8 | Human in the loop | A rare, expensive decision gets a person. Retries absorb short blips. |
+| V9 | Uptime is not freshness | Every process was up while 117K players had stale ranks. Define the SLI as time from 204 to visible, per region. |
+| V9 | Age beats depth | A trickle behind a stall has a normal backlog and a 40-second age. Alert on the oldest note's age. |
+| V9 | Black-box plus white-box | Canaries show what users feel. The lane exporter shows where it is stuck. |
+| V9 | Canary design | The score is the tick timestamp, so no coordination is needed. Reads use the real public path. |
+| V9 | Burn-rate alerts | Page on how fast the error budget is burning over two windows, not on a raw threshold. |
+| V9 | Watch the watchers | Timeouts and a watchdog restart stuck loops. A dead-man's heartbeat catches a silent monitoring system. |
+
+## 5. Where next?
+
+Two options:
+
+**(a) Drill deeper into one piece.** Good candidates:
+- The tie-breaking rule when many players share a score, and what it does to around-me.
+- The dead-letter table for poison outbox notes.
+- Automatic cross-region promotion with Patroni, and what it costs.
+- Approximate rank for the long tail on a 500M-player board.
+
+**(b) Mock interview.** I play the interviewer and pressure-test the whole design. I'll ask follow-ups, change requirements mid-way and push on weak spots. You answer out loud as you would in the room.
+
+Say **"a"** with a topic, or **"b"** to begin.
 
 
 
