@@ -734,3 +734,310 @@ My recommendation: Complete the first five thoroughly, including dry runs, edge 
 
 Use Java 21 or later, with `HashMap`, `ArrayDeque`, `PriorityQueue`, and `TreeMap` where appropriate. The important skill is choosing and coordinating the structures—not implementing everything from scratch when the problem doesn't require it.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Since you've now solved the original 13 problems **and all 16 additional problems**, you've covered a substantial part of the Custom Data Structures pattern.
+
+At this stage, I would **stop collecting standard design problems and focus on the remaining high-value gaps**. For Google L4/L5 and Meta interviews, the next useful problems should introduce genuinely different techniques, not simply repeat `HashMap + doubly linked list` or `HashMap + heap`.
+
+I'll focus on problems that extend your current preparation into advanced data structure design, efficient querying, and maintaining complex state.
+
+# 1. Additional Custom Data Structure Problems Worth Solving
+
+I've excluded all 29 problems you've already completed.
+
+These are **10 additional problems** I would consider, ranked by the new techniques they introduce and their usefulness for Google/Meta-style interviews.
+
+| # | Problem | Difficulty | Main concept | Priority |
+|---:|---|---|---|---|
+| 1 | [Design Underground System](https://leetcode.com/problems/design-underground-system/) | Medium | HashMap + aggregation + state management | High |
+| 2 | [Design Authentication Manager](https://leetcode.com/problems/design-authentication-manager/) | Medium | Time-based expiration + lazy cleanup | High |
+| 3 | [Design Browser History](https://leetcode.com/problems/design-browser-history/) | Medium | Navigation state + stack/list design | High |
+| 4 | [Design Log Storage System](https://leetcode.com/problems/design-log-storage-system/) | Medium | Ordered data + range queries | High |
+| 5 | [Design Skiplist](https://leetcode.com/problems/design-skiplist/) | Hard | Probabilistic ordered data structure | High |
+| 6 | [Excel Sheet Column Sum Formula](https://leetcode.com/problems/excel-sum-formula/) | Hard · Premium | Dependency graph + incremental updates | Medium–High |
+| 7 | [Design Phone Directory](https://leetcode.com/problems/design-phone-directory/) | Medium | Efficient allocation and reuse | Medium |
+| 8 | [Design Tic-Tac-Toe](https://leetcode.com/problems/design-tic-tac-toe/) | Medium | Incremental state tracking | Medium |
+| 9 | [Design Snake Game](https://leetcode.com/problems/design-snake-game/) | Medium | Deque + HashSet + simulation | Medium |
+| 10 | [Design Bounded Blocking Queue](https://leetcode.com/problems/design-bounded-blocking-queue/) | Medium · Premium | Thread safety + synchronization | Medium–High |
+
+*Difficulty and priority are preparation recommendations, not predictions of interview frequency.*
+
+## 2. Why these problems are worth considering
+
+### 1. Design Underground System
+
+**Link:** [LeetCode 1396](https://leetcode.com/problems/design-underground-system/)
+
+**What it teaches:** Designing a data structure that tracks active state and computes aggregates from completed events.
+
+You must support operations such as:
+- `checkIn(id, stationName, time)`
+- `checkOut(id, stationName, time)`
+- `getAverageTime(startStation, endStation)`
+
+The key design is to maintain:
+- A map of currently checked-in passengers.
+- A map of route statistics containing total travel time and trip count.
+
+The average is calculated from the accumulated total and count.
+
+**Why it matters:** It teaches you to distinguish transient state from aggregated historical state. This is useful for analytics, event processing, and backend-oriented interview problems.
+
+### 2. Design Authentication Manager
+
+**Link:** [LeetCode 1797](https://leetcode.com/problems/design-authentication-manager/)
+
+**What it teaches:** Managing expiring entries efficiently.
+
+You must generate tokens, renew them, and count unexpired tokens.
+
+The important questions are:
+- How do you identify expired tokens?
+- When should expired entries be removed?
+- Can you avoid scanning every token on every request?
+
+Explore a `HashMap` combined with expiration timestamps and an ordered expiration queue.
+
+**Why it matters:** This resembles the underlying challenges of session management, token expiration, and time-to-live caches.
+
+### 3. Design Browser History
+
+**Link:** [LeetCode 1472](https://leetcode.com/problems/design-browser-history/)
+
+**What it teaches:** Maintaining state when operations can move both forward and backward.
+
+Operations include:
+- Visiting a new URL.
+- Moving backward by a specified number of steps.
+- Moving forward by a specified number of steps.
+
+The important invariant is that visiting a new URL discards the forward history.
+
+Compare a list with a current-position pointer against two-stack implementations.
+
+**Why it matters:** It reinforces state transitions and the trade-offs between different representations.
+
+### 4. Design Log Storage System
+
+**Link:** [LeetCode 635](https://leetcode.com/problems/design-log-storage-system/)
+
+**What it teaches:** Storing timestamped records and retrieving them at different levels of time granularity.
+
+You must store logs and retrieve their IDs within a specified time range. The query may operate at year, month, day, hour, minute, or second granularity.
+
+Consider:
+- A `TreeMap` with ordered timestamps.
+- Encoding timestamps into comparable representations.
+- Finding the relevant range without scanning every stored log.
+
+**Why it matters:** It builds on your experience with `TreeMap` and interval queries while introducing time-granularity constraints.
+
+### 5. Design Skiplist
+
+**Link:** [LeetCode 1206](https://leetcode.com/problems/design-skiplist/)
+
+**What it teaches:** Implementing an ordered data structure with probabilistic balancing.
+
+You must support:
+- `search`
+- `add`
+- `erase`
+
+A skip list maintains multiple linked-list levels. Higher levels allow searches to skip over large portions of the data.
+
+Expected time complexity is \(O(\log n)\) for search, insertion, and deletion, with \(O(n)\) expected space.
+
+**Why it matters:** You will learn how an ordered structure can achieve efficient operations without implementing a balanced binary search tree.
+
+This is a more specialized addition, but valuable if you want to understand advanced data structure implementation.
+
+### 6. Excel Sheet Column Sum Formula
+
+**Link:** [LeetCode 631](https://leetcode.com/problems/excel-sum-formula/)
+
+**What it teaches:** Maintaining dependencies between values.
+
+A spreadsheet cell may contain a constant or a formula referencing other cells. When a referenced cell changes, dependent cells must reflect the updated result.
+
+You need to think about:
+- Representing cell dependencies.
+- Evaluating formulas.
+- Propagating updates to dependent cells.
+- Avoiding incorrect results when dependencies overlap.
+
+This introduces graph-based dependency management rather than ordinary container design.
+
+**Why it matters:** It is a useful bridge between custom data structures, dependency graphs, and incremental computation.
+
+### 7. Design Phone Directory
+
+**Link:** [LeetCode 379](https://leetcode.com/problems/design-phone-directory/)
+
+**What it teaches:** Managing a pool of available resources.
+
+You must efficiently:
+- Allocate an available number.
+- Check whether a number is available.
+- Release a number for reuse.
+
+A queue or set can represent available numbers, while a boolean array can track allocation state.
+
+**Why it matters:** It is a practical resource-allocation problem. However, given your existing experience with sets and maps, it is less novel than the first six problems.
+
+### 8. Design Tic-Tac-Toe
+
+**Link:** [LeetCode 348](https://leetcode.com/problems/design-tic-tac-toe/)
+
+**What it teaches:** Maintaining enough state to answer queries without repeatedly examining the entire board.
+
+Instead of scanning all rows, columns, and diagonals after every move, maintain counters for each row, column, and diagonal.
+
+Each move can then be processed in \(O(1)\) time.
+
+**Why it matters:** This is a simple but important example of replacing repeated computation with incremental state maintenance.
+
+It is particularly useful for learning how to derive an efficient representation from the required operations.
+
+### 9. Design Snake Game
+
+**Link:** [LeetCode 353](https://leetcode.com/problems/design-snake-game/)
+
+**What it teaches:** Coordinating multiple structures to represent a changing simulation.
+
+A typical solution uses:
+- A deque to maintain the snake's body.
+- A set of occupied coordinates to detect collisions.
+- State representing food positions and the current score.
+
+The tricky part is handling movement into the snake's current tail position when the tail is about to move away.
+
+**Why it matters:** It tests whether your data structures correctly represent dynamic state, including subtle update-order edge cases.
+
+### 10. Design Bounded Blocking Queue
+
+**Link:** [LeetCode 1188](https://leetcode.com/problems/design-bounded-blocking-queue/)
+
+**What it teaches:** Implementing a bounded queue used by multiple threads.
+
+The queue has a fixed capacity:
+- `enqueue` waits when the queue is full.
+- `dequeue` waits when the queue is empty.
+- Operations must be thread-safe.
+
+You need to reason about synchronization, waiting and notification, and race conditions.
+
+**Why it matters:** This is the most relevant addition for connecting custom data structure design with concurrent programming.
+
+Given your Java backend background, it is worth understanding, although it is more specialized than ordinary algorithmic design questions.
+
+---
+
+# 3. Which should you actually solve?
+
+I wouldn't automatically add all 10 to your mandatory DSA list.
+
+For your Google L4/L5 and Meta preparation, my recommended order is:
+
+| Order | Problem | Reason |
+|---:|---|---|
+| 1 | Design Underground System | State management and aggregation |
+| 2 | Design Authentication Manager | Expiration and cleanup |
+| 3 | Design Log Storage System | Ordered queries |
+| 4 | Design Skiplist | Advanced ordered structure |
+| 5 | Excel Sheet Column Sum Formula | Dependency management |
+| 6 | Design Browser History | Navigation state |
+| 7 | Design Bounded Blocking Queue | Concurrency and synchronization |
+| 8 | Design Tic-Tac-Toe | Incremental computation |
+| 9 | Design Snake Game | Multiple coordinated structures |
+| 10 | Design Phone Directory | Resource allocation |
+
+## 4. My final recommendation
+
+You've already solved 29 problems across custom data structure design, caches, frequency tracking, ordered maps, streams, and complex state management.
+
+**I would prioritize the first five additional problems, then move on to other DSA patterns rather than trying to complete every design problem on LeetCode.**
+
+For Google and Meta, broad algorithmic coverage, problem-solving under time constraints, and the ability to explain your reasoning are generally more valuable than accumulating a very large number of problems from one category.
+
+One final distinction: **custom data structure design is not the same as system design.** For senior-level interviews, you'll also want to practise designing larger systems, including APIs, storage, caching, concurrency, reliability, and scalability. Those skills complement your DSA preparation but require a different kind of practice.
