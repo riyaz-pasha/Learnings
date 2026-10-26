@@ -3882,6 +3882,1171 @@ Are you currently designing a leaderboard, a task queue, or a rate limiter? Let 
 
 
 
+# Multi-Region Deep Dive: Keys, Persistence, Retrieval and Cross-Shard Queries
+
+Sofia is in Frankfurt and Arjun is in Hyderabad. At 8:00:00pm Arjun posts 51,000. At 8:00:00.4 Sofia opens the app and asks "what's Arjun's rank?"
+
+Four questions have to have crisp answers.
+
+1. Where does Arjun's score live?
+2. How does it reach Frankfurt?
+3. Which copy does Sofia's read touch?
+4. How does Sofia get a global rank without asking every region?
+
+Along the way I correct four details from earlier versions. Each is marked **Correction**.
+
+## 1. The mental model: three kinds of data
+
+| Kind | Examples | Placement | Why |
+|---|---|---|---|
+| Source of truth | `scores`, `score_outbox` | One home region, plus standbys | It needs exactly one writer and must be durable. |
+| Derived index | Redis ZSETs | A **full copy in every region** | Reads must be local, and rank needs every player. |
+| Control data | `shard_map`, `region_map`, `shard_hosts`, `board_index_config` | Replicated everywhere, tiny | Routing needs every region to agree. |
+
+The rule is **write where the player lives, read where the reader lives.**
+
+Only four flows ever cross an ocean.
+
+```mermaid
+graph LR
+    subgraph H["Home region of the player"]
+        W["API (write)"] --> P[("Postgres shard")]
+        P --> O["Outbox relay"]
+        O --> IH[("Index copy")]
+    end
+    subgraph RA["Remote region A"]
+        IA[("Index copy")]
+        RD["API (read)"] --> IA
+    end
+    subgraph RB["Paired standby region"]
+        SB[("Standby shard")]
+    end
+    W2["API in a non-home region"] -->|"3 forwarded write"| W
+    O -->|"1 ZADD GT over WAN"| IA
+    P -.->|"2 async WAL"| SB
+    CFG[("Config store")] -.->|"4 config replication"| RD
+    CFG -.-> W
+```
+
+1. **Relay delivery:** idempotent `ZADD GT` to the other regions' indexes.
+2. **WAL shipping:** async, to the paired standby.
+3. **Write forwarding:** a non-home API passes a write to the serving region.
+4. **Config and metrics:** tiny and rare.
+
+**No read ever crosses a region.** That is the point of the design.
+
+## 2. How we create keys, and why
+
+### 2.1 `player_id`: the region lives inside the ID
+
+Say a game server in Frankfurt receives a submit for player X. It must know X's home region before it can do anything.
+
+| Option | Routing cost | What breaks |
+|---|---|---|
+| Lookup table `player → region` | One extra read per write | The table must itself be global. If it is slow or down, writes stop. |
+| Random UUID | None, but you can't route | You'd need the lookup table anyway. |
+| **Region bits inside the ID** | **Zero** | The home can't change without a new ID. |
+
+We pick the third. The ID travels with every request, so routing is a bit shift.
+
+```text
+player_id (BIGINT, signed, top bit always 0):
+[ 0 | 7 bits home region | 56 bits sequence ]
+```
+
+```python
+def make_player_id(home: int, seq: int) -> int:
+    assert 0 <= home < 128 and 0 <= seq < (1 << 56)
+    return (home << 56) | seq
+
+def home_of(player_id: int) -> int:
+    return (player_id >> 56) & 0x7F          # 0 us-east-1, 1 eu-west-1, 2 ap-south-1
+```
+
+**Correction.** V7 said 8 region bits. Postgres `BIGINT` is signed, so the top bit must stay 0 and 7 bits are usable. That gives 128 logical regions. The example ID in V7's write body (`2305843009213693952`) was also wrong. A region-2 player is `(2 << 56) + seq`, for example `144115188075857372`.
+
+**Sequence allocation.** Each region hands out sequence numbers from its own counter, in blocks of about 1,000 per signup server. No cross-region coordination is needed. 56 bits holds about 7.2e16 players. Sequences 1 to 999 are reserved for the V9 canaries.
+
+**What the immutable home costs, and why it is smaller than it looks.** The ID says "home region 2". The physical location is a separate mapping.
+
+```text
+player_id  --home_of()-->  logical home 2  --region_map-->  serving_region (physical)
+```
+
+- Moving a whole region (V8 failover) is one edit in `region_map`. No IDs change.
+- Adding a fourth region means new signups get code 3. Existing players are untouched.
+- Moving one traveling player is never needed. Their writes forward at a 200ms cost nobody feels, and their reads are already local.
+
+### 2.2 `board_id`: the window is part of the key
+
+```text
+ranked:daily:2026-10-22      ranked:weekly:2026-W43      ranked:alltime
+```
+
+A new window is a new key, so there is no rollover job and no "reset" operation.
+
+**The window comes from the match's UTC end time, never from the server's clock.** Consider a match that ends at 23:59:58 UTC in Mumbai. The write is forwarded and commits in Frankfurt at 00:00:03. With server-clock windows, Frankfurt files it under tomorrow's board and Mumbai would disagree. With event time, every region files it under today. The API checks the board list in the request against `ended_at` and rejects a mismatch, so a game server can't write to arbitrary boards.
+
+### 2.3 Postgres key: `(board_id, player_id)`
+
+It is one row per player per board. It carries no region column, because `player_id` already encodes the region.
+
+**Correction.** V0 added `idx_board_score ON (board_id, score DESC)` for rank queries. Since V1 no read path uses it, and it taxes every one of the 300K row writes per second at peak. We drop it. Rebuilds use the primary key with keyset pagination (`WHERE (board_id, player_id) > ($1, $2) ORDER BY ... LIMIT 10000`).
+
+### 2.4 Three decisions, three independent hashes
+
+| Decision | Derived from | Changing it moves | Cost of change |
+|---|---|---|---|
+| Home region | ID bits | A player's writes and Postgres rows | `region_map` edit, or a new ID |
+| Postgres shard | `md5(player_id)[0:4] % 1024`, then `shard_map` | Rows between the 16 shards in one region | One bucket at a time (V5) |
+| Index shard | `md5(player_id)[4:8] % shards`, per board generation | ZSET members in all 3 regions | Build a new generation, flip `gen` (V6) |
+
+They are independent on purpose. Suppose we reshard Postgres from 16 to 20 shards. If the index shard came from the same bucket, every ZSET member would move too. Because they use different, non-overlapping bytes of one MD5, a Postgres move never touches Redis.
+
+### 2.5 Redis key: `lb:{board_id}:g{gen}:s{i}`
+
+| Part | Why it exists |
+|---|---|
+| `lb:` | Namespace, so other systems on the same Redis can't collide. |
+| `{board_id}` | One ZSET family per board, so a closed board can be dropped on its own. |
+| `g{gen}` | Layout generation. Resharding builds `g2` beside `g1` and flips a pointer. |
+| `s{i}` | The index shard. It is in the key so a debug `SCAN` shows which shard holds what. Routing never reads it from Redis. |
+
+- **Member:** `player_id` as a string. **Score:** the best score as a double.
+- **No hash tags, no Redis Cluster.** Each index shard is its own Sentinel-managed primary. The API does the shard math. No command ever spans keys on two shards.
+- **Score precision:** doubles hold integers exactly up to 2^53, about 9.0e15. Scores far below that are safe.
+
+### 2.6 Outbox and match IDs
+
+- **`score_outbox.id`** is a per-shard `BIGSERIAL`. Order exists only inside one shard. That is fine, because the max operation is commutative and global order is never needed.
+- **`match_id`** is not a dedupe key. Idempotence comes from the max upsert. We keep `match_id` for tracing and for the V8 replay.
+
+### Summary of keys
+
+| Key | Format | Decides | Why this way |
+|---|---|---|---|
+| `player_id` | `[0\|7b home\|56b seq]` | Which region writes | Routing with no lookup. |
+| `board_id` | `{mode}:{kind}:{window}` | Which board a score counts toward | Window in the key means no rollover job. Event time keeps regions in agreement. |
+| `scores` PK | `(board_id, player_id)` | Row identity | One best score per player per board. |
+| Bucket | `md5[0:4] % 1024` | Postgres shard | Fixed buckets make resharding cheap. |
+| Index shard | `md5[4:8] % n` | ZSET shard | Independent of the bucket. |
+| ZSET key | `lb:{board}:g{gen}:s{i}` | Where a member lives in Redis | `gen` makes resharding a pointer flip. |
+
+## 3. Data persistence in detail
+
+### The lifecycle of one score
+
+```mermaid
+sequenceDiagram
+    participant GS as Game server (Mumbai)
+    participant API as API ap-south-1
+    participant PG as Postgres primary (ap)
+    participant AZ as AZ standby (ap, sync)
+    participant WS as Cross-region standby (eu, async)
+    participant RL as Relay loops (ap)
+    participant IA as Index ap-south-1
+    participant IE as Index eu-west-1
+    participant S as Sofia (Frankfurt)
+
+    GS->>API: POST /v1/scores (Arjun, 51000)
+    API->>PG: guard, upsert scores, insert outbox
+    PG->>AZ: WAL, synchronous
+    AZ-->>PG: ack (about 1-2 ms)
+    PG-->>API: COMMIT ok
+    API-->>GS: 204 (T+0)
+    PG--)WS: WAL stream, async
+    RL->>PG: poll pending rows
+    RL->>IA: ZADD GT (T+0.1-0.2 s)
+    RL->>IE: ZADD GT over WAN (T+0.3-0.5 s)
+    S->>IE: rank read, local to Frankfurt
+    IE-->>S: updated rank
+```
+
+### The durability ladder
+
+| When | What just became true | Survives | Does not survive |
+|---|---|---|---|
+| T+0 (the 204) | Committed on the primary, and on the in-region AZ standby | Process crash, host loss, AZ loss | Loss of the whole region |
+| T+0.1 to 1s | Applied on the cross-region standby | Region loss, apart from the last sub-second tail | Nothing we care about, and that tail is replayable |
+| T+0.1 to 0.2s | In the home region's index | Serves local reads | Redis loss (rebuild from Postgres) |
+| T+0.3 to 0.5s | In every region's index | Any single region's index being lost | n/a |
+
+**Correction.** In V8's config I left `synchronous_standby_names` unset. For the in-region AZ standby it should be set, for example `ANY 1 (az_b)`. That costs about 1 to 2ms and means an AZ loss loses nothing. Only the cross-region standby stays async.
+
+**The index is derived.** Losing a Redis shard costs a rebuild from Postgres, not data. Replicas also run AOF with `appendfsync everysec`, so a full restart loads from disk first.
+
+### Consolidated schema (home Postgres shard, for reference)
+
+```sql
+CREATE TABLE scores (
+  board_id   TEXT        NOT NULL,
+  player_id  BIGINT      NOT NULL,
+  bucket     SMALLINT    NOT NULL,
+  score      BIGINT      NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (board_id, player_id)
+);
+CREATE INDEX idx_scores_bucket ON scores (bucket, updated_at);   -- used by bucket moves
+
+CREATE TABLE score_outbox (
+  id             BIGSERIAL   PRIMARY KEY,
+  board_id       TEXT        NOT NULL,
+  player_id      BIGINT      NOT NULL,
+  score          BIGINT      NOT NULL,
+  index_shard    SMALLINT    NOT NULL,
+  delivered_mask SMALLINT    NOT NULL DEFAULT 0,   -- one bit per target region
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at   TIMESTAMPTZ
+);
+CREATE INDEX idx_outbox_pending ON score_outbox (index_shard, id) WHERE delivered_mask <> 7;
+
+CREATE TABLE bucket_ownership (bucket SMALLINT PRIMARY KEY, owned BOOLEAN NOT NULL);
+CREATE TABLE region_epoch (home_region SMALLINT PRIMARY KEY, epoch BIGINT NOT NULL);
+```
+
+### Who writes, who reads, where it lives
+
+| Store | Where | Who writes | Who reads |
+|---|---|---|---|
+| `scores`, `score_outbox` | Home region's Postgres shards | API (write path) | Relay, rebuild, replay, reconciliation |
+| `delivered_mask` | Same shard | Relay loops, one bit each | Relay loops, cleanup, lane exporter |
+| Standby shards | Paired region | Postgres replication | Nobody until promotion |
+| Index ZSETs | All 3 regions, 8 shards each | Relay loops from all 3 homes | API in that region only |
+| Config tables | Replicated to all regions | Operator, resharding and promotion tools | All API pods and relays |
+
+**Postgres is never on a read path.** It is read only by rebuilds, replays, audits and the reconciliation job.
+
+### What fails, and what survives
+
+| Failure | Writes | Reads | Recovery |
+|---|---|---|---|
+| Response lost after commit | Game server retries | Fine | The max upsert makes the retry a no-op. |
+| Relay lane stalls | Fine | One region's slice goes stale | Lane alert at 30s, watchdog restart at 60s. |
+| WAN cut to region R | Fine | R's index goes stale | R's readiness check fails and DNS steers away. Outbox rows wait, and bits catch up on their own. |
+| Redis shard failover | Fine | 10 to 15s of 503 on rank | Sentinel promotion, then re-publish the last 60s. |
+| Whole home region lost | 503 for that region's players | Fine everywhere | V8 runbook. |
+
+## 4. Data retrieval in detail
+
+Every read stays in the reader's region.
+
+| Request | Path | Reads | Worst-case staleness |
+|---|---|---|---|
+| Rank | GeoDNS, CDN pass-through, local API | Local index, 1 + 8 commands | About 0.5s (outbox 0.2s plus WAN 0.3s) |
+| Around-me | Same | Local index, scatter | About 0.5s |
+| Top-100 | CDN, then pod cache, then local API | Local index, 8 commands, cached | About 1.5s |
+
+Rank has no CDN or pod cache in front of it, so it is the fresher read.
+
+### Read-your-writes across regions
+
+Arjun submits, and half a second later Sofia reads. Sofia's index may not have the score yet. For Arjun it is invisible only if he is away from his home region.
+
+| Option | Mechanism | Verdict |
+|---|---|---|
+| Echo the score | The write response returns the accepted score, and the client shows it right away. | **Chosen** for the score itself. |
+| Pin to home | A short cookie sends this player's reads to their home region for 5s. | Held in reserve. It costs 220ms for the rare traveler. |
+| Version token | The read waits until the lane's delivered watermark passes a token. | Rejected. It needs a per-lane watermark service for a 0.5s gap. |
+
+One related case is a brand-new player. Their first score is not in a remote index yet, so `ZSCORE` returns nil and the API returns 404. The client contract treats a 404 within a few seconds of a submit as "pending" and retries after 1s.
+
+### A lagging region should not serve reads
+
+`/healthz/ready` in region R also fails if the local canary reader reports repeated `missed` results. GeoDNS then removes R after 3 failed checks, which is about 30 seconds. Clients move to the next-nearest region, which is fresh.
+
+## 5. Cross-shard queries and global requests
+
+### The query catalogue
+
+| Query | Shards touched | Method | Exact? |
+|---|---|---|---|
+| Rank | 1 owner + all 8 | `ZSCORE`, then sum of `ZCOUNT (score +inf` | Yes |
+| Top-100 | 8 | `ZREVRANGE 0 99` on each, then k-way merge | Yes |
+| Deep page (ranks 1,001-1,100) | 8 | Each shard must return its top 1,100, then merge | Yes, but cost grows with depth |
+| Around-me | 1 + 8 | 3 range queries per shard, then merge | Yes |
+| Total players, percentile | 8 | Sum of `ZCARD`, cached about 5s. Percentile is rank divided by total. | Yes |
+| Friends' scores (cut in SCOPE) | At most 8 | Group friend IDs by owner shard, one `ZMSCORE` per shard, sort in the API | Yes |
+| "Who is #5,000?" | 8 | Binary search on score using summed `ZCOUNT`, then fetch | Yes |
+| Whole-board scan, rebuild | 48 Postgres shards (16 per home, 3 homes) | Keyset pagination on the primary key | Yes |
+
+### Why scatter-gather is exact
+
+1. **Partitions don't overlap.** Each player lives in exactly one shard, so summed counts never double count.
+2. **Top-K is a union property.** Anyone in the global top K is also in the top K of their own shard, so merging per-shard top Ks cannot miss them.
+3. **The merge must use Redis's tie order.** Equal scores sort by member string, so merge on `(score, member)` in the same direction Redis uses. Otherwise you get duplicates or skips at shard boundaries.
+
+**Correction.** V6's around-me used exclusive bounds on both sides, so players tied with you never appeared. Add a third query per shard for equal scores.
+
+```text
+ZRANGEBYSCORE    lb:...:s{j} (score +inf   LIMIT 0 5      higher
+ZREVRANGEBYSCORE lb:...:s{j} (score -inf   LIMIT 0 5      lower
+ZRANGEBYSCORE    lb:...:s{j} score score   LIMIT 0 10     tied (shares your rank)
+```
+
+### Deep pages
+
+Page 11 of the leaderboard needs the top 1,100 from each shard, so 8,800 rows merged to return 100. We cap the public API at the top 1,000. Anything deeper uses the binary-search method or around-me for a specific player.
+
+### The scatter is not a snapshot
+
+The 8 calls land a millisecond or two apart. At 150K writes per second fleet-wide, a few hundred writes land during one scatter. Each can move your rank by at most one. That is far below our 1-2 second freshness budget, so we accept it.
+
+### Tail latency from fan-out
+
+If each call is slow 1% of the time, the chance that at least one of 8 is slow is `1 - 0.99^8 = 7.7%`. That is a real number, and the options are these.
+
+| Fix | Mechanism | Verdict |
+|---|---|---|
+| **Tight timeout and one retry** | `timeout=50ms`, then retry the same primary once | **Chosen** |
+| Hedged read to a replica | After p95 (say 20ms) send the same `ZCOUNT` to a replica and take the first answer | Keep in reserve. Staleness of a few ms is harmless, but it adds replica load. |
+| Return a partial sum | Skip the slow shard | Rejected. It breaks exact rank. |
+
+### Global requests never leave the region
+
+If the index were partitioned by region, rank would need `ZCOUNT` from three regions. That is three WAN trips of 130 to 220ms in the critical path. Instead we pay about 24GB total (8GB per region, three copies) and keep every read local. That is cheap next to the latency it removes.
+
+### Reconciliation (anti-entropy)
+
+Idempotent delivery means mistakes self-heal, but bugs and lost keys still happen. A nightly job per region checks the index against the truth.
+
+1. For each board, compare `sum(ZCARD)` over 8 shards with `sum(COUNT(*))` over the 48 Postgres shards.
+2. Sample 10K random `(board, player)` pairs per home shard. Compare Postgres `score` with `ZSCORE` in each region.
+3. For mismatches, insert a repair note into `score_outbox` from `scores`. The normal relay delivers it, and the max rule makes this safe.
+4. Export `lb_reconcile_mismatch_total` and alert if it is above zero for two nights running.
+
+## 6. Other things multi-region needs
+
+### Board lifecycle
+
+Without this, old boards fill Redis forever and late events have no rule.
+
+| State | When | Writes | Index |
+|---|---|---|---|
+| Open | Window is active | Accepted | Live ZSET |
+| Grace | Window ended, up to 24h for dailies | Accepted if `ended_at` is inside the window | Live |
+| Frozen | Grace over and the outbox for the board is drained | Rejected with 409 | Final top-100 snapshot stored. `EXPIRE` set on the ZSETs. |
+| Archived | After a retention period | Rejected | Postgres rows moved to cold storage |
+
+The relay checks board state before `ZADD`, so it can't recreate an expired key.
+
+### Network partitions
+
+| Cut | What keeps working | What degrades |
+|---|---|---|
+| Region A cannot reach B (WAN) | Local writes and reads in both | A's notes to B stall, so B's index goes stale for A's players. B's readiness may fail. |
+| A region loses the config store | Reads. Writes continue until the 30s lease expires. | Then writes return 503. This is the fencing from V8. |
+| Client cannot reach its nearest region | DNS steers it away | Higher latency |
+
+### Data residency
+
+The index copies in other regions hold only `player_id` and `score`. These are pseudonymous, with no names or emails. Personal data stays in the profile service and in the home region's Postgres. Display names for the top-100 come from a profile service in batch, and are cached with the list.
+
+### Adding a fourth region
+
+1. Assign code 3 to new signups. Existing IDs are untouched.
+2. Stand up the stack and seed its index from a peer. A temporary `replicaof` then promote works, or rebuild from the 48 shards.
+3. Add it as a relay target. This needs one code change. The "fully delivered" mask is hardcoded as 7 in V7. Make it a config value (`TARGET_MASK`), so four regions use 15. `SMALLINT` holds 15 bits.
+4. Add its standby pairing and its canary prober.
+
+## 7. Recap
+
+| Concept | The Insight |
+|---|---|
+| Write where the player lives | The home region is encoded in `player_id`, so routing costs a bit shift and never a lookup. |
+| Home is logical | `region_map` maps a logical home to a physical region, so a failover or a move never changes IDs. |
+| Independent hashes | Region, Postgres bucket and index shard use different bits, so resharding one never moves the others. |
+| Event-time board keys | Boards come from the match's UTC end time, so every region agrees on which window a score belongs to. |
+| Durability ladder | Commit, then AZ standby, then cross-region standby, then indexes. Each rung survives a bigger failure. |
+| Reads stay local | A full index copy per region costs 3x memory and removes every WAN trip from the read path. |
+| Rank is additive | Non-overlapping partitions mean `1 + Σ ZCOUNT` is exact. Merge top-K lists with Redis's own tie order. |
+
+**Interview arc:** *"A global leaderboard can't scatter ranks across oceans on every read, so I give each player a home region encoded in their ID to own their writes, replicate a full ranking index into every region through idempotent max-merge notes, and answer rank with a local sum of per-shard counts, which keeps reads local and exact while writes stay conflict-free."*
+
+## What next?
+
+Pick one:
+
+**(a)** Drill into one more piece:
+- The binary-search "who is #N" query.
+- The reconciliation job.
+- Logical homes (64 homes over 3 regions) for rebalancing load.
+
+**(b)** Start the mock interview, where I play interviewer and pressure-test the whole design.
+
+Say **"a"** with a topic, or **"b"** to begin.
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+# Three Drill-Downs: "Who is #N", Reconciliation, Logical Homes
+
+Each one gets its own mini-version: break it, solve it, implement it. The drill-downs expose two gaps in my earlier answers, and I mark them **Correction**.
+
+# Drill 1: "Who is #N?"
+
+## Break it
+
+Priya is a product manager. She wants the Gold-tier banner to say "top 1% starts at score X". On a 50M-player board, the 1% line is **position 500,000**.
+
+Sam is a player. He taps "jump to rank 20,000,413" and expects to land on that page.
+
+In V1 this was one command:
+
+```text
+ZREVRANGE lb:ranked:alltime 499999 499999 WITHSCORES      # O(log N), skip-list spans
+```
+
+V6 sharded the ZSET, and that command stopped working. Position 499,999 in one shard is not position 499,999 globally.
+
+## Naive attempts
+
+### Attempt 1: Merge top-K with K = N
+
+*Why it looked reasonable:* It's exactly how top-100 works in V6.
+
+*How it breaks:* The global top 500,000 sits inside the union of each shard's top 500,000. So each shard must return 500K entries.
+
+- That is about 12MB per shard and about **100MB per query**.
+- Each `ZREVRANGE 0 499999` blocks its shard's single thread for hundreds of milliseconds.
+- During that time the shard serves nothing else, including the relay's `ZADD`. Outbox lag spikes for everyone.
+
+Merging top-K is fine for K up to about 1,000. It cannot scale to deep positions.
+
+### Attempt 2: Ask each shard for its position N/8
+
+*Why it looked reasonable:* Players are hashed evenly, so each shard holds one-eighth of every score range.
+
+*How it breaks:* "Even" only holds on average. Counts above a given score differ between shards by a few thousand. Position N/8 in shard 3 is near global position N, not at it. The answer is approximate, and the product needs exact.
+
+### The insight
+
+Rank moves in one direction as score moves. A higher score always has a lower or equal rank number. So we can **binary search on the score**, not on the position.
+
+Each probe asks one exact question: "how many players have score at least s?" V6 already answers it with 8 parallel `ZCOUNT`.
+
+Think of guessing a number with "higher or lower" hints. Each guess costs one exact count.
+
+## Solve it
+
+Define two things.
+
+- **Position N** is the Nth player in the total order (score descending, then member string descending, which is Redis's own order).
+- **Rank** is `1 + count of strictly higher scores`, so ties share a rank.
+
+If three players tie at rank 20,000,413, they occupy positions 20,000,413, 20,000,414 and 20,000,415. Position N always exists. "Rank N" can belong to nobody. So the API is by **position**.
+
+The algorithm has three phases.
+
+1. **Find the score** `s*` at position N, by binary search with scatter `ZCOUNT`.
+2. **Find the player** inside the tie group at `s*`.
+3. **Verify** by running the normal rank path on that player.
+
+- ✅ **What we gained:**
+  - An exact answer for any N in about 25-30ms, with about 160 cheap commands and no big blocking calls.
+  - Percentile cutoffs for free. Phase 1 alone returns the tier boundary score.
+  - It runs on the local region's index, so there is no WAN trip.
+- ⚠️ **What we gave up:**
+  - **Not a snapshot.** About 20 sequential rounds run while writes keep landing. At finale load, thousands of writes arrive in that time. We return the player and their verified current rank, so the caller sees any drift.
+  - **Huge tie groups can't name one player.** Past a cap we return the group's rank and size.
+  - **A new endpoint to rate limit**, because each call fans out 160 commands.
+- ❌ **What we considered and rejected:**
+  - Top-K merge for deep N.
+  - Per-shard position N/8.
+  - A histogram or t-digest. It's approximate. I'd use it for percentiles on a 10x bigger board, but not for "who is exactly #N".
+
+## Implement it
+
+```http
+GET /v1/boards/ranked:alltime/positions/20000413
+→ { "position": 20000413, "player_id": 98231, "score": 48200, "rank": 20000413, "tied_with": 2 }
+```
+
+### Phase 1: find `s*`
+
+We want the **largest integer score s such that `cnt_ge(s) >= N`**. Two facts follow.
+
+- `cnt_ge(s*+1) < N`, so fewer than N players are strictly above `s*`.
+- Someone has score exactly `s*`, because `cnt_ge(s*) > cnt_ge(s*+1)`.
+
+```python
+async def cnt_ge(board, cfg, s):                       # players with score >= s
+    parts = await asyncio.gather(*[
+        redis[j].zcount(key(board, cfg, j), s, "+inf") for j in range(cfg.shards)])
+    return sum(parts)
+
+async def who_is(board, N):
+    cfg = board_cfg(board)
+    total = await total_players(board)                 # sum of ZCARD, cached 5s
+    if not (1 <= N <= total):
+        raise NotFound
+    if N <= 1000:
+        return await top_slice(board, N)               # the V6 top-K merge is cheaper here
+
+    lo = await min_score(board)                        # ZRANGE 0 0 on each shard, then min
+    hi = await max_score(board)                        # ZREVRANGE 0 0 on each shard, then max
+    while lo < hi:                                     # invariant: cnt_ge(lo) >= N
+        mid = (lo + hi + 1) // 2
+        if await cnt_ge(board, cfg, mid) >= N:
+            lo = mid
+        else:
+            hi = mid - 1
+    s_star = lo
+```
+
+With scores up to 212,000, that is `log2(212,000) ≈ 18` probes. A worked trace (numbers illustrative) for N = 20,000,413:
+
+| Probe `mid` | `cnt_ge(mid)` | vs N | Next range |
+|---|---|---|---|
+| 106,000 | 310,000 | below | hi = 105,999 |
+| 53,000 | 17.6M | below | hi = 52,999 |
+| 26,500 | 31.0M | at least | lo = 26,500 |
+| 39,750 | 24.9M | at least | lo = 39,750 |
+| 46,375 | 21.1M | at least | lo = 46,375 |
+| 49,687 | 19.4M | below | hi = 49,686 |
+| ... 12 more probes | | | lands on `s*` = 48,200 |
+
+### Phase 2: find the player in the tie group
+
+```python
+    above = await cnt_ge(board, cfg, s_star + 1)       # strictly higher
+    k = N - above                                      # 1-based position inside the tie group
+    group = await cnt_ge(board, cfg, s_star) - above   # size of the tie group
+
+    if k > TIE_CAP:                                    # e.g. 5,000
+        return TiedGroup(rank=above + 1, size=group)   # name no single player
+
+    parts = await asyncio.gather(*[
+        redis[j].zrevrangebyscore(key(board, cfg, j), s_star, s_star, start=0, num=k)
+        for j in range(cfg.shards)])
+    merged = sorted(itertools.chain(*parts), key=lambda m: m.decode(), reverse=True)
+    pid = int(merged[k - 1])
+```
+
+Each shard needs to return at most `k` members. The kth member overall can't be deeper than k in any single shard. The merge sorts by the member **string**, because that is Redis's tie order. Numeric order would disagree. For example, "9" sorts after "10" as a string.
+
+### Phase 3: verify and return
+
+```python
+    score, rank_now = await rank_of(board, pid)        # V6 path: ZSCORE + 8x ZCOUNT
+    return Position(N, pid, score, rank_now, tied_with=group - 1)
+```
+
+If `rank_now` differs from `above + 1`, a write landed during the search. The caller sees the real current rank.
+
+### Latency option: 16-way search
+
+Each round probes 15 evenly spaced scores in one pipeline per shard.
+
+```python
+pts = [lo + (hi - lo) * i // 16 for i in range(1, 16)]
+counts = await asyncio.gather(*[pipelined_zcount(j, pts) for j in shards])   # 8 pipelines x 15 commands
+# narrow [lo, hi] to the largest probe with cnt >= N, up to the next probe minus 1
+```
+
+That is `ceil(log16(212,000)) = 5` rounds, about 8ms, using about 600 commands instead of 160. We use it only for latency-sensitive callers.
+
+### Protection
+
+- Rate limit: 2 requests per second per client.
+- Cache the result for 2s by `(board, N)`. A cron job also computes tier cutoffs (1%, 5%, 20%) once a minute using phase 1 only, and the banner reads that.
+- Any shard timeout returns `503` with `Retry-After`, as in V6.
+
+### Sequence
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as API (local region)
+    participant IX as Index shards 0..7
+
+    C->>API: GET /positions/20000413
+    API->>IX: ZCARD, min and max score (cached or 1 round)
+    IX-->>API: total, lo, hi
+    loop about 18 rounds
+        API->>IX: ZCOUNT mid +inf on all 8 shards
+        IX-->>API: 8 counts, sum them
+    end
+    API->>IX: ZCOUNT (s_star +inf, then ZREVRANGEBYSCORE s_star s_star LIMIT 0 k
+    IX-->>API: above, tie members
+    Note over API: merge ties by member string, pick the kth
+    API->>IX: ZSCORE, then 8x ZCOUNT (verify rank)
+    API-->>C: player, score, rank now
+```
+
+## Follow-ups
+
+**Q: In V1 this was one command. Why did sharding make it hard?**
+A skip list answers "what's at position N?" through span counts inside one structure. Once members are split, no single structure knows the global order. We rebuild it from the one thing shards can answer exactly and independently: how many members are above a score.
+
+**Q: What about 500M players?**
+Binary search still works, since it's logarithmic in the score range, not in players. Per-shard `ZCOUNT` stays O(log N). I'd cache more aggressively and add the 16-way probe.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Position vs rank | Ties share a rank, so "rank N" can be empty. Position N always exists. |
+| Search on score | Rank is monotone in score, so binary search on score with exact scatter counts. |
+| Tie handling | Find the tie group's start from the count above, then fetch at most k per shard and merge by Redis's string order. |
+| Not a snapshot | About 20 rounds run during live writes, so verify and return the current rank. |
+| Why not top-K | K = N means 100MB per query and long blocking calls on single-threaded shards. |
+
+**Interview arc:** *"Sharding broke 'what's at position N', and merging top-N costs 100MB at N = 500K, so I binary-search the score using exact scatter ZCOUNTs, then resolve the tie group by merging per-shard members in Redis's own order, which gives exact answers in about 20 cheap rounds."*
+
+# Drill 2: The Reconciliation Job
+
+## Break it
+
+It's Thursday 02:10 UTC. A bad kernel patch rolls to all three AZs and takes down **all three nodes** of eu-west-1 index shard 5.
+
+The on-call engineer wants it back fast. The V3 plan was to rebuild from Postgres, which takes minutes. Instead they restore last night's backup, which is **3 hours old**. The shard is online in 4 minutes.
+
+V3's re-publish heals the last 60 seconds. But **18,400 score improvements** from the missing 3 hours are not in that shard. Their outbox rows were deleted by cleanup after an hour. Nothing remembers they existed.
+
+Sofia in Frankfurt posted 52,300 at 01:00. Her index entry still says 49,000. Her rank is wrong by about 340,000 places. Nobody notices for three days.
+
+Why every alarm stayed quiet:
+
+- **Lane ages are 0.** The relay is healthy and has nothing pending.
+- **Canaries pass.** They submit every 10 seconds, so any canary player heals itself within seconds.
+- **Counts match.** Sofia still exists in shard 5, just with an old score. `ZCARD` equals `COUNT(*)`.
+- **Redis is up and the API returns 200.**
+
+This is **silent loss of old state**. Our monitoring watches the flow of new writes, and nothing watches the correctness of old ones.
+
+## Drift classes
+
+| Class | Index vs Postgres | Typical cause |
+|---|---|---|
+| Missing | Player in Postgres, absent in Redis | Restore from an old backup, lost key |
+| Low | Redis score lower than Postgres | Lost update, old restore |
+| High | Redis score higher than Postgres | Postgres lost an acked write (failover tail), or a buggy write |
+| Extra | In Redis, no Postgres row | Bad write, test data, a deleted board |
+
+## Naive attempts
+
+### Attempt 1: Rebuild every index nightly
+
+*Why it looked reasonable:* The index is derived, so recreate it.
+
+*How it breaks:* It loads 80M rows into three regions every night and needs a new generation, a dual-write window and a flip (V6). It also hides bugs. A nightly overwrite repairs drift silently, so nobody learns it happened, and a restore bug can recur every day.
+
+### Attempt 2: Compare counts
+
+*How it breaks:* Sofia's case has equal counts. Counts catch missing members but not wrong scores.
+
+### Attempt 3: Sample 10K random players
+
+*How it breaks:* It tells you whether big drift exists. Our 18,400 players are 0.037% of the board, so a 10K sample expects about 3.7 hits. Smaller drift is invisible. It also tells you nothing about **which** players are wrong, so there's no repair list.
+
+## Solve it
+
+Compare **every member**. It's cheaper than it sounds.
+
+- Redis shards are scanned on their **replicas**, so primaries stay untouched.
+- Postgres rows are read from the **in-region sync standby**. In V8 those standbys serve no reads, so they're free capacity.
+- A full scan is about 6M members per index shard. That is minutes of wall time per board.
+
+**Last time I sketched sampling. A full comparison is affordable, so we do that.**
+
+The job has four stages.
+
+1. **Full keyed diff** per `(board, region, index shard)`. It produces candidates.
+2. **Re-verify each candidate** with fresh reads, skipping players with pending outbox rows. This removes noise from writes that landed during the scan.
+3. **Classify** into missing, low, high or extra.
+4. **Repair** with the safe mechanism for each class.
+
+**Correction.** My last message said repair notes work for every mismatch because "the max rule makes this safe". That is only true for **missing and low**. `ZADD GT` can never lower a score, so a **high** index value would survive. High and extra need an explicit compare-and-set.
+
+- ✅ **What we gained:**
+  - It finds the exact list of wrong players.
+  - It repairs through the same delivery path, so there is no special machinery for the common case.
+  - It also works as the verifier for index resharding and for home moves (Drill 3).
+- ⚠️ **What we gave up:**
+  - About 600MB of memory per shard job.
+  - About 2GB of WAN transfer per region per night for the big board, because remote homes' rows must reach each region's reconciler.
+  - A repair policy to own. "High" needs a decision (below).
+- ❌ **What we considered and rejected:** Nightly rebuild, count comparison and sampling. Also slice digests (Merkle-style). At our size, live writes during a scan make nearly every slice mismatch, so they add little. At 10x scale I'd use them, with the same re-verify step behind them.
+
+## Implement it
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| Index scan (`ZSCAN`) | Nobody (read only) | Reconciler | Index shard **replicas**, each region |
+| Row scan | Nobody (read only) | Reconciler | In-region sync **standby** of each home shard |
+| `reconcile_findings` | Reconciler | Dashboards, operators | Small ops Postgres, outside the 48 shards |
+| Repair notes | Reconciler | Normal relay loops | `score_outbox` on the home shard |
+| CAS repair | Reconciler | n/a | Index shard primary |
+
+```sql
+CREATE TABLE reconcile_findings (
+  run_id BIGINT, region SMALLINT, board_id TEXT, index_shard SMALLINT, player_id BIGINT,
+  kind TEXT,                 -- missing | low | high | extra
+  pg_score BIGINT, idx_score BIGINT,
+  state TEXT,                -- candidate | confirmed | repaired | skipped_pending | cas_failed
+  found_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### Stage 1: full diff
+
+```python
+def scan_rows(shard, board, shard_j, cfg):             # from the standby, keyset pages
+    last = 0
+    while True:
+        rows = standby[shard].fetch("""
+            SELECT player_id, score, updated_at FROM scores
+            WHERE board_id = %s AND player_id > %s ORDER BY player_id LIMIT 50000""",
+            [board, last])
+        if not rows: break
+        for r in rows:
+            if index_shard(r.player_id, cfg.shards) == shard_j:
+                yield r
+        last = rows[-1].player_id
+
+def scan_index(replica, key):
+    cursor = 0
+    while True:
+        cursor, batch = replica.zscan(key, cursor, count=5000)
+        yield from batch
+        time.sleep(0.005)                              # throttle
+        if cursor == 0: break
+```
+
+```python
+def diff(pg, idx):                                     # pg: {pid: row}, idx: {pid: score}
+    for pid, s in idx.items():
+        row = pg.get(pid)
+        if row is None:    yield ("extra",   pid, None,      s)
+        elif s < row.score: yield ("low",    pid, row.score, s)
+        elif s > row.score: yield ("high",   pid, row.score, s)
+    for pid, row in pg.items():
+        if pid not in idx: yield ("missing", pid, row.score, None)
+```
+
+Scan Redis **first**, then Postgres. Then any player who improved in between shows as "low", which is the harmless direction.
+
+### Stage 2: re-verify each candidate
+
+Noise is small. About 2,000 submits per second for about 90 seconds at a 25% improvement rate is about 45K players, or 0.1% of the board. Re-checking that many is trivial.
+
+```python
+def reverify(c):
+    pg_now  = pg_primary[c.home].fetchone(
+        "SELECT score, updated_at FROM scores WHERE board_id=%s AND player_id=%s", [c.board, c.pid])
+    idx_now = redis_primary[c.region][c.j].zscore(key(c.board, c.cfg, c.j), str(c.pid))
+    pending = pg_primary[c.home].exists(
+        "SELECT 1 FROM score_outbox WHERE board_id=%s AND player_id=%s AND delivered_mask <> 7",
+        [c.board, c.pid])
+    if pending or (pg_now and pg_now.updated_at > RUN_START - timedelta(seconds=60)):
+        return Skip("skipped_pending")
+    return classify(pg_now, idx_now)                   # same four classes, with fresh values
+```
+
+Point reads use the **primary**, because there are only thousands of them.
+
+### Stage 3 and 4: classify and repair
+
+| Class | Repair | Mechanism |
+|---|---|---|
+| Missing, low | Re-deliver the current Postgres score to **this region only** | Outbox insert with a preset mask |
+| High | CAS the index down to the Postgres value | Lua script |
+| Extra | CAS-remove the member | Same Lua script |
+
+Missing or low. This sets only the broken region's bit as pending. For eu (bit 1), the mask is `7 & ~2 = 5`.
+
+```sql
+INSERT INTO score_outbox (board_id, player_id, score, index_shard, delivered_mask)
+SELECT board_id, player_id, score, $3, $4          -- $4 = 7 & ~(1 << target_region)
+FROM scores WHERE board_id = $1 AND player_id = $2;
+```
+
+The normal relay loop for that region delivers it with `ZADD GT`. The insert reads the **current** Postgres score, so a concurrent improvement can't be overwritten with an older value.
+
+High or extra:
+
+```lua
+-- KEYS[1] = zset, ARGV[1] = member, ARGV[2] = bad value we observed, ARGV[3] = target score or ''
+local cur = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if cur and tonumber(cur) == tonumber(ARGV[2]) then
+  if ARGV[3] == '' then return redis.call('ZREM', KEYS[1], ARGV[1]) end
+  redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+  return 1
+end
+return 0                                              -- someone changed it, leave it alone
+```
+
+The script only writes if the index still holds the exact bad value we saw. If the relay moved it in the meantime, the script does nothing.
+
+### The "high" policy
+
+| Mode | When | Rule |
+|---|---|---|
+| Steady state | Normal days | **Postgres wins.** CAS the index down. Any "high" outside post-failover mode pages a human, because it usually means a bug. |
+| Post-failover | After a V8 promotion and replay, set by the operator | If the high value appears in **two or more** regions' indexes, treat it as an acked write Postgres lost. **Heal Postgres upward** by posting it through the normal write path with `match_id = 'reconcile-...'`. A value present in two independent indexes was committed once. |
+
+### Schedule, metrics and alerts
+
+- Nightly per region for open and grace boards, staggered. Frozen boards are checked once at freeze.
+- **Verifier use:** run it on the new generation before an index reshard flip (V6 step 3), and on a home's old and new copies before deleting the old one (Drill 3).
+- Metrics: `lb_reconcile_confirmed_total{kind,region}`, `lb_reconcile_repaired_total`, `lb_reconcile_last_success_timestamp`.
+- Alerts: page if confirmed mismatches exceed 0.01% of members, or any "high" outside post-failover mode. Ticket if the last success is over 36 hours old.
+
+### Sequence
+
+```mermaid
+sequenceDiagram
+    participant RC as Reconciler (eu-west-1)
+    participant RR as Index replica (shard 5)
+    participant SB as Postgres standbys (all homes)
+    participant PG as Home Postgres primary
+    participant RL as Relay loop (target eu)
+    participant IX as Index primary (shard 5)
+
+    par full scan
+        RC->>RR: ZSCAN throttled, all members
+        RR-->>RC: members and scores
+    and
+        RC->>SB: keyset scan of scores
+        SB-->>RC: rows
+    end
+    Note over RC: diff gives candidates, 18,400 low plus noise
+    loop each candidate
+        RC->>PG: fresh score and pending outbox check
+        RC->>IX: fresh ZSCORE
+        alt pending or just changed
+            RC->>RC: skip
+        else confirmed low
+            RC->>PG: INSERT outbox row, mask = 5 (eu only)
+            RL->>PG: poll pending row
+            RL->>IX: ZADD GT
+        end
+    end
+```
+
+## Follow-ups
+
+**Q: How do you avoid false positives from in-flight writes?**
+Scan the index first and Postgres second, so races only produce harmless "low" candidates. Then re-verify every candidate with fresh reads and skip anyone with a pending outbox row or a very recent update. Only players still wrong after that are repaired.
+
+**Q: Why not just rebuild the index from Postgres?**
+A rebuild fixes the symptom silently and teaches you nothing. Reconciliation produces an exact list of drifted players, repairs only those, and its mismatch rate becomes a metric. A rising rate points at a real bug.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Silent drift | Old state can be lost while every flow metric looks healthy. Canaries heal themselves and lane ages show only new writes. |
+| Counts miss it | Wrong scores keep the counts equal. Compare member by member. |
+| Scan replicas | Reads come from index replicas and Postgres standbys, so primaries are untouched. |
+| Re-verify | Fresh point reads plus the pending-outbox check turn candidates into confirmed findings. |
+| GT can't lower | Missing and low repair through the relay. High and extra need a compare-and-set. |
+| Two policies | Postgres wins normally. After a failover, a value present in two regions heals Postgres upward. |
+
+**Interview arc:** *"Idempotent delivery heals in-flight failures but can't see old state that was silently lost, so a nightly job scans every index member against Postgres standbys, re-verifies each mismatch with fresh reads, and repairs missing or low scores through the normal outbox and high or extra ones through a compare-and-set script."*
+
+# Drill 3: Logical Homes (64 Homes over 3 Regions)
+
+## Break it
+
+It's six weeks after a new title launches in India. ap-south-1 grows from 33% to **52%** of all players.
+
+Its 16 Postgres primaries peak at **90% CPU** at 8pm IST. Commit p99 goes from 8ms to **180ms**, and game servers' 2-second timeouts start firing at 0.4%.
+
+us-east-1 runs at **28%** and eu-west-1 at **35%**.
+
+Under V7/V8, a player's home is their region, forever. The options are limited.
+
+## Naive attempts
+
+### Attempt 1: Add shards in ap (V5 bucket moves)
+
+*Why it looked reasonable:* We already have the machinery.
+
+*How it breaks:* It works, but it buys hardware only in ap. We pay for ap's 3-hour daily peak around the clock, while us-east-1 holds about 70% spare capacity that is already paid for. Every growth spurt repeats this.
+
+### Attempt 2: Re-create Indian players as US-homed players
+
+*How it breaks:* `player_id` is referenced everywhere, in friends lists and inventories. Changing it means migrating every system that stores an ID.
+
+### Attempt 3: A per-player override table
+
+*How it breaks:* 50M rows in a lookup on the write path, replicated globally. It brings back the global dependency that putting the region in the ID was designed to avoid.
+
+### The right granularity
+
+| Unit of placement | Count | Size of one unit | Verdict |
+|---|---|---|---|
+| Region | 3 | 33% | Too coarse to balance |
+| **Logical home** | **64** | **1.6%** | **Chosen** |
+| Bucket (V5) | 1,024 | 0.1% | 1,024 databases and about 24K relay loops. Too much to run. |
+| Player | 50M | 0.000002% | Lookup table on the write path |
+
+64 units is fine enough to balance three regions to within about 1.6%. It also fits the 7-bit ID field, with 128 codes available and 64 in use.
+
+## Solve it
+
+The 7-bit home field is already in `player_id`. Now it means a **logical home** (0 to 127), not a region. A small table maps each home to where it runs.
+
+```mermaid
+graph LR
+    ID["player_id<br/>[0 | 7-bit logical home | 56-bit seq]"] -->|"home_of: bit shift"| H["Logical home h<br/>0..127, 64 in use"]
+    H -->|"home_map lookup, refreshed about 5s"| M["serving_region, cluster_id,<br/>standby_region, epoch, state"]
+    M --> C["Postgres cluster in serving region<br/>database lh_h"]
+    C -.->|"async WAL"| S["Standby cluster in standby_region"]
+```
+
+**A logical home is one Postgres database** holding about 1.25M rows (about 235MB) and about 780 submits per second at peak. Several homes share a cluster. This replaces V5's bucket map. **The 64 homes are the shards.** Each home is small enough that one database handles it.
+
+### What changes from V5-V8
+
+| Piece | Before | With logical homes |
+|---|---|---|
+| Home | 3 regional codes | 64 logical homes in the same 7-bit field |
+| Postgres layout | 16 shards per region, 1,024 buckets | One database per home, hosted on a cluster. No buckets. |
+| Maps | `shard_map`, `region_map`, `shard_hosts` | One `home_map` |
+| Write guard | `bucket_ownership` plus `region_epoch` | One `home_epoch` |
+| Relay loops | per pg shard x index shard x target | per **home** x index shard x target |
+| Canary | 16 per region | 1 per home, 64 total |
+| Failover unit | A whole region | One cluster (2 to 4 homes), or a region's clusters spread over two regions |
+| Standby pairing | One paired region | Per-cluster standby region |
+
+**The index is untouched.** It is keyed by board and index shard, not by home. Moving a home never changes a ZSET key.
+
+- ✅ **What we gained:**
+  - **Rebalancing without changing any ID.** Move 6 of ap's 26 homes to us-east-1 in a week, one at a time.
+  - **Cheap moves.** One home is about 235MB, so a move is minutes, not days.
+  - **Smaller failures.** A cluster failure hits 2-4 homes (about 5% of players) instead of a region (33%).
+  - **Spread failover.** Standbys sit in both other regions, so a region loss splits across two.
+  - **Per-home game days.** You can test failover on 1.6% of players.
+  - **Region growth by moving existing homes**, not waiting for new signups.
+- ⚠️ **What we gave up:**
+  - **Moved homes pay write latency.** A Mumbai game server's write for a us-homed player forwards across the ocean, about +130-220ms. Nobody waits on that.
+  - **Own-region freshness gets worse for moved homes.** Delivery to the local index is now a WAN trip, so about 0.4-0.5s instead of about 0.2s. That is still inside the 1.5s budget.
+  - **`home_map` is critical config.** A stale copy is stopped by the epoch guard, which costs a brief 503.
+  - **64 databases to monitor**, and about 1,536 relay loops (64 homes x 8 index shards x 3 targets).
+  - **Moves briefly pause writes** for the home, about 5-10s.
+- ❌ **What we considered and rejected:** Per-player maps, bucket-level homes, keeping home equal to region, and consistent hashing. Consistent hashing places things automatically as nodes come and go. Here, placement is a small explicit table that an operator-approved controller changes on purpose, which gives control, fencing and an audit trail.
+
+### Retrofitting a live system
+
+For a greenfield design, allocate 64 homes at launch. For a system that has already shipped with 3 homes, a one-time reshard splits each legacy home into about 21 homes, by grouping its V5 buckets. I'd mention it and not build it here.
+
+## Implement it
+
+### Schema
+
+```sql
+-- config store, replicated to all regions (replaces region_map, shard_hosts, shard_map)
+CREATE TABLE home_map (
+  home           SMALLINT PRIMARY KEY,          -- 0..127
+  serving_region SMALLINT NOT NULL,
+  cluster_id     SMALLINT NOT NULL,
+  standby_region SMALLINT NOT NULL,             -- never equal to serving_region
+  epoch          BIGINT   NOT NULL,
+  state          TEXT     NOT NULL,             -- active | moving | fenced
+  version        BIGINT   NOT NULL
+);
+
+CREATE TABLE home_moves (
+  home SMALLINT, from_region SMALLINT, to_region SMALLINT,
+  state TEXT,                                   -- planned | copying | fenced | flipped | verified | cleaned
+  started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
+);
+
+-- inside each home's own database lh_{home}
+CREATE TABLE home_epoch (home SMALLINT PRIMARY KEY, epoch BIGINT NOT NULL, fenced BOOLEAN NOT NULL DEFAULT false);
+-- scores and score_outbox as before, minus the bucket column and idx_scores_bucket
+```
+
+### Who writes, who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| `home_map` | Rebalancer, promotion tool | API pods, relay loops, exporter, canary prober (about 5s refresh) | Config store, all regions |
+| `home_moves` | Rebalancer | Operators, dashboards | Config store |
+| `home_epoch` | Move and promotion tools | API (guard in every write) | Each home's database |
+| `scores`, `score_outbox` | API (write path) | Relay, reconciler | Home's database on its cluster |
+
+### Write path (delta)
+
+```python
+async def submit(req):
+    home = (req.player_id >> 56) & 0x7F
+    m = HOME_MAP[home]
+    if m.state == "fenced" or lease_expired():
+        return Response(503, headers={"Retry-After": "5"})
+    if m.serving_region != MY_REGION:
+        return await forward(m.serving_region, req)
+    conn = CLUSTER_POOL[m.cluster_id].database(f"lh_{home}")
+    # one txn: guard, then 3x (upsert scores + insert outbox), exactly as V6
+```
+
+```sql
+SELECT 1 FROM home_epoch WHERE home = $1 AND epoch = $2 AND NOT fenced FOR SHARE;
+```
+
+No row means a stale map or a fenced home. The API rolls back, refreshes the map and retries once.
+
+### New signups
+
+A new player gets a home chosen among the homes **currently served by their nearest region**, weighted by free capacity. Their writes start local. Later moves only change where the write executes.
+
+### Moving home 37 from ap-south-1 to us-east-1
+
+1. **Plan.** Mark `home_moves` as `planned`. Create database `lh_37` on a destination cluster.
+2. **Backfill** with the V5 max-merge upsert, keyset-paginated from A to B.
+
+```sql
+INSERT INTO scores (board_id, player_id, score, updated_at) VALUES ...
+ON CONFLICT (board_id, player_id)
+DO UPDATE SET score = EXCLUDED.score, updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.score > scores.score;
+```
+
+3. **Catch up** by re-copying rows with `updated_at >= last_copy` until a pass takes under a second.
+4. **Fence A.** This waits for in-flight writers to finish. New writers hit the guard and get 503.
+
+```sql
+UPDATE home_epoch SET fenced = true WHERE home = 37;       -- on A
+```
+
+5. **Drain.** The relay for home 37 keeps running at A until `SELECT count(*) FROM score_outbox WHERE delivered_mask <> 7` returns 0.
+6. **Final delta copy.** There are no writers now, so this pass is exact.
+7. **Open B.** Set `home_epoch` on B to A's epoch + 1 with `fenced = false`.
+8. **Flip the map.**
+
+```sql
+UPDATE home_map SET serving_region=$us, cluster_id=$cB, standby_region=$sB,
+       epoch=$e1, state='active', version=version+1 WHERE home=37;
+```
+
+9. **Switch relays.** Start the relay loops for home 37 in the new region. Stop the old ones.
+10. **Verify, then clean up.** Run the Drill 2 reconciler on both copies. After 24 hours with a clean result, delete A's data.
+
+Pods adopt the new map within about 5s. In that window, writes for these players get 503 and retry. Rollback before step 8 is "unfence A and drop B". After step 8, rollback is "move it back".
+
+### The rebalancer
+
+It is a controller, not a human-free autopilot. An operator approves each plan.
+
+```python
+def plan_move(metrics):
+    util = {r: p95_daily_peak_cpu(r) for r in REGIONS}       # last 7 days of daily peaks
+    src, dst = max(util, key=util.get), min(util, key=util.get)
+    if util[src] < 0.65 or util[src] - util[dst] < 0.25:
+        return None
+    return Move(home=pick_home(src), to=dst)                  # one move at a time
+```
+
+Safety rails:
+
+- Never during a tournament or finale window.
+- Never with a stalled lane or an open incident.
+- At most one move at a time, with the backfill throttled to about 20% of the source cluster's IOPS.
+- Re-evaluate after 24 hours of fresh metrics.
+
+### Failover with logical homes
+
+- **Cluster loss:** promote that cluster's AZ standby. If the whole cluster's region is gone, promote its cross-region standby.
+- **Region loss (V8):** same runbook, but now per cluster. Standbys are placed in **both** other regions, so ap's 26 homes split about 13 to eu and 13 to us.
+
+| Scenario | Extra write load on surviving API fleets |
+|---|---|
+| V8 (ap pairs to eu) | eu takes all of ap's homes: 14K + 20K = **34K submits per second at peak**, about 2.4x |
+| Logical homes, spread | us: 15.6K + 10.2K = **26K**, eu: 14K + 10.2K = **24K**, about 1.7x each |
+
+Standby hardware cost is the same, one standby per cluster. Only its placement changes.
+
+### Sequence: a home move
+
+```mermaid
+sequenceDiagram
+    participant RB as Rebalancer
+    participant A as Home DB at ap-south-1
+    participant B as Home DB at us-east-1
+    participant CF as Config store
+    participant API as API pods (all regions)
+    participant RL as Relay loops
+
+    RB->>B: create lh_37, backfill with max-merge upsert
+    RB->>A: read rows in keyset pages
+    loop until delta under 1 s
+        RB->>A: read rows changed since last pass
+        RB->>B: max-merge upsert
+    end
+    RB->>A: fence home 37, waits for in-flight writers
+    API-->>API: writes for home 37 return 503, retry
+    RL->>A: drain pending outbox for home 37
+    RB->>B: final delta copy, open with epoch + 1
+    RB->>CF: flip home_map for home 37
+    CF-->>API: new map in about 5 s
+    API->>B: writes for home 37 now execute at us-east-1
+    RL->>B: relay loops for home 37 start in us-east-1
+```
+
+## Follow-ups
+
+**Q: Why not consistent hashing for placing homes?**
+Consistent hashing helps when nodes join and leave and you want placement to adjust by itself. Here we have 64 fixed units and a handful of regions, and we want to move one specific hot home on purpose, fence it, and audit it. An explicit 64-row map does that.
+
+**Q: Doesn't moving homes away from their players hurt them?**
+Only their write path, and only by about 130-220ms on a call nobody waits on. Reads are always served from the local index copy. The cost is slightly older freshness for their own rank, about 0.4-0.5s, still inside the 2s SLO.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Right granularity | Region is too coarse and bucket is too fine. 64 homes balance three regions to about 1.6% and are cheap to run. |
+| Indirection, not new IDs | The 7-bit home field stays in the ID. Only the `home_map` row changes when a home moves. |
+| Homes are the shards | One small database per home replaces the bucket map. A home is about 235MB, so moves take minutes. |
+| Fence, drain, flip | The same max-merge copy and `FOR SHARE` fence as V5, plus draining the outbox before opening the new copy. |
+| Spread failover | Per-cluster standby placement lets a region loss split across two regions instead of one. |
+| Index untouched | ZSETs are keyed by board and index shard, so a home move never changes them. |
+
+**Interview arc:** *"A region-per-home design can't rebalance, because players' IDs pin them to a region, so I put a 7-bit logical home in the ID and keep a 64-row map from home to region, cluster and standby, which lets a controller move one 235MB home at a time with a fence-drain-flip, and also spreads a region loss across two surviving regions."*
+
+# How the Three Connect
+
+- Drill 2's reconciler is the **safety check** for Drill 3's moves. It runs before an old copy is deleted.
+- Drill 1 only reads the index, so it is unaffected by where homes live.
+- Drill 3's per-home canaries and lane labels make Drill 2's findings easier to place. A drifted player maps to exactly one home and one index shard.
+
+## What next?
+
+Pick one:
+
+**(a)** Another drill-down:
+- Dead-letter handling for poison outbox notes.
+- Automatic cross-region promotion with Patroni, and its cost.
+- Retrofitting a live 3-home system to 64 homes.
+
+**(b)** Start the mock interview. I play interviewer and pressure-test the whole design, including these three pieces.
+
+Say **"a"** with a topic, or **"b"** to begin.
 
 
 
@@ -3915,27 +5080,6 @@ Are you currently designing a leaderboard, a task queue, or a rate limiter? Let 
 
 
 
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -3943,6 +5087,10 @@ Are you currently designing a leaderboard, a task queue, or a rate limiter? Let 
 -----------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------
+
+
+
+
 
 
 
