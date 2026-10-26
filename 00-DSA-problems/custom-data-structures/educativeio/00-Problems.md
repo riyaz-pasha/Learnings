@@ -1041,3 +1041,155 @@ You've already solved 29 problems across custom data structure design, caches, f
 For Google and Meta, broad algorithmic coverage, problem-solving under time constraints, and the ability to explain your reasoning are generally more valuable than accumulating a very large number of problems from one category.
 
 One final distinction: **custom data structure design is not the same as system design.** For senior-level interviews, you'll also want to practise designing larger systems, including APIs, storage, caching, concurrency, reliability, and scalability. Those skills complement your DSA preparation but require a different kind of practice.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+You've now completed the original 13 problems, the 16 additional problems, and the 10 further problems. That's **39 problems in the Custom Data Structures category**.
+
+At this point, I recommend changing your strategy: rather than continuing to collect standard design problems, focus on **genuinely new data structure techniques, less common but valuable design challenges, and problems that combine multiple patterns**.
+
+For your Google L4/L5 and Meta interview preparation, I'll exclude all 39 problems you've already solved and identify only additional problems that offer meaningful learning value.
+
+One caveat: more problems do not automatically mean better interview readiness. The goal is to identify gaps in your understanding, not to exhaust every problem tagged *Design* on LeetCode.
+
+## 1. The next 12 problems I'd consider
+
+I reviewed the broader LeetCode design-problem catalog to identify problems that weren't in your previous lists. The most useful remaining candidates involve iterators, mutable range queries, specialized stacks, dynamic rankings, and stateful systems. [LeetCode JavaScript Solutions](https://leetcodejavascript.com/tags/design?utm_source=chatgpt.com)
+
+| # | Problem | Difficulty | Primary concept | Recommendation |
+|---:|---|---|---|---|
+| 1 | [Design HashMap](https://leetcode.com/problems/design-hashmap/) | Easy | Hashing, collision handling, bucket design | Solve if not implemented from scratch |
+| 2 | [Design Linked List](https://leetcode.com/problems/design-linked-list/) | Medium | Node management, insertion, deletion | Solve if not implemented from scratch |
+| 3 | [Implement Queue using Stacks](https://leetcode.com/problems/implement-queue-using-stacks/) | Easy | Amortized analysis, two-stack design | Recommended |
+| 4 | [Implement Stack using Queues](https://leetcode.com/problems/implement-stack-using-queues/) | Easy | Adapting one interface to another | Optional |
+| 5 | [Design a Stack With Increment Operation](https://leetcode.com/problems/design-a-stack-with-increment-operation/) | Medium | Lazy propagation within a stack | Recommended |
+| 6 | [Dinner Plate Stacks](https://leetcode.com/problems/dinner-plate-stacks/) | Hard | Multiple bounded stacks, indexed capacity management | High-value challenge |
+| 7 | [Range Sum Query – Mutable](https://leetcode.com/problems/range-sum-query-mutable/) | Medium | Fenwick tree or segment tree | Essential if those structures aren't mastered |
+| 8 | [Range Sum Query 2D – Mutable](https://leetcode.com/problems/range-sum-query-2d-mutable/) | Hard · Premium | 2D Fenwick tree or 2D segment tree | Advanced extension |
+| 9 | [Online Stock Span](https://leetcode.com/problems/online-stock-span/) | Medium | Monotonic stack + streaming state | Recommended |
+| 10 | [Online Election](https://leetcode.com/problems/online-election/) | Medium | Preprocessing + binary search | Recommended |
+| 11 | [Sequentially Ordinal Rank Tracker](https://leetcode.com/problems/sequentially-ordinal-rank-tracker/) | Hard | Ordered ranking, heaps or balanced sets | High-value challenge |
+| 12 | [Count Integers in Intervals](https://leetcode.com/problems/count-integers-in-intervals/) | Hard | Interval merging, ordered maps or segment trees | Advanced extension |
+
+These problems are not all pure custom data structure problems. I've included several because they strengthen closely related skills that matter in algorithmic interviews.
+
+### Which ones are genuinely new?
+
+**Highest-value additions:**
+
+1. **Dinner Plate Stacks:** Maintain many stacks with a fixed capacity and efficiently locate the leftmost stack with available space.
+2. **Design a Stack With Increment Operation:** Learn to defer updates instead of modifying every affected element.
+3. **Range Sum Query – Mutable:** Move from simple prefix sums to structures that support both updates and queries.
+4. **Sequentially Ordinal Rank Tracker:** Maintain a ranking as items are added, while queries request successive ranked results.
+5. **Count Integers in Intervals:** Maintain the union of many intervals while supporting insertions and total covered-length queries.
+
+These five offer more meaningful extensions than solving another basic queue or stack implementation.
+
+---
+
+## 2. A separate category: iterator design
+
+Iterator problems are useful because they test how you maintain traversal state without materializing unnecessary data.
+
+| Problem | Difficulty | Link | Main concept |
+|---|---|---|---|
+| Flatten 2D Vector | Medium | [LeetCode 251](https://leetcode.com/problems/flatten-2d-vector/) | Lazy traversal across nested collections |
+| Peeking Iterator | Medium | [LeetCode 284](https://leetcode.com/problems/peeking-iterator/) | Lookahead without consuming the next element |
+| Flatten Nested List Iterator | Medium | [LeetCode 341](https://leetcode.com/problems/flatten-nested-list-iterator/) | Stack-based traversal of nested structures |
+| Zigzag Iterator | Medium | [LeetCode 281](https://leetcode.com/problems/zigzag-iterator/) | Alternating traversal across multiple iterators |
+| Binary Search Tree Iterator | Medium | [LeetCode 173](https://leetcode.com/problems/binary-search-tree-iterator/) | Explicit traversal state using a stack |
+
+**My recommendation:** Solve Peeking Iterator and Flatten Nested List Iterator first. Then study BST Iterator if you haven't already mastered iterative tree traversal.
+
+These are particularly useful for understanding iterators, lazy evaluation, and stateful traversal in Java.
+
+---
+
+## 3. What about the remaining LeetCode design problems?
+
+There are many more, including Design SQL, Design Spreadsheet, Design a Text Editor, Design a Task Manager, and Design an ATM Machine. The catalog is extensive. [LeetCode JavaScript Solutions](https://leetcodejavascript.com/tags/design?utm_source=chatgpt.com)
+
+I wouldn't automatically add all of them to your preparation.
+
+Use this filter:
+
+- **Add it** if it introduces a genuinely new technique.
+- **Study it selectively** if it combines familiar techniques in an interesting way.
+- **Skip it for now** if it mostly repeats a structure you already understand.
+
+For example, after completing LRU Cache, LFU Cache, Max Stack, and All O\`one Data Structure, another problem involving only a `HashMap` and linked list probably has diminishing returns unless it introduces a new constraint.
+
+---
+
+## 4. My final recommendation for your Google/Meta preparation
+
+Given the 39 problems you've completed, I'd prioritize the following **eight remaining problems**:
+
+| Order | Problem | What you should master |
+|---:|---|---|
+| 1 | [Implement Queue using Stacks](https://leetcode.com/problems/implement-queue-using-stacks/) | Amortized \(O(1)\) reasoning |
+| 2 | [Peeking Iterator](https://leetcode.com/problems/peeking-iterator/) | Stateful iterator design |
+| 3 | [Dinner Plate Stacks](https://leetcode.com/problems/dinner-plate-stacks/) | Coordinating multiple data structures |
+| 4 | [Design a Stack With Increment Operation](https://leetcode.com/problems/design-a-stack-with-increment-operation/) | Lazy updates |
+| 5 | [Online Stock Span](https://leetcode.com/problems/online-stock-span/) | Monotonic stack |
+| 6 | [Range Sum Query – Mutable](https://leetcode.com/problems/range-sum-query-mutable/) | Fenwick tree or segment tree |
+| 7 | [Sequentially Ordinal Rank Tracker](https://leetcode.com/problems/sequentially-ordinal-rank-tracker/) | Dynamic ranking |
+| 8 | [Count Integers in Intervals](https://leetcode.com/problems/count-integers-in-intervals/) | Interval union and advanced querying |
+
+These are my recommendations based on coverage and transferable skills, not a verified ranking of questions asked by Google or Meta.
+
+**One important point:** If you've already mastered Fenwick trees, segment trees, monotonic stacks, and iterator design through other DSA patterns, you don't need to solve all eight here. In that case, Dinner Plate Stacks, Sequentially Ordinal Rank Tracker, and Count Integers in Intervals are the most interesting remaining challenges.
+
+After these, I'd move on rather than continuing to expand the Custom Data Structures list.
