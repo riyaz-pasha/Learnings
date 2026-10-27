@@ -3,6 +3,7 @@
 /*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
 
 /* Theme source: /Users/riyaz/Personal/Learning/markdown-theme-2.css */
+@import url("https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap");
 
 /* fills the whole page edge-to-edge so there's no white gutter around the centered content */
 html,
@@ -14,14 +15,28 @@ body.preview-container {
 .markdown-preview.markdown-preview {
   background-color: #161b22 !important;
   color: #e6edf3;
-  font-family: "JetBrains Mono", monospace;
-  /* font-family: "Inter", system-ui, sans-serif; */
-  line-height: 1.7;
+  font-family: "PT Serif", -apple-system-ui-serif, "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  font-size: 17px;
+  line-height: 1.75;
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: common-ligatures contextual;
+  font-feature-settings: "liga" 1, "calt" 1, "kern" 1;
   box-sizing: border-box !important;
   width: 100% !important;
   max-width: 100% !important;
   margin: 0 !important;
   padding: 40px !important;
+}
+
+.markdown-preview.markdown-preview h1,
+.markdown-preview.markdown-preview h2,
+.markdown-preview.markdown-preview h3,
+.markdown-preview.markdown-preview h4,
+.markdown-preview.markdown-preview h5,
+.markdown-preview.markdown-preview h6 {
+  font-family: "PT Serif", -apple-system-ui-serif, Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .markdown-preview.markdown-preview h1 {
@@ -82,11 +97,9 @@ body.preview-container {
 .markdown-preview.markdown-preview code,
 .markdown-preview.markdown-preview pre,
 .markdown-preview.markdown-preview pre * {
-  /* JetBrains Mono's ligatures (<=, >=, &&, ||, =>, ...) render as
-     missing-glyph boxes in the webview — disable ligature substitution
-     so operators show as literal characters. */
-  font-variant-ligatures: none !important;
-  font-feature-settings: "liga" 0, "calt" 0 !important;
+  font-family: "FiraCode Nerd Font Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace !important;
+  font-variant-ligatures: normal !important;
+  font-feature-settings: "liga" 1, "calt" 1 !important;
 }
 
 .markdown-preview.markdown-preview code {
@@ -94,6 +107,7 @@ body.preview-container {
   color: #ffb86c;
   padding: 3px 7px;
   border-radius: 6px;
+  font-size: 0.88em;
 }
 
 .markdown-preview.markdown-preview pre {
@@ -103,6 +117,8 @@ body.preview-container {
   overflow-x: auto;
   margin: 20px 0;
   border: 1px solid #30363d;
+  font-size: 0.88em;
+  line-height: 1.55;
 }
 
 .markdown-preview.markdown-preview table {

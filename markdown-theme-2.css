@@ -1,15 +1,26 @@
+@import url("https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap");
+
 body {
   background-color: #161b22;
   color: #e6edf3;
-  font-family: "JetBrains Mono", monospace;
-  /* font-family: "Inter", system-ui, sans-serif; */
-  line-height: 1.7;
+  font-family: "PT Serif", -apple-system-ui-serif, "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  font-size: 17px;
+  line-height: 1.75;
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: common-ligatures contextual;
+  font-feature-settings: "liga" 1, "calt" 1, "kern" 1;
   max-width: 100%;
   margin: auto;
   padding: 40px;
 }
 
 /* HEADINGS */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "PT Serif", -apple-system-ui-serif, Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
 
 h1 {
   color: #ff7b72;
@@ -79,11 +90,20 @@ input[type="checkbox"] {
 
 /* INLINE CODE */
 
+code,
+pre,
+pre * {
+  font-family: "FiraCode Nerd Font Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  font-variant-ligatures: normal;
+  font-feature-settings: "liga" 1, "calt" 1;
+}
+
 code {
   background: #1c2128;
   color: #ffb86c;
   padding: 3px 7px;
   border-radius: 6px;
+  font-size: 0.88em;
 }
 
 /* CODE BLOCKS */
@@ -95,6 +115,8 @@ pre {
   overflow-x: auto;
   margin: 20px 0;
   border: 1px solid #30363d;
+  font-size: 0.88em;
+  line-height: 1.55;
 }
 
 /* TABLES */

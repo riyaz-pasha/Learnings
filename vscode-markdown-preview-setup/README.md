@@ -47,12 +47,13 @@ re-run `./install.sh`.
 
 `install.sh` writes to both.
 
-## Required extension + font
+## Required extension + fonts
 
 - Extension: **Markdown Preview Enhanced** (`shd101wyy.markdown-preview-enhanced`)
   — install via VS Code, or `code --install-extension shd101wyy.markdown-preview-enhanced`.
-- Font: **FiraCode Nerd Font Mono** — already tracked in this repo's `Brewfile`
-  (`cask "font-fira-code-nerd-font"`), so `brew bundle` picks it up.
+- Prose Font: **PT Serif** — preinstalled on macOS (`/System/Library/Fonts/Supplemental/PTSerif.ttc`) with Google Fonts web fallback in `style.less`.
+- Code Font: **FiraCode Nerd Font Mono** — already tracked in this repo's `Brewfile`
+  (`cask "font-fira-code-nerd-font"`), so `brew bundle` picks it up. Used across VS Code editor, terminal, and preview code blocks.
 
 ## Settings applied (`settings.snippet.json`)
 
