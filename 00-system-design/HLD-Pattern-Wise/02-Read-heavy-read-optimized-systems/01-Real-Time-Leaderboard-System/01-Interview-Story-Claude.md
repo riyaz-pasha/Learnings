@@ -5074,6 +5074,227 @@ Say **"a"** with a topic, or **"b"** to begin.
 
 
 
+# Top-100 Caching: What Caches It, and How the Thundering Herd Is Handled
+
+## Direct answer
+
+**DNS does not cache the top-100.** GeoDNS only picks which region serves the client. The top-100 is cached in two places today.
+
+1. **The CDN edge.** Cache-Control is `max-age=0.5` with stale-while-revalidate.
+2. **The in-process cache inside each API pod.** This is the V4 pod cache.
+
+**It is not cached in Redis today.** The 8 ZSET shards in each region are the ranking index. They are the source we recompute from, not a cache. I deliberately kept cache traffic off them, because V4's break-it was cache-shaped traffic starving the index.
+
+You're right to ask about a Redis tier, because it is a real design option. I'll show where it would live and when it earns its place. First, here is every layer that already collapses duplicate calls.
+
+## The layers, and who each one protects
+
+| Layer | Where it lives | Collapses duplicates by | Protects | Freshness cost |
+|---|---|---|---|---|
+| Client | Phone | `max-age`, ETag with `304`, jittered polling | Network and CDN | up to 0.5s |
+| CDN edge | Edge location | Request collapsing per URL | Origin from each edge | 0.5s |
+| CDN origin shield (new) | One tier per origin region | Request collapsing across edges | API from many edges | 0s extra |
+| Pod cache (V4) | Memory in each API pod | Single-flight plus stale-while-revalidate | The index, per pod | 0.5s |
+| Regional cache tier (optional, new) | Small dedicated Redis in each region | A short lock, so one pod computes for all | The index, per region | 0.5s |
+| Index shards | 8 Redis shards per region | Not a cache | n/a | n/a |
+
+**Correction.** V4 described CDN request collapsing per edge. With about 200 edge locations, each one still sends its own request every 0.5s. That is about 400 requests per second to our origin for one board. An **origin shield** fixes it. All edges ask one shield node per origin region, and the shield collapses them. The origin then sees about 2 requests per second per board.
+
+## Do we add a Redis cache tier?
+
+Do the numbers first.
+
+**Case 1: one very hot board, such as the finale.** The CDN and shield cut 500K per second to about 2 per second at the origin. Pod single-flight bounds scatters at pods x 2 per second. With 200 pods that is 400 scatters per second. Each scatter is 8 `ZREVRANGE 0 99`, so 3,200 commands per second, or about 400 per shard. That is **0.4% of one shard's ceiling**. A Redis tier is not needed for this case.
+
+**Case 2: many mid-popularity boards.** Say 10,000 boards at about 1 request per second each. The requests spread across 200 pods, so each pod sees one request per board every few minutes. The pod cache never hits. The shield helps only for boards that go through the CDN. Every other request becomes a scatter. That is up to 10K scatters per second, or about 80K commands per second. Per shard that is about 10K, which is about 10% of capacity. This is acceptable but noticeable.
+
+**Case 3: cold pods during autoscale.** Finale traffic scales pods from 20 to 200, and every new pod starts with an empty pod cache. Single-flight bounds the damage at one scatter per new pod, which is small. It still adds jitter at the worst moment.
+
+**My recommendation:**
+
+- **For the public top-100 endpoint:** CDN, origin shield and pod cache are enough. Skip the Redis tier.
+- **Add the regional cache tier if** you have many mid-tail boards, callers that bypass the CDN (internal services, authenticated or personalized lists), or a need to survive a CDN outage.
+
+I'll show the design so you can decide.
+
+## The optional regional cache tier
+
+### Where it lives
+
+| Question | Answer |
+|---|---|
+| Which region? | **Every region has its own.** A read never crosses an ocean. |
+| Which shard? | **None of the 8 index shards.** It's a separate small Redis (primary plus one replica in a second AZ), so cache traffic can't steal CPU from `ZCOUNT` and `ZADD`. |
+| How is a board placed? | One key per board on one instance. Total size is about 10,000 boards x 4KB = 40MB, so there's nothing to shard. |
+| Hot-key risk? | The key sees about 2 reads per second from the lock winners plus pod refreshes, so it's tiny. |
+
+### Key and value
+
+```text
+Key:    cache:top100:{board_id}:g{gen}          e.g.  cache:top100:ranked:alltime:g1
+Value:  {"computed_at": 1761600000123, "items": [[98231, 51000], [441, 50990], ...]}   (about 3KB)
+PX:     10000          physical TTL, so we can serve stale if a recompute fails
+Fresh:  500 ms         logical freshness, judged by computed_at
+Lock:   lock:top100:{board_id}   SET NX PX 1500
+```
+
+`gen` is in the key so an index resharding flip can't mix layouts. The logical and physical TTLs differ on purpose. The value stays readable for 10s, but readers treat it as fresh only for 0.5s. That gives us stale-while-revalidate and a fallback during a shard failover.
+
+### Who writes and who reads
+
+| Structure | Who writes | Who reads | Lives where |
+|---|---|---|---|
+| Pod cache `top:{board}` | The pod, after a refresh | The same pod | Pod memory |
+| `cache:top100:{board}:g{gen}` | The lock winner (one pod per board per region), through a Lua script | Every pod in that region, on a pod-cache miss | Regional cache Redis |
+| `lock:top100:{board}` | The pod that wins `SET NX` | Pods trying to win it | Regional cache Redis |
+| Origin shield object | The CDN shield | CDN edges | The CDN provider |
+
+### Read path with all layers
+
+```python
+FRESH = lambda: 500 * random.uniform(0.8, 1.2)       # jitter, so pods don't refresh in lockstep
+STALE_OK = 3000
+
+async def get_top100(board):
+    e, now = L1.get(board), ms()
+    if e and now - e.at < FRESH():                    # 1. fresh in this pod
+        return e.value
+    if e and now - e.at < STALE_OK:                   # 2. stale: serve it, refresh once in the background
+        asyncio.ensure_future(single_flight(board))
+        return e.value
+    return await single_flight(board)                 # 3. cold: all callers in this pod share one future
+
+async def refresh(board):                             # runs once per pod per board at a time
+    v = await l2_get(board)                           # cache Redis, 20 ms timeout, fail open
+    if v and ms() - v.computed_at < FRESH():          # 4. regional cache is fresh
+        return L1.put(board, v)
+    won = await l2_lock(board)                        # SET lock:top100:{board} pod NX PX 1500
+    if won:                                           # 5. this pod computes for the whole region
+        top = await scatter_merge(board)              # 8x ZREVRANGE 0 99, then merge (V6)
+        await l2_put_if_newer(board, top)             # Lua, below
+        return L1.put(board, top)
+    if v: return L1.put(board, v)                     # 6. someone else is computing: use the stale one
+    for _ in range(3):                                # 7. nothing to serve: wait briefly, then re-read
+        await asyncio.sleep(0.05 + random.random() * 0.05)
+        v = await l2_get(board)
+        if v: return L1.put(board, v)
+    top = await scatter_merge(board)                  # 8. fail open: compute locally
+    return L1.put(board, top)
+```
+
+```lua
+-- put_if_newer: KEYS[1]=cache key, ARGV[1]=json, ARGV[2]=computed_at, ARGV[3]=px
+local cur = redis.call('GET', KEYS[1])
+if cur and cjson.decode(cur).computed_at >= tonumber(ARGV[2]) then return 0 end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
+return 1
+```
+
+- **The lock expires by itself** after 1.5s. A winner that crashes never blocks anyone for more than 1.5s.
+- **Wrong winner can't hurt.** If a slow winner finishes after its lock expired, `put_if_newer` refuses to overwrite a newer value. Cache writes are safe to repeat.
+- **Everything fails open.** If the cache Redis is down, pods compute locally, bounded by single-flight.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CDN as CDN edge
+    participant SH as Origin shield
+    participant P as API pod
+    participant L2 as Regional cache Redis
+    participant IX as Index shards 0..7
+
+    C->>CDN: GET /top?n=100
+    alt edge fresh
+        CDN-->>C: cached list
+    else edge miss
+        CDN->>SH: one request per URL
+        alt shield fresh
+            SH-->>CDN: cached list
+        else shield miss
+            SH->>P: one request per URL
+            alt pod cache fresh
+                P-->>SH: list
+            else pod stale or cold (single-flight per pod)
+                P->>L2: GET cache:top100 and check computed_at
+                alt cache tier fresh
+                    L2-->>P: list
+                else stale
+                    P->>L2: SET lock NX PX 1500
+                    alt won
+                        P->>IX: ZREVRANGE 0 99 on 8 shards
+                        IX-->>P: 8 lists, merge to top 100
+                        P->>L2: put_if_newer
+                    else lost
+                        P-->>P: serve stale or wait 50 ms and re-read
+                    end
+                end
+                P-->>SH: list
+            end
+            SH-->>CDN: list
+        end
+        CDN-->>C: list
+    end
+```
+
+## Thundering herd: every case, and what stops it
+
+| # | Herd | What happens | What stops it |
+|---|---|---|---|
+| 1 | **Hot key expires** | Thousands of requests arrive in the same millisecond | Edge and shield collapse. Pod single-flight plus serving stale. The lock at the cache tier. |
+| 2 | **Cold start**: new pods during autoscale or a deploy | Empty pod caches, all asking at once | The cache tier answers them. Without it, each pod does one scatter, bounded at pods x 1. |
+| 3 | **Lockstep expiry** | All pods refresh on the same 0.5s boundary | Jittered `FRESH` (plus or minus 20%), so refreshes smear across the window. |
+| 4 | **Midnight rollover** | The daily board's name changes and every URL is cold at once | Clients get the current board ID from the API, not from their clock. A scheduled job requests the next window's board 60s early, so the cache, config row and CDN are primed. A new board is nearly empty, so the first scatter is cheap anyway. |
+| 5 | **Redis index shard failover** | Scatters fail for 10 to 15s | Stale values keep serving (physical TTL 10s, `stale-if-error=30`). The V3 circuit breaker stops retry storms. |
+| 6 | **Cache tier fails over** | Every pod's L2 call fails | The 20ms timeout, then fail open to local compute, still bounded by single-flight. The pod breaker stops it hammering the dead cache. |
+| 7 | **Unknown board IDs** (scanners, typos) | Millions of distinct URLs, all misses, so the cache fills with junk | Validate `board_id` against `board_index_config` before touching any cache. Cache the 404 for 5s. |
+| 8 | **Client polling in lockstep** | Millions of phones refresh at second boundaries | Clients poll every 1s with a random start offset and use `If-None-Match`, so unchanged lists return `304` with no body. |
+
+**The ETag.** The API sets `ETag: "<hash of the 100 (player, score) pairs>"`. A `304` costs no body bytes. At 500K requests per second of 4KB each, that is the difference between 2GB per second and close to nothing, for the share that revalidates.
+
+## Numbers for the finale
+
+| Layer | Requests per second for the hot board |
+|---|---|
+| Clients | 500,000 |
+| Reach the origin shield (after edge collapse) | about 200 (200 edges, one per 1s refresh) |
+| Reach API pods (after shield) | about 2 per origin region |
+| Reach the cache tier (pod-cache misses) | at most pods x 2 per second, but mostly 2 |
+| Scatters on the index (with the cache tier) | **about 2 per second per region** (16 commands per second) |
+| Scatters on the index (without the cache tier) | up to pods x 2 = 400 per second per region (3,200 commands per second) |
+
+The last two rows are the full justification for the optional tier. Without it the finale is fine. With it the index becomes nearly insensitive to the number of pods.
+
+## Trade-offs
+
+- ✅ **Gained with the cache tier:** pod count stops multiplying index load, cold pods start warm, mid-tail boards get a shared cache, and there's a second place to serve stale from during failover.
+- ⚠️ **Given up:**
+  - One more component per region to run, monitor and fail over.
+  - Another term in the staleness budget. The worst case rises by about 0.1s of refresh skew.
+  - Cache and lock keys that need monitoring.
+- ❌ **Rejected:**
+  - **Caching on the index shards.** That is V4's problem again.
+  - **Invalidate on write.** Almost every write could change the top 100 during a finale, so the cache would never hit.
+  - **A global cache across regions.** A read would cross an ocean and defeat the multi-region design.
+  - **A per-board background refresher.** It wastes work on idle boards.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| DNS vs CDN | DNS only routes. The CDN and the pod cache hold the top-100. |
+| The index is not a cache | The ZSET shards are the source we recompute from, and cache traffic is kept off them. |
+| Origin shield | Without one, every edge sends its own origin request. With one, the origin sees a couple per second. |
+| Single-flight at three levels | One call per URL at the edge and shield, one per pod, and a short lock for one per region. |
+| Lock plus put-if-newer | A lock stops duplicates. Put-if-newer makes a slow or crashed winner harmless. |
+| Jitter and ETag | Jitter breaks lockstep refreshes and polling. ETag makes unchanged lists nearly free. |
+| Fail open | Every cache layer is optional for correctness, so an outage costs latency and never an answer. |
+
+**Interview arc:** *"A hot top-100 would stampede the index on every expiry, so I collapse duplicates at every layer: request collapsing at the CDN edge and origin shield, single-flight and stale-while-revalidate in each pod, and an optional regional Redis tier with a short lock and put-if-newer so one pod computes for the whole region, all with jittered TTLs and ETags, and every layer failing open to the one below."*
+
+## What next?
+
+Say **"a"** for another drill-down (dead-letter handling, Patroni promotion, or retrofitting 64 homes), or **"b"** to start the mock interview. I can also fold this cache tier back into the master architecture diagram if you want it updated.
+
 
 
 
