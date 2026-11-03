@@ -36,12 +36,27 @@ echo "-> Merging settings.snippet.json into VS Code User settings"
 jq -s '.[0] * .[1]' "$VSCODE_SETTINGS" settings.snippet.json > "$VSCODE_SETTINGS.tmp"
 mv "$VSCODE_SETTINGS.tmp" "$VSCODE_SETTINGS"
 
-echo "-> Installing crossnote-style.less to $CROSSNOTE_DIR/style.less"
+CANONICAL_THEME="../markdown-theme-2.css"
+if [ ! -f "$CANONICAL_THEME" ]; then
+  echo "error: canonical theme not found at $CANONICAL_THEME" >&2
+  exit 1
+fi
+
+if ! cmp -s "$CANONICAL_THEME" crossnote-style.less; then
+  echo "warning: $CANONICAL_THEME and crossnote-style.less have drifted apart." >&2
+  echo "         Installing the canonical file, but copy the change into" >&2
+  echo "         crossnote-style.less so the two stay identical." >&2
+fi
+
+echo "-> Installing $CANONICAL_THEME to $CROSSNOTE_DIR/style.less"
 mkdir -p "$CROSSNOTE_DIR"
-cp crossnote-style.less "$CROSSNOTE_DIR/style.less"
+cp "$CANONICAL_THEME" "$CROSSNOTE_DIR/style.less"
 
 if [ -f crossnote-config.js ]; then
   echo "-> Installing crossnote-config.js to $CROSSNOTE_DIR/config.js"
+  if [ -f "$CROSSNOTE_DIR/config.js" ]; then
+    cp "$CROSSNOTE_DIR/config.js" "$CROSSNOTE_DIR/config.js.bak.$(date +%Y%m%d%H%M%S)"
+  fi
   cp crossnote-config.js "$CROSSNOTE_DIR/config.js"
 fi
 

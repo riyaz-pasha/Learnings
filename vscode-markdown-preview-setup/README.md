@@ -9,44 +9,49 @@ redoing this from scratch.
 
 | File | Purpose |
 |---|---|
-| `install.sh` | Idempotent installer — merges `settings.snippet.json` into VS Code's `settings.json` and copies `crossnote-style.less` into place. |
+| `install.sh` | Idempotent installer — merges `settings.snippet.json` into VS Code's `settings.json`, copies the canonical theme to Crossnote's `style.less`, and backs up/installs `config.js`. |
 | `settings.snippet.json` | The VS Code User settings this setup depends on. |
-| `crossnote-style.less` | The **actually applied** stylesheet for Markdown Preview Enhanced (includes PT Serif fonts, 20-color Super Mermaid palette, shadow removal, and zero text clipping). |
-| `crossnote-config.js` | Mermaid configuration for Crossnote (`mermaidTheme: "redux-dark-color"` and 20-color `themeVariables`). |
+| `crossnote-style.less` | Byte-identical mirror of the canonical theme, kept in this folder so the whole setup is browsable in one place. |
+| `crossnote-config.js` | Mermaid configuration for Crossnote (`mermaidTheme: "redux-dark-color"`, 20-color `themeVariables`, and font metrics). |
 
 The canonical theme source lives at `../markdown-theme-2.css` (repo root) —
-edit colors/spacing there.
+edit colors/spacing there, then copy the result over `crossnote-style.less`.
+`install.sh` installs the canonical file and warns if the mirror has drifted.
 
 ## Super Mermaid Colorful Theme Integration
-Automatically styles all Mermaid diagrams in Markdown Preview Enhanced with a vibrant 20-color palette inspired by the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid):
-- **20-color cyclic palette**: Nodes and clusters cycle through 20 distinct colors (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate, Mint, Coral, Gold, Lavender).
-- **Sequence Diagram Multi-Color Actors**: Participants each get a distinct color from the palette, with top and bottom boxes matching consistently, and lifelines colored to match each participant.
-- **No Text Clipping**: Multiline edge labels (e.g. `Command<br/>Reserve 2`) and foreignObject contents scale cleanly without text truncation.
+Styles Mermaid diagrams in Markdown Preview Enhanced with a vibrant 20-color palette inspired by the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid). This theme is **dark-only** — the page background and prose colors are hard-coded dark, so there is no light-mode variant.
+- **20-color cyclic palette**: Flowchart nodes and clusters cycle through 20 distinct colors (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate, Mint, Coral, Gold, Lavender). The cycling rules are scoped to `flowchart-v2`; ER row striping is restored with explicit overrides because `redux-dark-color` otherwise paints every path inside an entity one color.
+- **Sequence Diagram Multi-Color Actors**: `redux-dark-color` plus `bkgColorArray` / `borderColorArray` color each participant, with top and bottom boxes matching. Lifelines use a single `actorLineColor` (they are deliberately *not* matched per participant — Mermaid's actor ids are global across diagrams, so per-id rules drift on pages with multiple sequence diagrams).
+- **No Text Clipping**: Multiline edge labels (e.g. `Command<br/>Reserve 2`) and foreignObject contents scale cleanly without text truncation. The base diagram font family/size come from `config.js` `themeVariables` so Mermaid's text measurement matches what is rendered.
 - **Zero Shadow Effect**: All drop-shadow filters are completely removed for crisp, modern diagrams.
 - **Natural Preview Zoom**: Diagrams scale and center cleanly with VS Code's editor zoom (<kbd>Cmd</kbd> + <kbd>+</kbd> / <kbd>-</kbd>).
 
 
 ## Why two theme files?
 
-- `markdown-theme-2.css` (repo root) — the theme in plain CSS, as if styling
-  `<body>`, `<h1>`, `<code>`, etc. directly. **Edit this one.**
-- `crossnote-style.less` (this folder) — the same rules, but transformed to
-  actually work inside Markdown Preview Enhanced. It's not just a copy:
-  - Every selector is scoped under `.markdown-preview.markdown-preview`
-    (Markdown Preview Enhanced renders content inside a div with that class,
-    not `<body>` directly — a bare `body { ... }` rule never matches anything
-    in the preview).
-  - Several properties carry `!important` because the extension's own base
-    CSS (`crossnote/styles/style-template.css`,
-    `crossnote/styles/preview.css`) targets the same elements with a more
-    specific selector chain (e.g. `.preview-container .crossnote[data-for=preview]`)
-    and otherwise wins the cascade even though it loads first.
-  - It includes a font-ligature-disabling rule for code blocks that
-    `markdown-theme-2.css` doesn't need (see Gotcha #4).
+- `markdown-theme-2.css` (repo root) — **canonical source. Edit this one.**
+- `crossnote-style.less` (this folder) — a byte-identical mirror kept so the
+  whole setup is browsable in one folder. `install.sh` installs the canonical
+  file and warns if the mirror has drifted.
 
-If you change `markdown-theme-2.css`, manually port the change into
-`crossnote-style.less` (keep the selector scoping / `!important`s), then
-re-run `./install.sh`.
+Both files already contain the MPE-specific work: selectors are scoped under
+`.markdown-preview.markdown-preview` (Markdown Preview Enhanced renders content
+inside a div with that class, not `<body>` directly), and several properties
+carry `!important` to beat the extension's own base CSS
+(`crossnote/styles/style-template.css`, `crossnote/styles/preview.css`).
+
+Note: `markdown.styles` in `settings.snippet.json` points at the same file for
+VS Code's **built-in** preview, but those selectors do not match that preview's
+DOM (`body.vscode-body > div.markdown-body`), so the theme effectively only
+applies to Markdown Preview Enhanced. The built-in preview will still get its
+own default styling.
+
+After editing `markdown-theme-2.css`:
+
+```bash
+cp ../markdown-theme-2.css crossnote-style.less   # keep the mirror in sync
+./install.sh
+```
 
 ## Where things actually live (none of this is in the repo by default)
 
@@ -81,11 +86,16 @@ re-run `./install.sh`.
 "markdown-preview-enhanced.codeBlockTheme": "github-dark.css"
 ```
 
-- `markdown.styles` themes VS Code's **built-in** preview (`Cmd+Shift+V`) — no
-  extension required, works standalone.
+- `markdown.styles` targets VS Code's **built-in** preview (`Cmd+Shift+V`), but
+  the file's `.markdown-preview.markdown-preview` selectors do not match that
+  preview's DOM, so it has no visible effect there. The theme is applied by
+  MPE via `style.less` instead.
 - The `markdown-preview-enhanced.*` keys theme the **richer** preview (Mermaid,
   math, TOC, etc. — `Cmd+Shift+P` → "Markdown Preview Enhanced: Open Preview
   to the Side").
+- `markdown-preview-enhanced.mermaidTheme` is overridden by the top-level
+  `mermaidTheme` in `config.js` (MPE merges VS Code settings first, then the
+  global config file). Change the theme in `config.js`, not here.
 - `editor.fontFamily`/`fontLigatures` are for the actual code editor and are
   unrelated to the preview theming — Monaco's ligature rendering is solid and
   needed no workarounds (unlike Gotcha #4 below).
@@ -124,18 +134,30 @@ re-run `./install.sh`.
    than the preview's webview).
 
 5. **Mermaid diagrams styled with Super Mermaid Colorful Theme**:
-   Integrated the signature auto-colored aesthetic from the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid).
-   It applies a 16-color cyclic palette (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate)
-   with light/dark theme adaptation (deep translucent tints in dark mode, pastels in light mode),
-   unblurred edges (drop-shadow removed), natural SVG scaling that zooms properly with preview zoom,
-   proper sequence diagram styling, and text clipping fixes. Flowcharts, sequence diagrams, and ER diagrams
-   render automatically in this colorful style in Markdown Preview Enhanced without any manual per-diagram styling.
+   Integrated the auto-colored aesthetic from the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid).
+   It applies a **20-color** cyclic palette to flowcharts (nodes *and* clusters),
+   uses `redux-dark-color` + `themeVariables.bkgColorArray` / `borderColorArray`
+   for sequence-diagram participants, removes drop shadows, scales naturally with
+   preview zoom, and fixes text clipping. The theme is **dark-only**; the page
+   background and prose colors are hard-coded dark, so there is no light-mode
+   variant. ER and class diagrams are not touched by the flowchart palette
+   rules; ER row striping is restored with explicit overrides because the
+   `redux-dark-color` theme otherwise paints every path inside an entity.
+
+   Two Mermaid-specific traps worth remembering:
+   - Mermaid measures label text at `themeVariables.fontFamily` / `fontSize`
+     *before* generating the SVG. Overriding those in CSS makes the measured
+     size disagree with the rendered size, causing clipped/overlapping labels.
+     Set them in `config.js` instead of the stylesheet.
+   - Sequence lifeline ids (`line#actor0`, …) use a module-global counter that
+     is not reset between diagrams, so per-id coloring drifts on a page with
+     more than one sequence diagram. Use `actorLineColor` instead.
 
 ## Re-applying after a theme edit
 
 ```bash
 # 1. Edit ../markdown-theme-2.css
-# 2. Port the change into crossnote-style.less (keep scoping/!important)
+# 2. cp ../markdown-theme-2.css crossnote-style.less   # keep the mirror identical
 # 3. Re-run:
 ./install.sh
 # 4. In VS Code: Cmd+Shift+P -> Developer: Reload Window

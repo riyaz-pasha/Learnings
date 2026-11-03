@@ -46,19 +46,39 @@
     // Prevent automatic execution until DOM is ready
     "startOnLoad": false,
 
-    // Base theme used for internal color and layout calculations
-    "theme": "redux-dark-color",
+    // NOTE: do not set `theme` here. MPE overwrites `MERMAID_CONFIG.theme`
+    // with the top-level `mermaidTheme` value above before initializing.
 
     /**
      * Theme Variables:
      * Defines the 20-color Super Mermaid cyclic palette for sequence diagrams
      * and diagrams that consume theme palette arrays.
      *
-     * - `bkgColorArray`: Rich tint fills (22% opacity) that look elegant on dark backgrounds
-     *   (#161b22) and automatically blend into soft pastel tones on light backgrounds (#ffffff).
+     * - `bkgColorArray`: Rich tint fills (22% opacity) tuned for the dark
+     *   #161b22 preview background.
      * - `borderColorArray`: High-contrast, vibrant stroke colors for participant borders.
+     *
+     * The scalar values below keep Mermaid's own text metrics and the colors
+     * it paints outside the CSS palette in sync with the stylesheet. In
+     * particular `fontFamily` / `fontSize` are set here (not in CSS) because
+     * Mermaid measures labels with them before generating the SVG; overriding
+     * them in CSS would make measurement and rendering disagree.
      */
     "themeVariables": {
+      "darkMode": true,
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans\", Helvetica, Arial, sans-serif",
+      "fontSize": "14px",
+      "lineColor": "#94A3B8",
+      "primaryTextColor": "#E6EDF3",
+      "nodeTextColor": "#E6EDF3",
+      "edgeLabelBackground": "#1C2128",
+      "actorLineColor": "#475569",
+      "actorTextColor": "#E6EDF3",
+      "noteBkgColor": "rgba(245, 158, 11, 0.22)",
+      "noteTextColor": "#E6EDF3",
+      "noteBorderColor": "#F59E0B",
+      "activationBkgColor": "rgba(16, 185, 129, 0.22)",
+      "activationBorderColor": "#10B981",
       "bkgColorArray": [
         "rgba(59, 130, 246, 0.22)",  // 1:  Blue
         "rgba(16, 185, 129, 0.22)",  // 2:  Emerald
