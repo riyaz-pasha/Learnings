@@ -60,6 +60,14 @@ if [ -f crossnote-config.js ]; then
   cp crossnote-config.js "$CROSSNOTE_DIR/config.js"
 fi
 
+if [ -f head.html ]; then
+  echo "-> Installing head.html to $CROSSNOTE_DIR/head.html"
+  if [ -f "$CROSSNOTE_DIR/head.html" ]; then
+    cp "$CROSSNOTE_DIR/head.html" "$CROSSNOTE_DIR/head.html.bak.$(date +%Y%m%d%H%M%S)"
+  fi
+  cp head.html "$CROSSNOTE_DIR/head.html"
+fi
+
 echo
 echo "Done. In VS Code, run:"
 echo "  Cmd+Shift+P -> Developer: Reload Window"

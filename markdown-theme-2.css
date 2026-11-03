@@ -240,6 +240,18 @@ body.preview-container {
   --sm-row-odd: #1C2128;
   --sm-row-even: #181D24;
 
+  /* Semantic Role Palette Tokens (Architecture & System Design) */
+  --sm-db-fill:        rgba(16, 185, 129, 0.22);  --sm-db-stroke:        #10B981; /* Emerald */
+  --sm-cache-fill:     rgba(245, 158, 11, 0.22);  --sm-cache-stroke:     #F59E0B; /* Amber */
+  --sm-queue-fill:     rgba(139, 92, 246, 0.22);  --sm-queue-stroke:     #8B5CF6; /* Purple */
+  --sm-service-fill:   rgba(99, 102, 241, 0.22);  --sm-service-stroke:   #6366F1; /* Indigo */
+  --sm-client-fill:    rgba(6, 182, 212, 0.22);   --sm-client-stroke:    #06B6D4; /* Cyan */
+  --sm-gateway-fill:   rgba(14, 165, 233, 0.22);  --sm-gateway-stroke:   #0EA5E9; /* Sky */
+  --sm-external-fill:  rgba(100, 116, 139, 0.18); --sm-external-stroke:  #94A3B8; /* Slate */
+  --sm-alert-fill:     rgba(239, 68, 68, 0.22);   --sm-alert-stroke:     #EF4444; /* Red */
+  --sm-success-fill:   rgba(5, 150, 105, 0.22);   --sm-success-stroke:   #059669; /* Mint */
+  --sm-decision-fill:  rgba(245, 158, 11, 0.20);  --sm-decision-stroke:  #F59E0B; /* Amber Decision */
+
   /* 20 Dark-Mode Fills: 22% opacity tints matching dark slate background (#161b22) */
   --sm-fill-1:  rgba(59, 130, 246, 0.22);  --sm-stroke-1:  #3B82F6; /* Blue */
   --sm-fill-2:  rgba(16, 185, 129, 0.22);  --sm-stroke-2:  #10B981; /* Emerald */
@@ -391,14 +403,139 @@ body.preview-container {
 .markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:nth-child(20n + 20 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider)) { fill: var(--sm-fill-20) !important; stroke: var(--sm-stroke-20) !important; }
 
 /* -------------------------------------------------------------------------
-   10. CLUSTERS / SUBGRAPHS (20 COLORS)
-   Distinct bounding containers and colored header labels. Cycled with
-   `:nth-child(... of g.cluster)` so nested clusters are counted correctly.
+   9.2 SEMANTIC ARCHITECTURAL COMPONENT CLASSES
+   When explicit classes (e.g. `:::db` or `class A db`) are assigned or
+   auto-tagged by `head.html`, they take precedence over the cyclic rainbow.
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.db :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.storage :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-db-fill) !important;
+  stroke: var(--sm-db-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.cache :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-cache-fill) !important;
+  stroke: var(--sm-cache-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.queue :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.stream :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.broker :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-queue-fill) !important;
+  stroke: var(--sm-queue-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.service :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.compute :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-service-fill) !important;
+  stroke: var(--sm-service-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.gateway :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.ingress :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.proxy :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-gateway-fill) !important;
+  stroke: var(--sm-gateway-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.client :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.user :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-client-fill) !important;
+  stroke: var(--sm-client-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.alert :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.fail :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.dlq :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-alert-fill) !important;
+  stroke: var(--sm-alert-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.success :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.ok :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-success-fill) !important;
+  stroke: var(--sm-success-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.external :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.thirdparty :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-external-fill) !important;
+  stroke: var(--sm-external-stroke) !important;
+  stroke-dasharray: 4 3 !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.decision :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-decision-fill) !important;
+  stroke: var(--sm-decision-stroke) !important;
+}
+
+/* -------------------------------------------------------------------------
+   9.3 ZERO-EFFORT SHAPE HEURISTICS (Pure CSS)
+   - Database Cylinders: `[(...)]` paths carry label-offset-y or cylinder class.
+   - Decision Diamonds: `{...}` render 4-vertex polygons.
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:has(path[label-offset-y]) :is(rect, polygon, circle, ellipse, path:not(.divider)),
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node.cylinder :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-db-fill) !important;
+  stroke: var(--sm-db-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:has(polygon) polygon {
+  fill: var(--sm-decision-fill) !important;
+  stroke: var(--sm-decision-stroke) !important;
+}
+
+/* -------------------------------------------------------------------------
+   9.4 ZERO-EFFORT ID KEYWORD HEURISTICS (Pure CSS fallback)
+   Matches nodes whose written ID contains architectural terms case-insensitively.
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:is([id*="db" i], [id*="database" i], [id*="postgres" i], [id*="mysql" i], [id*="storage" i]) :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-db-fill) !important;
+  stroke: var(--sm-db-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:is([id*="cache" i], [id*="redis" i], [id*="memcached" i]) :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-cache-fill) !important;
+  stroke: var(--sm-cache-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:is([id*="queue" i], [id*="kafka" i], [id*="rabbit" i], [id*="sqs" i], [id*="stream" i]) :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-queue-fill) !important;
+  stroke: var(--sm-queue-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:is([id*="gateway" i], [id*="ingress" i], [id*="proxy" i], [id*="alb" i]) :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-gateway-fill) !important;
+  stroke: var(--sm-gateway-stroke) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.node:is([id*="client" i], [id*="user" i], [id*="browser" i], [id*="app" i]) :is(rect, polygon, circle, ellipse, path:not(.divider)) {
+  fill: var(--sm-client-fill) !important;
+  stroke: var(--sm-client-stroke) !important;
+}
+
+/* -------------------------------------------------------------------------
+   10. CLUSTERS / SUBGRAPHS (CARD ARCHITECTURE & 20 COLORS)
+   Distinct bounding containers, architectural dashed borders, and clear micro-badges.
+   Cycled with `:nth-child(... of g.cluster)` so nested clusters are counted correctly.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.cluster > rect {
   stroke-width: 1.5px !important;
+  stroke-dasharray: 6 4 !important;
   rx: 8px !important;
   ry: 8px !important;
+}
+
+/* Nested subgraphs: solid inner border with deeper background */
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.cluster g.cluster > rect {
+  stroke-dasharray: none !important;
+  fill: rgba(13, 17, 23, 0.75) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.cluster .cluster-label :is(text, tspan, span, p) {
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
 }
 
 .markdown-preview.markdown-preview .mermaid svg[aria-roledescription="flowchart-v2"] g.cluster:nth-child(20n + 1 of g.cluster) > rect { fill: var(--sm-cluster-1) !important; stroke: var(--sm-stroke-1) !important; }
@@ -558,14 +695,52 @@ body.preview-container {
   stroke-dasharray: 4 4 !important;
 }
 
-/* Sequence Messages */
-.markdown-preview.markdown-preview .mermaid :is(line.messageLine0, line.messageLine1, path.messageLine0, path.messageLine1) {
+/* Sequence Messages: distinct synchronous request vs muted dashed return */
+.markdown-preview.markdown-preview .mermaid :is(line.messageLine0, path.messageLine0) {
   stroke: var(--sm-line) !important;
   stroke-width: 1.5px !important;
 }
 
+.markdown-preview.markdown-preview .mermaid :is(line.messageLine1, path.messageLine1) {
+  stroke: #64748b !important;
+  stroke-width: 1.2px !important;
+  stroke-dasharray: 4 3 !important;
+}
+
 .markdown-preview.markdown-preview .mermaid text.messageText {
   fill: var(--sm-text) !important;
+  font-weight: 500 !important;
+}
+
+/* Sequence diagram fragments (alt, opt, loop, par, critical) */
+.markdown-preview.markdown-preview .mermaid rect.loopLine {
+  fill: rgba(22, 27, 34, 0.45) !important;
+  stroke: #30363d !important;
+  stroke-width: 1.2px !important;
+  stroke-dasharray: 4 3 !important;
+  rx: 6px !important;
+  ry: 6px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid rect.labelBox {
+  fill: #1c2128 !important;
+  stroke: #30363d !important;
+  stroke-width: 1px !important;
+  rx: 4px !important;
+  ry: 4px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid text.labelText {
+  fill: #79c0ff !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+}
+
+.markdown-preview.markdown-preview .mermaid text.loopText {
+  fill: var(--sm-text) !important;
+  font-size: 12px !important;
   font-weight: 500 !important;
 }
 
@@ -615,4 +790,44 @@ body.preview-container {
 .markdown-preview.markdown-preview .mermaid svg[aria-roledescription="er"] g.node .outer-path path[fill="none"] {
   fill: none !important;
 }
+
+/* -------------------------------------------------------------------------
+   14. STATE DIAGRAMS (stateDiagram-v2)
+   Crisp state capsules, distinctive start/end states, and clean transition lines.
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid svg[aria-roledescription="stateDiagram"] {
+  & g.stateGroup rect {
+    fill: var(--sm-fill-1) !important;
+    stroke: var(--sm-stroke-1) !important;
+    stroke-width: 1.5px !important;
+    rx: 6px !important;
+    ry: 6px !important;
+  }
+
+  & g.stateGroup text {
+    fill: var(--sm-text) !important;
+    font-weight: 500 !important;
+  }
+
+  & .start-state {
+    fill: var(--sm-stroke-2) !important;
+    stroke: var(--sm-stroke-2) !important;
+  }
+
+  & .end-state-inner {
+    fill: var(--sm-stroke-5) !important;
+    stroke: var(--sm-stroke-5) !important;
+  }
+
+  & .end-state-outer {
+    stroke: var(--sm-stroke-5) !important;
+    stroke-width: 1.5px !important;
+  }
+
+  & .transition {
+    stroke: var(--sm-line) !important;
+    stroke-width: 1.5px !important;
+  }
+}
+
 

@@ -50,6 +50,46 @@
     // with the top-level `mermaidTheme` value above before initializing.
 
     /**
+     * Flowchart Engine Settings:
+     * - `curve: "basis"`: Smooth, elegant curved connectors replacing jagged stair-step lines.
+     * - `nodeSpacing` / `rankSpacing`: Balanced breathing room between components.
+     * - `htmlLabels: true`: Enables rich formatting inside node labels.
+     */
+    "flowchart": {
+      "useMaxWidth": true,
+      "htmlLabels": true,
+      "curve": "basis",
+      "nodeSpacing": 45,
+      "rankSpacing": 50,
+      "padding": 15
+    },
+
+    /**
+     * Sequence Diagram Settings:
+     * - `mirrorActors: true`: Displays actor participant boxes at both top and bottom.
+     * - Comfortable message and actor margins.
+     */
+    "sequence": {
+      "useMaxWidth": true,
+      "diagramMarginX": 20,
+      "diagramMarginY": 20,
+      "actorMargin": 50,
+      "boxMargin": 10,
+      "boxTextMargin": 5,
+      "noteMargin": 10,
+      "messageMargin": 35,
+      "mirrorActors": true,
+      "bottomMarginAdj": 1
+    },
+
+    /**
+     * State Diagram Settings:
+     */
+    "state": {
+      "useMaxWidth": true
+    },
+
+    /**
      * Theme Variables:
      * Defines the 20-color Super Mermaid cyclic palette for sequence diagrams
      * and diagrams that consume theme palette arrays.

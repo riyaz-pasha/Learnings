@@ -9,22 +9,29 @@ redoing this from scratch.
 
 | File | Purpose |
 |---|---|
-| `install.sh` | Idempotent installer — merges `settings.snippet.json` into VS Code's `settings.json`, copies the canonical theme to Crossnote's `style.less`, and backs up/installs `config.js`. |
+| `install.sh` | Idempotent installer — merges `settings.snippet.json` into VS Code's `settings.json`, copies canonical theme to Crossnote's `style.less`, and backs up/installs `config.js` and `head.html`. |
 | `settings.snippet.json` | The VS Code User settings this setup depends on. |
 | `crossnote-style.less` | Byte-identical mirror of the canonical theme, kept in this folder so the whole setup is browsable in one place. |
-| `crossnote-config.js` | Mermaid configuration for Crossnote (`mermaidTheme: "redux-dark-color"`, 20-color `themeVariables`, and font metrics). |
+| `crossnote-config.js` | Mermaid configuration for Crossnote (`mermaidTheme: "redux-dark-color"`, 20-color `themeVariables`, font metrics, curved connectors `curve: "basis"`, and spacing). |
+| `head.html` | Lightweight deterministic post-render script injected into the preview webview for automatic semantic class tagging and shape classification. |
+| `DIAGRAMMING_GUIDE.md` | Architectural cheat sheet with standard semantic classes, shape heuristics, connection styles, and templates. |
 
 The canonical theme source lives at `../markdown-theme-2.css` (repo root) —
 edit colors/spacing there, then copy the result over `crossnote-style.less`.
 `install.sh` installs the canonical file and warns if the mirror has drifted.
 
-## Super Mermaid Colorful Theme Integration
-Styles Mermaid diagrams in Markdown Preview Enhanced with a vibrant 20-color palette inspired by the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid). This theme is **dark-only** — the page background and prose colors are hard-coded dark, so there is no light-mode variant.
-- **20-color cyclic palette**: Flowchart nodes and clusters cycle through 20 distinct colors (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate, Mint, Coral, Gold, Lavender). The cycling rules are scoped to `flowchart-v2`; ER row striping is restored with explicit overrides because `redux-dark-color` otherwise paints every path inside an entity one color.
-- **Sequence Diagram Multi-Color Actors**: `redux-dark-color` plus `bkgColorArray` / `borderColorArray` color each participant, with top and bottom boxes matching. Lifelines use a single `actorLineColor` (they are deliberately *not* matched per participant — Mermaid's actor ids are global across diagrams, so per-id rules drift on pages with multiple sequence diagrams).
-- **No Text Clipping**: Multiline edge labels (e.g. `Command<br/>Reserve 2`) and foreignObject contents scale cleanly without text truncation. The base diagram font family/size come from `config.js` `themeVariables` so Mermaid's text measurement matches what is rendered.
-- **Zero Shadow Effect**: All drop-shadow filters are completely removed for crisp, modern diagrams.
-- **Natural Preview Zoom**: Diagrams scale and center cleanly with VS Code's editor zoom (<kbd>Cmd</kbd> + <kbd>+</kbd> / <kbd>-</kbd>).
+## Semantic & Consistent Architecture Diagramming System
+Upgraded from random rainbow cycling to an intelligent, multi-tier architectural diagramming system:
+- **3-Tier Semantic Classification**:
+  - **Tier 1 (Explicit Classes)**: `:::db`, `:::cache`, `:::queue`, `:::service`, `:::client`, `:::gateway`, `:::alert`, `:::success`, `:::external`.
+  - **Tier 2 (Shape Heuristics)**: Functional shapes automatically styled with their architectural roles (Cylinder `[(...)]` $\rightarrow$ Emerald DB, Diamond `{...}` $\rightarrow$ Amber Decision, Hexagon `{{...}}` $\rightarrow$ 3rd-Party Slate, Subroutine `[[...]]` $\rightarrow$ Queue Purple).
+  - **Tier 3 (Keyword Detection)**: Inbuilt regex classifier in `head.html` scans label text ("Postgres", "Redis", "Kafka", "Gateway", "DLQ") and tags semantic roles with zero author effort.
+  - **Tier 4 (Fallback)**: General unannotated nodes continue to receive the vibrant 20-color Super Mermaid palette.
+- **Card-Style Architectural Boundaries**: Subgraphs / VPCs styled with dashed architectural boundaries and uppercase tracked micro-badge headers.
+- **Fluid Curved Connectors**: Flowcharts use `curve: "basis"` in `config.js` to eliminate harsh stair-step lines.
+- **Smarter Sequence Diagrams**: Clear visual distinction between synchronous request calls and muted dashed return arrows (`-->>`), plus sleek translucent containers for `alt`, `opt`, and `loop` fragments.
+- **State Diagrams (`stateDiagram-v2`)**: Styled with clean state capsules, green start states, and red end states.
+- **Zero Text Clipping & Zero Shadows**: ForeignObject overflow reset and no blurry drop shadows.
 
 
 ## Why two theme files?

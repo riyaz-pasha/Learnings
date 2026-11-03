@@ -1,0 +1,144 @@
+<!-- ==========================================================================
+     MARKDOWN PREVIEW ENHANCED — GLOBAL HEAD INJECTION
+     Location: ~/.local/state/crossnote/head.html
+     Backup:   vscode-markdown-preview-setup/head.html
+     
+     This file is injected into the <head> of the Crossnote preview webview.
+     It provides lightweight, zero-AI, deterministic post-render enhancement
+     for Mermaid diagrams:
+       1. Automatic semantic class tagging based on label keywords
+          (e.g., "Postgres" -> db, "Redis" -> cache, "Kafka" -> queue)
+       2. Automatic shape classification (cylinder -> db, diamond -> decision, etc.)
+       3. Respects explicit user classes (:::db, :::cache) without overriding them.
+     ========================================================================== -->
+<script type="text/javascript">
+(function() {
+  "use strict";
+
+  // Semantic keyword dictionary for system design and architecture components
+  var SEMANTIC_RULES = [
+    {
+      cls: "db",
+      pattern: /\b(db|database|databases|postgres(ql)?|mysql|mongodb|dynamodb?|cassandra|sqlite|oracle|aurora|redshift|bigquery|snowflake|cockroachdb?|couchbase|firestore|scylladb?|blob|storage)\b/i
+    },
+    {
+      cls: "cache",
+      pattern: /\b(cache|caching|redis|memcached|varnish|cdn|cache-aside|read-through)\b/i
+    },
+    {
+      cls: "queue",
+      pattern: /\b(queue|queues|kafka|rabbitmq|sqs|kinesis|event[ -]?stream|pulsar|activemq|nats|pub[ -]?sub|broker|celery|sidekiq|bullmq)\b/i
+    },
+    {
+      cls: "gateway",
+      pattern: /\b(gateway|ingress|api[ -]?gw|proxy|reverse[ -]?proxy|nginx|traefik|envoy|kong|load[ -]?balancer|alb|nlb|haproxy|api[ -]?gateway)\b/i
+    },
+    {
+      cls: "client",
+      pattern: /\b(client|clients|user|users|customer|customers|browser|mobile|ios|android|frontend|ui|spa|web[ -]?app|actor)\b/i
+    },
+    {
+      cls: "alert",
+      pattern: /\b(error|fail|failed|failure|alert|alarm|dead[ -]?letter|dlq|crash|reject|rejected|timeout|circuit[ -]?open|5\d\d)\b/i
+    },
+    {
+      cls: "success",
+      pattern: /\b(success|succeeded|ok|healthy|200|passed|approved|done|complete|completed|acknowledged)\b/i
+    },
+    {
+      cls: "external",
+      pattern: /\b(stripe|paypal|twilio|sendgrid|github|google|apple|auth0|okta|oauth|third[ -]?party|3rd[ -]?party|vendor|external)\b/i
+    }
+  ];
+
+  var KNOWN_CLASSES = ["db", "cache", "queue", "gateway", "client", "service", "alert", "success", "external", "decision"];
+
+  function classifyDiagram(svg) {
+    if (!svg) return;
+    
+    // Process flowchart nodes
+    var nodes = svg.querySelectorAll("g.node");
+    nodes.forEach(function(node) {
+      // 1. Skip if author already assigned an explicit semantic class
+      for (var i = 0; i < KNOWN_CLASSES.length; i++) {
+        if (node.classList.contains(KNOWN_CLASSES[i])) return;
+      }
+
+      // 2. Shape-based heuristics
+      // Cylinders have label-offset-y attribute or outer-path with arc
+      if (node.querySelector("path[label-offset-y]") || node.classList.contains("cylinder")) {
+        node.classList.add("db");
+        return;
+      }
+      // Decision diamond (rhombus 4-point polygon)
+      var polygon = node.querySelector("polygon");
+      if (polygon) {
+        var points = (polygon.getAttribute("points") || "").trim().split(/\s+|,/);
+        // Rhombus has 4 points (8 numbers)
+        if (points.length === 8) {
+          node.classList.add("decision");
+          return;
+        }
+        // Hexagon has 6 points (12 numbers)
+        if (points.length === 12) {
+          node.classList.add("external");
+          return;
+        }
+      }
+
+      // 3. Keyword-based heuristics from label text
+      var labelEl = node.querySelector(".nodeLabel, foreignObject, text");
+      var text = labelEl ? (labelEl.textContent || "") : (node.textContent || "");
+      if (!text) return;
+
+      for (var r = 0; r < SEMANTIC_RULES.length; r++) {
+        if (SEMANTIC_RULES[r].pattern.test(text)) {
+          node.classList.add(SEMANTIC_RULES[r].cls);
+          return;
+        }
+      }
+    });
+  }
+
+  function runClassification() {
+    var svgs = document.querySelectorAll(".mermaid svg");
+    svgs.forEach(classifyDiagram);
+  }
+
+  // Run on initial page load
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", runClassification);
+  } else {
+    runClassification();
+  }
+
+  // Observe live diagram re-renders by Crossnote
+  var debounceTimer = null;
+  var observer = new MutationObserver(function(mutations) {
+    var shouldScan = false;
+    for (var i = 0; i < mutations.length; i++) {
+      var m = mutations[i];
+      if (m.addedNodes.length > 0) {
+        for (var j = 0; j < m.addedNodes.length; j++) {
+          var n = m.addedNodes[j];
+          if (n.nodeType === 1 && (n.classList.contains("mermaid") || n.querySelector && n.querySelector(".mermaid"))) {
+            shouldScan = true;
+            break;
+          }
+        }
+      }
+      if (shouldScan) break;
+    }
+
+    if (shouldScan) {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(runClassification, 60);
+    }
+  });
+
+  observer.observe(document.documentElement || document.body, {
+    childList: true,
+    subtree: true
+  });
+})();
+</script>
