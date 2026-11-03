@@ -40,6 +40,11 @@ echo "-> Installing crossnote-style.less to $CROSSNOTE_DIR/style.less"
 mkdir -p "$CROSSNOTE_DIR"
 cp crossnote-style.less "$CROSSNOTE_DIR/style.less"
 
+if [ -f crossnote-config.js ]; then
+  echo "-> Installing crossnote-config.js to $CROSSNOTE_DIR/config.js"
+  cp crossnote-config.js "$CROSSNOTE_DIR/config.js"
+fi
+
 echo
 echo "Done. In VS Code, run:"
 echo "  Cmd+Shift+P -> Developer: Reload Window"

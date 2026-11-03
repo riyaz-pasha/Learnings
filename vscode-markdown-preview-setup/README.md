@@ -11,10 +11,20 @@ redoing this from scratch.
 |---|---|
 | `install.sh` | Idempotent installer — merges `settings.snippet.json` into VS Code's `settings.json` and copies `crossnote-style.less` into place. |
 | `settings.snippet.json` | The VS Code User settings this setup depends on. |
-| `crossnote-style.less` | The **actually applied** stylesheet for Markdown Preview Enhanced (checked in as a backup/reference — see "Why two theme files?" below). |
+| `crossnote-style.less` | The **actually applied** stylesheet for Markdown Preview Enhanced (includes PT Serif fonts, 20-color Super Mermaid palette, shadow removal, and zero text clipping). |
+| `crossnote-config.js` | Mermaid configuration for Crossnote (`mermaidTheme: "redux-dark-color"` and 20-color `themeVariables`). |
 
 The canonical theme source lives at `../markdown-theme-2.css` (repo root) —
 edit colors/spacing there.
+
+## Super Mermaid Colorful Theme Integration
+Automatically styles all Mermaid diagrams in Markdown Preview Enhanced with a vibrant 20-color palette inspired by the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid):
+- **20-color cyclic palette**: Nodes and clusters cycle through 20 distinct colors (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate, Mint, Coral, Gold, Lavender).
+- **Sequence Diagram Multi-Color Actors**: Participants each get a distinct color from the palette, with top and bottom boxes matching consistently, and lifelines colored to match each participant.
+- **No Text Clipping**: Multiline edge labels (e.g. `Command<br/>Reserve 2`) and foreignObject contents scale cleanly without text truncation.
+- **Zero Shadow Effect**: All drop-shadow filters are completely removed for crisp, modern diagrams.
+- **Natural Preview Zoom**: Diagrams scale and center cleanly with VS Code's editor zoom (<kbd>Cmd</kbd> + <kbd>+</kbd> / <kbd>-</kbd>).
+
 
 ## Why two theme files?
 
@@ -113,9 +123,13 @@ re-run `./install.sh`.
    ligatures render correctly natively (Monaco is a more mature rendering path
    than the preview's webview).
 
-5. **Mermaid diagrams default to a light palette** (dark text assumed to sit
-   on a white node fill) — invisible on a dark page. Fixed via
-   `mermaidTheme: "dark"`.
+5. **Mermaid diagrams styled with Super Mermaid Colorful Theme**:
+   Integrated the signature auto-colored aesthetic from the [Super Mermaid extension](https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid).
+   It applies a 16-color cyclic palette (Blue, Emerald, Amber, Purple, Rose, Cyan, Lime, Indigo, Fuchsia, Teal, Orange, Violet, Sky, Yellow, Red, Slate)
+   with light/dark theme adaptation (deep translucent tints in dark mode, pastels in light mode),
+   unblurred edges (drop-shadow removed), natural SVG scaling that zooms properly with preview zoom,
+   proper sequence diagram styling, and text clipping fixes. Flowcharts, sequence diagrams, and ER diagrams
+   render automatically in this colorful style in Markdown Preview Enhanced without any manual per-diagram styling.
 
 ## Re-applying after a theme edit
 

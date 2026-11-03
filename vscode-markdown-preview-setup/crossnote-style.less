@@ -194,3 +194,424 @@ body.preview-container {
   border-top: 1px solid #30363d;
   margin: 40px 0;
 }
+
+/* ==========================================================================
+   SUPER MERMAID COLORFUL THEME (20 VIBRANT COLORS, LIGHT + DARK ADAPTIVE)
+   Clean, sharp rendering with zero drop shadow and no text clipping.
+   ========================================================================== */
+
+/* Theme Variables */
+.markdown-preview.markdown-preview {
+  /* Default: Dark Theme */
+  --sm-text: #E6EDF3;
+  --sm-line: #94A3B8;
+  --sm-lifeline: #475569;
+  --sm-label-bg: #1C2128;
+  --sm-label-border: #30363D;
+  --sm-label-text: #E6EDF3;
+
+  /* 20 Dark-Mode Node Fills: rich, elegant tints matching #161b22 */
+  --sm-fill-1:  rgba(59, 130, 246, 0.22);  --sm-stroke-1:  #3B82F6; /* Blue */
+  --sm-fill-2:  rgba(16, 185, 129, 0.22);  --sm-stroke-2:  #10B981; /* Emerald */
+  --sm-fill-3:  rgba(245, 158, 11, 0.22);  --sm-stroke-3:  #F59E0B; /* Amber */
+  --sm-fill-4:  rgba(139, 92, 246, 0.22);  --sm-stroke-4:  #8B5CF6; /* Purple */
+  --sm-fill-5:  rgba(244, 63, 94, 0.22);   --sm-stroke-5:  #F43F5E; /* Rose */
+  --sm-fill-6:  rgba(6, 182, 212, 0.22);   --sm-stroke-6:  #06B6D4; /* Cyan */
+  --sm-fill-7:  rgba(132, 204, 22, 0.22);  --sm-stroke-7:  #84CC16; /* Lime */
+  --sm-fill-8:  rgba(99, 102, 241, 0.22);  --sm-stroke-8:  #6366F1; /* Indigo */
+  --sm-fill-9:  rgba(217, 70, 239, 0.22);  --sm-stroke-9:  #D946EF; /* Fuchsia */
+  --sm-fill-10: rgba(20, 184, 166, 0.22);  --sm-stroke-10: #14B8A6; /* Teal */
+  --sm-fill-11: rgba(249, 115, 22, 0.22);  --sm-stroke-11: #F97316; /* Orange */
+  --sm-fill-12: rgba(168, 85, 247, 0.22);  --sm-stroke-12: #A855F7; /* Violet */
+  --sm-fill-13: rgba(14, 165, 233, 0.22);  --sm-stroke-13: #0EA5E9; /* Sky */
+  --sm-fill-14: rgba(234, 179, 8, 0.22);   --sm-stroke-14: #EAB308; /* Yellow */
+  --sm-fill-15: rgba(239, 68, 68, 0.22);   --sm-stroke-15: #EF4444; /* Red */
+  --sm-fill-16: rgba(100, 116, 139, 0.22); --sm-stroke-16: #94A3B8; /* Slate */
+  --sm-fill-17: rgba(5, 150, 105, 0.22);   --sm-stroke-17: #059669; /* Mint */
+  --sm-fill-18: rgba(251, 113, 133, 0.22); --sm-stroke-18: #FB7185; /* Coral */
+  --sm-fill-19: rgba(217, 119, 6, 0.22);   --sm-stroke-19: #D97706; /* Gold */
+  --sm-fill-20: rgba(192, 132, 252, 0.22); --sm-stroke-20: #C084FC; /* Lavender */
+
+  /* Subgraphs / Clusters */
+  --sm-cluster-1:  rgba(59, 130, 246, 0.12);
+  --sm-cluster-2:  rgba(16, 185, 129, 0.12);
+  --sm-cluster-3:  rgba(245, 158, 11, 0.12);
+  --sm-cluster-4:  rgba(139, 92, 246, 0.12);
+  --sm-cluster-5:  rgba(244, 63, 94, 0.12);
+  --sm-cluster-6:  rgba(6, 182, 212, 0.12);
+  --sm-cluster-7:  rgba(132, 204, 22, 0.12);
+  --sm-cluster-8:  rgba(99, 102, 241, 0.12);
+  --sm-cluster-9:  rgba(217, 70, 239, 0.12);
+  --sm-cluster-10: rgba(20, 184, 166, 0.12);
+  --sm-cluster-11: rgba(249, 115, 22, 0.12);
+  --sm-cluster-12: rgba(168, 85, 247, 0.12);
+  --sm-cluster-13: rgba(14, 165, 233, 0.12);
+  --sm-cluster-14: rgba(234, 179, 8, 0.12);
+  --sm-cluster-15: rgba(239, 68, 68, 0.12);
+  --sm-cluster-16: rgba(100, 116, 139, 0.12);
+  --sm-cluster-17: rgba(5, 150, 105, 0.12);
+  --sm-cluster-18: rgba(251, 113, 133, 0.12);
+  --sm-cluster-19: rgba(217, 119, 6, 0.12);
+  --sm-cluster-20: rgba(192, 132, 252, 0.12);
+}
+
+/* Light Theme overrides */
+body.vscode-light .markdown-preview.markdown-preview,
+.markdown-preview.markdown-preview[data-theme="light"],
+html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown-preview.markdown-preview {
+  --sm-text: #1F2937;
+  --sm-line: #64748B;
+  --sm-lifeline: #CBD5E1;
+  --sm-label-bg: #FFFFFF;
+  --sm-label-border: #CBD5E1;
+  --sm-label-text: #1F2937;
+
+  /* 20 Light-Mode Node Fills: vibrant pastel pills */
+  --sm-fill-1:  #DBEAFE; --sm-stroke-1:  #3B82F6;
+  --sm-fill-2:  #D1FAE5; --sm-stroke-2:  #10B981;
+  --sm-fill-3:  #FEF3C7; --sm-stroke-3:  #F59E0B;
+  --sm-fill-4:  #EDE9FE; --sm-stroke-4:  #8B5CF6;
+  --sm-fill-5:  #FFE4E6; --sm-stroke-5:  #F43F5E;
+  --sm-fill-6:  #CFFAFE; --sm-stroke-6:  #06B6D4;
+  --sm-fill-7:  #ECFCCB; --sm-stroke-7:  #84CC16;
+  --sm-fill-8:  #E0E7FF; --sm-stroke-8:  #6366F1;
+  --sm-fill-9:  #FAE8FF; --sm-stroke-9:  #D946EF;
+  --sm-fill-10: #CCFBF1; --sm-stroke-10: #14B8A6;
+  --sm-fill-11: #FFEDD5; --sm-stroke-11: #F97316;
+  --sm-fill-12: #F3E8FF; --sm-stroke-12: #A855F7;
+  --sm-fill-13: #E0F2FE; --sm-stroke-13: #0EA5E9;
+  --sm-fill-14: #FEF9C3; --sm-stroke-14: #EAB308;
+  --sm-fill-15: #FEE2E2; --sm-stroke-15: #EF4444;
+  --sm-fill-16: #F1F5F9; --sm-stroke-16: #64748B;
+  --sm-fill-17: #D1FAE5; --sm-stroke-17: #059669;
+  --sm-fill-18: #FFE4E6; --sm-stroke-18: #FB7185;
+  --sm-fill-19: #FEF3C7; --sm-stroke-19: #D97706;
+  --sm-fill-20: #F3E8FF; --sm-stroke-20: #C084FC;
+
+  --sm-cluster-1:  rgba(59, 130, 246, 0.08);
+  --sm-cluster-2:  rgba(16, 185, 129, 0.08);
+  --sm-cluster-3:  rgba(245, 158, 11, 0.08);
+  --sm-cluster-4:  rgba(139, 92, 246, 0.08);
+  --sm-cluster-5:  rgba(244, 63, 94, 0.08);
+  --sm-cluster-6:  rgba(6, 182, 212, 0.08);
+  --sm-cluster-7:  rgba(132, 204, 22, 0.08);
+  --sm-cluster-8:  rgba(99, 102, 241, 0.08);
+  --sm-cluster-9:  rgba(217, 70, 239, 0.08);
+  --sm-cluster-10: rgba(20, 184, 166, 0.08);
+  --sm-cluster-11: rgba(249, 115, 22, 0.08);
+  --sm-cluster-12: rgba(168, 85, 247, 0.08);
+  --sm-cluster-13: rgba(14, 165, 233, 0.08);
+  --sm-cluster-14: rgba(234, 179, 8, 0.08);
+  --sm-cluster-15: rgba(239, 68, 68, 0.08);
+  --sm-cluster-16: rgba(100, 116, 139, 0.08);
+  --sm-cluster-17: rgba(5, 150, 105, 0.08);
+  --sm-cluster-18: rgba(251, 113, 133, 0.08);
+  --sm-cluster-19: rgba(217, 119, 6, 0.08);
+  --sm-cluster-20: rgba(192, 132, 252, 0.08);
+}
+
+/* -------------------------------------------------------------------------
+   Completely Eliminate Shadows from All Diagram Elements
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid,
+.markdown-preview.markdown-preview .mermaid * {
+  filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* -------------------------------------------------------------------------
+   Overall Mermaid Container & Sizing (Scales naturally with preview zoom)
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif !important;
+  font-size: 14px !important;
+  line-height: normal !important;
+  text-align: center;
+  margin: 24px auto;
+}
+
+.markdown-preview.markdown-preview .mermaid svg {
+  display: inline-block;
+  overflow: visible;
+}
+
+/* -------------------------------------------------------------------------
+   Avoid Any Text Clipping in Diagrams
+   ------------------------------------------------------------------------- */
+/* Allow foreignObject contents to render without clipping */
+.markdown-preview.markdown-preview .mermaid foreignObject,
+.markdown-preview.markdown-preview .mermaid foreignObject > div {
+  overflow: visible !important;
+}
+
+/* Reset <p> inside mermaid so document's margin: 14px 0 does not blow up node & edge layouts */
+.markdown-preview.markdown-preview .mermaid p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Node Rectangles: clean 6px rounded corners */
+.markdown-preview.markdown-preview .mermaid g.node rect {
+  rx: 6px !important;
+  ry: 6px !important;
+  stroke-width: 1.5px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid g.node :is(polygon, circle, ellipse, path) {
+  stroke-width: 1.5px !important;
+}
+
+/* Diagram Text Metrics */
+.markdown-preview.markdown-preview .mermaid text,
+.markdown-preview.markdown-preview .mermaid tspan,
+.markdown-preview.markdown-preview .mermaid .nodeLabel,
+.markdown-preview.markdown-preview .mermaid span {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif !important;
+  font-size: 14px !important;
+  line-height: 1.3 !important;
+}
+
+.markdown-preview.markdown-preview .mermaid g.node :is(text, tspan, .nodeLabel, span, p) {
+  color: var(--sm-text) !important;
+  fill: var(--sm-text) !important;
+  font-weight: 500 !important;
+}
+
+/* -------------------------------------------------------------------------
+   20-Color Sequence Palette for Flowchart / Graph Nodes
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 1 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 1) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-1) !important; stroke: var(--sm-stroke-1) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 2 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 2) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-2) !important; stroke: var(--sm-stroke-2) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 3 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 3) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-3) !important; stroke: var(--sm-stroke-3) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 4 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 4) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-4) !important; stroke: var(--sm-stroke-4) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 5 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 5) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-5) !important; stroke: var(--sm-stroke-5) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 6 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 6) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-6) !important; stroke: var(--sm-stroke-6) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 7 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 7) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-7) !important; stroke: var(--sm-stroke-7) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 8 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 8) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-8) !important; stroke: var(--sm-stroke-8) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 9 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 9) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-9) !important; stroke: var(--sm-stroke-9) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 10 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 10) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-10) !important; stroke: var(--sm-stroke-10) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 11 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 11) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-11) !important; stroke: var(--sm-stroke-11) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 12 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 12) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-12) !important; stroke: var(--sm-stroke-12) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 13 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 13) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-13) !important; stroke: var(--sm-stroke-13) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 14 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 14) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-14) !important; stroke: var(--sm-stroke-14) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 15 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 15) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-15) !important; stroke: var(--sm-stroke-15) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 16 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 16) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-16) !important; stroke: var(--sm-stroke-16) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 17 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 17) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-17) !important; stroke: var(--sm-stroke-17) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 18 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 18) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-18) !important; stroke: var(--sm-stroke-18) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 19 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 19) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-19) !important; stroke: var(--sm-stroke-19) !important; }
+.markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 20 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
+.markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 20) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-20) !important; stroke: var(--sm-stroke-20) !important; }
+
+/* -------------------------------------------------------------------------
+   Clusters / Subgraphs (20 Colors)
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid g.cluster > rect {
+  stroke-width: 1.5px !important;
+  rx: 8px !important;
+  ry: 8px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 1 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 1) > rect { fill: var(--sm-cluster-1) !important; stroke: var(--sm-stroke-1) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 1 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 1) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-1) !important; color: var(--sm-stroke-1) !important; font-weight: 600 !important; }
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 2 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 2) > rect { fill: var(--sm-cluster-2) !important; stroke: var(--sm-stroke-2) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 2 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 2) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-2) !important; color: var(--sm-stroke-2) !important; font-weight: 600 !important; }
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 3 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 3) > rect { fill: var(--sm-cluster-3) !important; stroke: var(--sm-stroke-3) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 3 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 3) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-3) !important; color: var(--sm-stroke-3) !important; font-weight: 600 !important; }
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 4 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 4) > rect { fill: var(--sm-cluster-4) !important; stroke: var(--sm-stroke-4) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 4 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 4) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-4) !important; color: var(--sm-stroke-4) !important; font-weight: 600 !important; }
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 5 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 5) > rect { fill: var(--sm-cluster-5) !important; stroke: var(--sm-stroke-5) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 5 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 5) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-5) !important; color: var(--sm-stroke-5) !important; font-weight: 600 !important; }
+
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 6 of g.cluster) > rect,
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 6) > rect { fill: var(--sm-cluster-6) !important; stroke: var(--sm-stroke-6) !important; }
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-child(20n + 6 of g.cluster) .cluster-label :is(text, tspan, span, p),
+.markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 6) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-6) !important; color: var(--sm-stroke-6) !important; font-weight: 600 !important; }
+
+/* -------------------------------------------------------------------------
+   Connecting Lines & Edge Labels (No Clipping on Multiline Labels)
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid :is(
+  .edgePaths path,
+  g.edgePath path,
+  path.flowchart-link,
+  path.relationshipLine
+) {
+  stroke: var(--sm-line) !important;
+  stroke-width: 1.5px !important;
+  stroke-linecap: round !important;
+}
+
+.markdown-preview.markdown-preview .mermaid marker path {
+  fill: var(--sm-line) !important;
+  stroke: var(--sm-line) !important;
+}
+
+.markdown-preview.markdown-preview .mermaid .edgeLabel {
+  background-color: transparent !important;
+}
+
+.markdown-preview.markdown-preview .mermaid .edgeLabel rect {
+  fill: var(--sm-label-bg) !important;
+  stroke: var(--sm-label-border) !important;
+  stroke-width: 1px !important;
+  rx: 4px !important;
+  ry: 4px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid .edgeLabel div.labelBkg {
+  background-color: var(--sm-label-bg) !important;
+  border: 1px solid var(--sm-label-border) !important;
+  border-radius: 4px !important;
+  padding: 1px 6px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid .edgeLabel :is(span, p) {
+  background: transparent !important;
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--sm-label-text) !important;
+  font-size: 12px !important;
+  line-height: 1.25 !important;
+  font-weight: 500 !important;
+  text-align: center !important;
+}
+
+.markdown-preview.markdown-preview .mermaid .edgeLabel text,
+.markdown-preview.markdown-preview .mermaid .edgeLabel tspan {
+  fill: var(--sm-label-text) !important;
+  font-size: 12px !important;
+}
+
+/* -------------------------------------------------------------------------
+   Sequence Diagrams (Multi-Color Actors & Matching Lifelines)
+   ------------------------------------------------------------------------- */
+/* Actor rect base styling */
+.markdown-preview.markdown-preview .mermaid rect.actor {
+  stroke-width: 1.5px !important;
+  rx: 6px !important;
+  ry: 6px !important;
+  filter: none !important;
+}
+
+/* Fallback if no inline fill is present */
+.markdown-preview.markdown-preview .mermaid rect.actor:not([style*="fill"]) {
+  fill: var(--sm-fill-1);
+  stroke: var(--sm-stroke-1);
+}
+
+.markdown-preview.markdown-preview .mermaid text.actor,
+.markdown-preview.markdown-preview .mermaid text.actor tspan {
+  fill: var(--sm-text) !important;
+  color: var(--sm-text) !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+}
+
+/* Lifelines styled with matching colors across participants */
+.markdown-preview.markdown-preview .mermaid line.actor-line {
+  stroke: var(--sm-lifeline) !important;
+  stroke-width: 1.2px !important;
+  stroke-dasharray: 4 4 !important;
+}
+
+.markdown-preview.markdown-preview .mermaid line#actor0  { stroke: var(--sm-stroke-1)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor1  { stroke: var(--sm-stroke-2)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor2  { stroke: var(--sm-stroke-3)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor3  { stroke: var(--sm-stroke-4)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor4  { stroke: var(--sm-stroke-5)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor5  { stroke: var(--sm-stroke-6)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor6  { stroke: var(--sm-stroke-7)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor7  { stroke: var(--sm-stroke-8)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor8  { stroke: var(--sm-stroke-9)  !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor9  { stroke: var(--sm-stroke-10) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor10 { stroke: var(--sm-stroke-11) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor11 { stroke: var(--sm-stroke-12) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor12 { stroke: var(--sm-stroke-13) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor13 { stroke: var(--sm-stroke-14) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor14 { stroke: var(--sm-stroke-15) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor15 { stroke: var(--sm-stroke-16) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor16 { stroke: var(--sm-stroke-17) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor17 { stroke: var(--sm-stroke-18) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor18 { stroke: var(--sm-stroke-19) !important; stroke-opacity: 0.6 !important; }
+.markdown-preview.markdown-preview .mermaid line#actor19 { stroke: var(--sm-stroke-20) !important; stroke-opacity: 0.6 !important; }
+
+/* Sequence Messages */
+.markdown-preview.markdown-preview .mermaid :is(line.messageLine0, line.messageLine1, path.messageLine0, path.messageLine1) {
+  stroke: var(--sm-line) !important;
+  stroke-width: 1.5px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid text.messageText {
+  fill: var(--sm-text) !important;
+  font-weight: 500 !important;
+}
+
+/* Sequence diagram activations (colorful state processing on lifelines) */
+.markdown-preview.markdown-preview .mermaid rect.activation0 { fill: var(--sm-fill-2) !important; stroke: var(--sm-stroke-2) !important; stroke-width: 1px !important; rx: 3px !important; ry: 3px !important; }
+.markdown-preview.markdown-preview .mermaid rect.activation1 { fill: var(--sm-fill-3) !important; stroke: var(--sm-stroke-3) !important; stroke-width: 1px !important; rx: 3px !important; ry: 3px !important; }
+.markdown-preview.markdown-preview .mermaid rect.activation2 { fill: var(--sm-fill-4) !important; stroke: var(--sm-stroke-4) !important; stroke-width: 1px !important; rx: 3px !important; ry: 3px !important; }
+
+/* Sequence diagram notes */
+.markdown-preview.markdown-preview .mermaid rect.note {
+  fill: var(--sm-fill-3) !important;
+  stroke: var(--sm-stroke-3) !important;
+  stroke-width: 1.5px !important;
+  rx: 6px !important;
+  ry: 6px !important;
+}
+
+.markdown-preview.markdown-preview .mermaid text.noteText {
+  fill: var(--sm-text) !important;
+  font-weight: 500 !important;
+}
+
+/* -------------------------------------------------------------------------
+   ER & Class Diagrams
+   ------------------------------------------------------------------------- */
+.markdown-preview.markdown-preview .mermaid rect.er.entityBox {
+  fill: var(--sm-fill-1) !important;
+  stroke: var(--sm-stroke-1) !important;
+  stroke-width: 1.5px !important;
+}
+.markdown-preview.markdown-preview .mermaid text.er.entityLabel {
+  fill: var(--sm-text) !important;
+  font-weight: 600 !important;
+}
+.markdown-preview.markdown-preview .mermaid :is(text.er.attributeBoxOdd, text.er.attributeBoxEven) {
+  fill: var(--sm-text) !important;
+}
