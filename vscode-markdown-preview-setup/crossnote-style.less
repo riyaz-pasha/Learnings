@@ -1,26 +1,41 @@
+/* ==========================================================================
+   MARKDOWN PREVIEW ENHANCED — CUSTOM THEME STYLESHEET
+   Location: ~/.local/state/crossnote/style.less
+   Backup:   vscode-markdown-preview-setup/crossnote-style.less
+   Reference: https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css
+   ========================================================================== */
 
-/* Please visit the URL below for more information: */
-/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
-
-/* Theme source: /Users/riyaz/Personal/Learning/markdown-theme-2.css */
+/* Load Google Web Font fallback for PT Serif */
 @import url("https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap");
 
-/* fills the whole page edge-to-edge so there's no white gutter around the centered content */
+/* -------------------------------------------------------------------------
+   1. GLOBAL PAGE & PREVIEW CONTAINER
+   Ensures the entire preview window is full-bleed dark (#161b22) with no
+   white gutter or unstyled margins around the content area.
+   ------------------------------------------------------------------------- */
 html,
 body.preview-container {
   background-color: #161b22 !important;
   margin: 0;
 }
 
+/* Scoped under .markdown-preview.markdown-preview to cleanly override
+   Crossnote's base template styles with high specificity. */
 .markdown-preview.markdown-preview {
   background-color: #161b22 !important;
   color: #e6edf3;
+
+  /* Typography: PT Serif with Apple system serif fallback chain */
   font-family: "PT Serif", -apple-system-ui-serif, "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
   font-size: 17px;
   line-height: 1.75;
   text-rendering: optimizeLegibility;
+
+  /* OpenType typographic features: common & contextual ligatures, kerning */
   font-variant-ligatures: common-ligatures contextual;
   font-feature-settings: "liga" 1, "calt" 1, "kern" 1;
+
+  /* Page layout: full-width responsive document with comfortable padding */
   box-sizing: border-box !important;
   width: 100% !important;
   max-width: 100% !important;
@@ -28,6 +43,10 @@ body.preview-container {
   padding: 40px !important;
 }
 
+/* -------------------------------------------------------------------------
+   2. HEADINGS & PROSE ELEMENTS
+   Distinct, warm color accents for headings to make navigation intuitive.
+   ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview h1,
 .markdown-preview.markdown-preview h2,
 .markdown-preview.markdown-preview h3,
@@ -94,6 +113,10 @@ body.preview-container {
   margin-right: 6px;
 }
 
+/* -------------------------------------------------------------------------
+   3. CODE BLOCKS & MONOSPACE ELEMENTS
+   Uses FiraCode Nerd Font Mono with full programming ligatures enabled.
+   ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview code,
 .markdown-preview.markdown-preview pre,
 .markdown-preview.markdown-preview pre * {
@@ -121,6 +144,10 @@ body.preview-container {
   line-height: 1.55;
 }
 
+/* -------------------------------------------------------------------------
+   4. TABLES, BLOCKQUOTES & CALLOUT ALERTS
+   Clean borders, alternating zebra rows, and distinct alert colorbars.
+   ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview table {
   border-collapse: collapse;
   width: 100%;
@@ -196,13 +223,12 @@ body.preview-container {
 }
 
 /* ==========================================================================
-   SUPER MERMAID COLORFUL THEME (20 VIBRANT COLORS, LIGHT + DARK ADAPTIVE)
-   Clean, sharp rendering with zero drop shadow and no text clipping.
+   5. SUPER MERMAID COLORFUL THEME (20 VIBRANT COLORS, LIGHT + DARK ADAPTIVE)
+   Inspired by: https://marketplace.visualstudio.com/items?itemName=mark-ku.super-mermaid
    ========================================================================== */
 
-/* Theme Variables */
+/* Dark Theme Variables (Default) */
 .markdown-preview.markdown-preview {
-  /* Default: Dark Theme */
   --sm-text: #E6EDF3;
   --sm-line: #94A3B8;
   --sm-lifeline: #475569;
@@ -210,7 +236,7 @@ body.preview-container {
   --sm-label-border: #30363D;
   --sm-label-text: #E6EDF3;
 
-  /* 20 Dark-Mode Node Fills: rich, elegant tints matching #161b22 */
+  /* 20 Dark-Mode Fills: 22% opacity tints matching dark slate background (#161b22) */
   --sm-fill-1:  rgba(59, 130, 246, 0.22);  --sm-stroke-1:  #3B82F6; /* Blue */
   --sm-fill-2:  rgba(16, 185, 129, 0.22);  --sm-stroke-2:  #10B981; /* Emerald */
   --sm-fill-3:  rgba(245, 158, 11, 0.22);  --sm-stroke-3:  #F59E0B; /* Amber */
@@ -232,7 +258,7 @@ body.preview-container {
   --sm-fill-19: rgba(217, 119, 6, 0.22);   --sm-stroke-19: #D97706; /* Gold */
   --sm-fill-20: rgba(192, 132, 252, 0.22); --sm-stroke-20: #C084FC; /* Lavender */
 
-  /* Subgraphs / Clusters */
+  /* Subgraphs / Clusters (12% subtle container fill) */
   --sm-cluster-1:  rgba(59, 130, 246, 0.12);
   --sm-cluster-2:  rgba(16, 185, 129, 0.12);
   --sm-cluster-3:  rgba(245, 158, 11, 0.12);
@@ -255,7 +281,7 @@ body.preview-container {
   --sm-cluster-20: rgba(192, 132, 252, 0.12);
 }
 
-/* Light Theme overrides */
+/* Light Theme Variables (Activated automatically when VS Code or preview theme is light) */
 body.vscode-light .markdown-preview.markdown-preview,
 .markdown-preview.markdown-preview[data-theme="light"],
 html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown-preview.markdown-preview {
@@ -266,7 +292,7 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
   --sm-label-border: #CBD5E1;
   --sm-label-text: #1F2937;
 
-  /* 20 Light-Mode Node Fills: vibrant pastel pills */
+  /* 20 Light-Mode Fills: soft, vibrant pastel tones */
   --sm-fill-1:  #DBEAFE; --sm-stroke-1:  #3B82F6;
   --sm-fill-2:  #D1FAE5; --sm-stroke-2:  #10B981;
   --sm-fill-3:  #FEF3C7; --sm-stroke-3:  #F59E0B;
@@ -311,7 +337,11 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   Completely Eliminate Shadows from All Diagram Elements
+   6. COMPLETE SHADOW ELIMINATION
+   Mermaid applies SVG drop shadows by default in sequence diagrams
+   (`<filter id="...-drop-shadow">`), causing unsharp, blurry edges.
+   Overriding `filter: none !important` removes all drop shadows, ensuring
+   crisp vector rendering across every element.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid,
 .markdown-preview.markdown-preview .mermaid * {
@@ -321,7 +351,11 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   Overall Mermaid Container & Sizing (Scales naturally with preview zoom)
+   7. MERMAID CONTAINER & NATURAL ZOOM SCALING
+   Avoid forcing `max-width: 100% !important` or `width: 100% !important`.
+   Letting Mermaid use its calculated SVG viewBox and inline max-width
+   allows diagrams to scale and zoom naturally with VS Code's editor zoom
+   (Cmd + Plus / Cmd + Minus).
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif !important;
@@ -337,15 +371,19 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   Avoid Any Text Clipping in Diagrams
+   8. TEXT CLIPPING PREVENTION IN DIAGRAM LABELS
+   - ForeignObject: By default, SVG foreignObject clips contents at its bounds.
+     Setting `overflow: visible` prevents text truncation on multiline labels.
+   - Paragraph Reset: Global `.markdown-preview p { margin: 14px 0 }` was
+     inheriting into `<p>` inside Mermaid `<foreignObject>` labels, adding 28px
+     of vertical margin that pushed lines like "Reserve 2" out of view.
+     Resetting margin: 0 inside `.mermaid p` fixes this completely.
    ------------------------------------------------------------------------- */
-/* Allow foreignObject contents to render without clipping */
 .markdown-preview.markdown-preview .mermaid foreignObject,
 .markdown-preview.markdown-preview .mermaid foreignObject > div {
   overflow: visible !important;
 }
 
-/* Reset <p> inside mermaid so document's margin: 14px 0 does not blow up node & edge layouts */
 .markdown-preview.markdown-preview .mermaid p {
   margin: 0 !important;
   padding: 0 !important;
@@ -362,7 +400,7 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
   stroke-width: 1.5px !important;
 }
 
-/* Diagram Text Metrics */
+/* Diagram Text Font Metrics */
 .markdown-preview.markdown-preview .mermaid text,
 .markdown-preview.markdown-preview .mermaid tspan,
 .markdown-preview.markdown-preview .mermaid .nodeLabel,
@@ -379,7 +417,9 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   20-Color Sequence Palette for Flowchart / Graph Nodes
+   9. 20-COLOR CYCLIC PALETTE FOR FLOWCHART & GRAPH NODES
+   Uses both `:nth-child(... of g.node)` and `:nth-of-type(...)` for robust
+   cycling across all Mermaid flowchart node shapes.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid g.node:nth-child(20n + 1 of g.node) :is(rect, polygon, circle, ellipse, path:not(.divider *)),
 .markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 1) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-1) !important; stroke: var(--sm-stroke-1) !important; }
@@ -423,7 +463,8 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 .markdown-preview.markdown-preview .mermaid g.node:nth-of-type(20n + 20) :is(rect, polygon, circle, ellipse, path:not(.divider *)) { fill: var(--sm-fill-20) !important; stroke: var(--sm-stroke-20) !important; }
 
 /* -------------------------------------------------------------------------
-   Clusters / Subgraphs (20 Colors)
+   10. CLUSTERS / SUBGRAPHS (20 COLORS)
+   Provides distinct bounding containers and colored header labels.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid g.cluster > rect {
   stroke-width: 1.5px !important;
@@ -462,7 +503,10 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 .markdown-preview.markdown-preview .mermaid g.cluster:nth-of-type(20n + 6) .cluster-label :is(text, tspan, span, p) { fill: var(--sm-stroke-6) !important; color: var(--sm-stroke-6) !important; font-weight: 600 !important; }
 
 /* -------------------------------------------------------------------------
-   Connecting Lines & Edge Labels (No Clipping on Multiline Labels)
+   11. CONNECTING LINES & EDGE LABELS
+   - Relationship lines: Clean slate strokes with rounded arrowheads.
+   - Multiline Labels: Pill background rendered on `div.labelBkg` or `.edgeLabel rect`
+     with zero padding/border overrides on text spans, eliminating text clipping.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid :is(
   .edgePaths path,
@@ -518,9 +562,15 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   Sequence Diagrams (Multi-Color Actors & Matching Lifelines)
+   12. SEQUENCE DIAGRAMS (MULTI-COLOR ACTORS & MATCHING LIFELINES)
+   - Participants: When initialized with `theme: "redux-dark-color"` in config.js,
+     Mermaid automatically applies distinct fills and strokes to both top and
+     bottom actor boxes. We preserve these inline styles without forcing a single fill.
+   - Lifelines: `line#actor0` through `line#actor19` are styled to match each
+     participant's stroke color with subtle 60% opacity.
+   - Activations: Distinct vibrant colors for lifeline state bars.
+   - Notes: Warm amber/yellow pill with crisp contrast.
    ------------------------------------------------------------------------- */
-/* Actor rect base styling */
 .markdown-preview.markdown-preview .mermaid rect.actor {
   stroke-width: 1.5px !important;
   rx: 6px !important;
@@ -528,7 +578,7 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
   filter: none !important;
 }
 
-/* Fallback if no inline fill is present */
+/* Fallback if no inline fill is present from Mermaid themeVariables */
 .markdown-preview.markdown-preview .mermaid rect.actor:not([style*="fill"]) {
   fill: var(--sm-fill-1);
   stroke: var(--sm-stroke-1);
@@ -601,7 +651,8 @@ html:not([data-theme="dark"]) body.preview-container:not(.vscode-dark) .markdown
 }
 
 /* -------------------------------------------------------------------------
-   ER & Class Diagrams
+   13. ER & CLASS DIAGRAMS
+   Clean entity boxes, high-contrast labels, and subtle alternating rows.
    ------------------------------------------------------------------------- */
 .markdown-preview.markdown-preview .mermaid rect.er.entityBox {
   fill: var(--sm-fill-1) !important;
