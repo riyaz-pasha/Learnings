@@ -2080,3 +2080,1101 @@ Reset
 
 Once this clicks, the same `mid` logic becomes natural in Segment Tree building, querying, and updating.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Iterative Segment Tree — Build the intuition, not the memorization
+
+The easiest way to understand an iterative Segment Tree is to forget about the recursive version for a moment.
+
+Think about one simple problem:
+
+You have an array:
+
+```
+int[] arr = {2, 1, 5, 3, 4, 7, 6, 8};
+```
+
+You need to support two operations:
+
+1. Update: Change an element at an index.
+2. Query: Find the sum of elements in a range.
+
+For example:
+
+```
+update(3, 10)       // Change arr[3] from 3 to 10
+query(2, 7)         // Sum arr[2] through arr[6]
+```
+
+A normal loop can calculate a range sum in `O(n)`. A Segment Tree lets us do both operations in `O(log n)`.
+
+The iterative version achieves this using a surprisingly simple idea:
+
+Put the original array at the bottom of a tree-shaped array, and build answers for larger groups above it.
+
+Let's understand why that works.
+
+## 1. First, understand what a Segment Tree actually stores
+
+A Segment Tree doesn't just store individual elements.
+
+It stores answers for groups of elements.
+
+Consider:
+
+```
+Array:  [2, 1, 5, 3, 4, 7, 6, 8]
+```
+
+We can calculate the sum of neighboring pairs:
+
+```
+Level 0:  2    1    5    3    4    7    6    8
+
+Level 1:    3       8       11      14
+
+Level 2:       11              25
+
+Level 3:               36
+```
+
+Where did these numbers come from?
+
+```
+3  = 2 + 1
+8  = 5 + 3
+11 = 4 + 7
+14 = 6 + 8
+
+11 = 3 + 8
+25 = 11 + 14
+
+36 = 11 + 25
+```
+
+Notice the pattern:
+
+- The bottom level stores individual elements.
+- The level above stores answers for groups of 2.
+- The next level stores answers for groups of 4.
+- The top stores the answer for the entire array.
+
+This is the entire foundation of a Segment Tree.
+
+Instead of calculating every element in a range, we combine answers from groups that are already calculated.
+
+## 2. The clever part: Store this tree in a normal array
+
+We don't actually need Node objects or left/right pointers.
+
+We can represent the entire tree using a single array.
+
+Let:
+
+```
+int n = arr.length;
+int[] tree = new int[2 * n];
+```
+
+For our example:
+
+```
+n = 8
+tree.length = 16
+```
+
+We deliberately leave index `0` unused.
+
+The important rule is:
+
+The original array starts at index `n`.
+
+That means:
+
+```
+tree[8]  = arr[0] = 2
+tree[9]  = arr[1] = 1
+tree[10] = arr[2] = 5
+tree[11] = arr[3] = 3
+tree[12] = arr[4] = 4
+tree[13] = arr[5] = 7
+tree[14] = arr[6] = 6
+tree[15] = arr[7] = 8
+```
+
+Why does this arrangement work?
+
+Because of a simple mathematical property of binary trees.
+
+For any node at index `i`:
+
+```
+Left child  = 2 * i
+Right child = 2 * i + 1
+Parent      = i / 2
+```
+
+Integer division is used for the parent.
+
+These are exactly the relationships we need to build the tree.
+
+Here is the complete layout:
+
+```
+                         1: 36
+                       /       \
+                 2: 11           3: 25
+                /    \           /    \
+           4: 3      5: 8    6: 11    7: 14
+           / \       / \      / \      / \
+          8   9    10  11   12  13   14  15
+
+          2   1     5   3    4   7    6   8
+```
+
+The bottom nodes are the original elements.
+
+Every node above them is the combination of its two children.
+
+For example:
+
+```
+tree[4] = tree[8] + tree[9];
+
+tree[5] = tree[10] + tree[11];
+
+tree[2] = tree[4] + tree[5];
+
+tree[1] = tree[2] + tree[3];
+```
+
+There is no recursion here. Just array indexing.
+
+## 3. Building the Segment Tree
+
+Now that we understand the layout, building it becomes straightforward.
+
+```
+public class SegmentTree {
+
+    private final int n;
+    private final int[] tree;
+
+    public SegmentTree(int[] arr) {
+
+        n = arr.length;
+        tree = new int[2 * n];
+
+        // Step 1: Copy original elements into the leaves.
+        for (int i = 0; i < n; i++) {
+            tree[n + i] = arr[i];
+        }
+
+        // Step 2: Build parent nodes from bottom to top.
+        for (int i = n - 1; i >= 1; i--) {
+            tree[i] = tree[2 * i] + tree[2 * i + 1];
+        }
+    }
+}
+```
+
+Let's understand the two steps.
+
+Step 1: Put elements into the leaves.
+
+```
+tree[n + i] = arr[i];
+```
+
+Why `n + i`?
+
+Because the leaf section begins at index `n`.
+
+For our example:
+
+```
+arr[0] → tree[8]
+arr[1] → tree[9]
+arr[2] → tree[10]
+...
+arr[7] → tree[15]
+```
+
+Step 2: Build parents from right to left.
+
+```
+for (int i = n - 1; i >= 1; i--) {
+    tree[i] = tree[2 * i] + tree[2 * i + 1];
+}
+```
+
+Why start at `n - 1`?
+
+Because `n` is the first leaf. Therefore, `n - 1` is the last parent.
+
+Why move backwards?
+
+Because a parent needs its children to be calculated first.
+
+For `n = 8`:
+
+```
+i = 7 → tree[7] = tree[14] + tree[15] = 14
+i = 6 → tree[6] = tree[12] + tree[13] = 11
+i = 5 → tree[5] = tree[10] + tree[11] = 8
+i = 4 → tree[4] = tree[8]  + tree[9]  = 3
+
+i = 3 → tree[3] = tree[6] + tree[7] = 25
+i = 2 → tree[2] = tree[4] + tree[5] = 11
+
+i = 1 → tree[1] = tree[2] + tree[3] = 36
+```
+
+That's it.
+
+Build complexity: `O(n)`
+
+Although there are `n - 1` parent calculations, each calculation takes constant time.
+
+## 4. Point Update — Change an element
+
+Suppose we want to execute:
+
+```
+update(3, 10);
+```
+
+Our original array is:
+
+```
+Index:  0  1  2  3  4  5  6  7
+Value:  2  1  5  3  4  7  6  8
+```
+
+We want to change index `3` from `3` to `10`.
+
+### Step 1: Find the corresponding leaf
+
+Remember:
+
+```
+tree index = n + original index
+```
+
+Therefore:
+
+```
+int pos = n + index;
+```
+
+For our example:
+
+```
+pos = 8 + 3 = 11
+```
+
+So we update:
+
+```
+tree[11] = 10;
+```
+
+Why only update the leaf?
+
+Because that leaf represents the actual array element.
+
+But there is a problem.
+
+Its parent and ancestors still contain answers calculated using the old value.
+
+We need to fix them.
+
+### Step 2: Move upwards and recalculate parents
+
+Look at the path from the updated leaf to the root:
+
+```
+                 1: 36
+                    |
+                 2: 11
+                    |
+                 5: 8
+                    |
+                11: 3  ← Update this
+```
+
+After changing `tree[11]` to `10`, we need to recalculate:
+
+```
+tree[5] = tree[10] + tree[11]
+        = 5 + 10
+        = 15
+
+tree[2] = tree[4] + tree[5]
+        = 3 + 15
+        = 18
+
+tree[1] = tree[2] + tree[3]
+        = 18 + 25
+        = 43
+```
+
+How do we move to the parent?
+
+Remember the relationship:
+
+```
+Parent = current index / 2
+```
+
+So:
+
+```
+pos = pos / 2;
+```
+
+In Java, we can write:
+
+```
+pos >>= 1;
+```
+
+That's why the iterative update looks like this:
+
+```
+public void update(int index, int value) {
+
+    // Find the leaf representing arr[index].
+    int pos = n + index;
+
+    // Update the actual element.
+    tree[pos] = value;
+
+    // Move to its parent.
+    pos /= 2;
+
+    // Recalculate all ancestors up to the root.
+    while (pos >= 1) {
+
+        tree[pos] = tree[2 * pos] + tree[2 * pos + 1];
+
+        pos /= 2;
+    }
+}
+```
+
+The important intuition:
+
+A change to one element can only affect the groups that contain that element.
+
+We don't need to rebuild the entire tree. We only travel from that element's leaf to the root.
+
+Each step halves the index.
+
+Therefore, update complexity is `O(log n)`.
+
+## 5. Range Query — The most interesting part
+
+Now comes the part that initially looks like magic.
+
+Suppose we want:
+
+```
+query(2, 7);
+```
+
+That means:
+
+```
+arr[2] + arr[3] + arr[4] + arr[5] + arr[6]
+```
+
+Our array:
+
+```
+Index:  0  1  2  3  4  5  6  7
+Value:  2  1  5  3  4  7  6  8
+
+                   └───────────┘
+                      [2, 7)
+```
+
+The answer is:
+
+```
+5 + 3 + 4 + 7 + 6 = 25
+```
+
+We could simply loop through these five elements.
+
+But remember what the Segment Tree has already calculated:
+
+```
+Index 5 = 8   → sum of arr[2] + arr[3]
+
+Index 6 = 11  → sum of arr[4] + arr[5]
+
+Index 14 = 6  → arr[6]
+```
+
+We can use these three precomputed answers:
+
+```
+8 + 11 + 6 = 25
+```
+
+We didn't need to look at all five elements individually.
+
+The question is:
+
+How can we systematically find these complete groups for any range?
+
+That's what the iterative query algorithm does.
+
+### Step 1: Convert the range into leaf positions
+
+We use a half-open range:
+
+```
+[left, right)
+```
+
+This means `left` is included and `right` is excluded.
+
+For example:
+
+```
+[2, 7) means indexes 2, 3, 4, 5, 6
+```
+
+Why use this convention?
+
+Because the range length becomes:
+
+```
+right - left
+```
+
+And an empty range is simply:
+
+```
+[3, 3)
+```
+
+To work with the tree, shift both boundaries into the leaf section:
+
+```
+left += n;
+right += n;
+```
+
+For our example:
+
+```
+left  = 2 + 8 = 10
+right = 7 + 8 = 15
+```
+
+We are now working with:
+
+```
+[10, 15)
+```
+
+Remember, these are tree indexes, not original array indexes.
+
+### Step 2: Understand the two boundaries
+
+At every level, we want to collect complete groups that fit inside the requested range.
+
+Look at the left boundary.
+
+A node with an odd index is a right child.
+
+For example:
+
+```
+       5
+      / \
+     10  11
+```
+
+If `left = 11`, the node is a right child.
+
+Its sibling, `10`, is outside our remaining query range.
+
+We cannot move up to parent `5`, because doing so would accidentally include `10`.
+
+So we must:
+
+1. Include node `11`.
+2. Move the left boundary to `12`.
+
+In code:
+
+```
+if (left % 2 == 1) {
+    sum += tree[left];
+    left++;
+}
+```
+
+Now the right boundary.
+
+Remember, `right` is exclusive.
+
+If `right` is odd, then `right - 1` is a left child.
+
+For example:
+
+```
+       7
+      / \
+     14  15
+```
+
+Suppose `right = 15`.
+
+Our query includes node `14`, but excludes node `15`.
+
+We cannot move up to parent `7`, because that would include node `15`, which is outside the range.
+
+So we must:
+
+1. Include node `14`.
+2. Move the right boundary to `14`.
+
+In code:
+
+```
+if (right % 2 == 1) {
+    right--;
+    sum += tree[right];
+}
+```
+
+This is the key insight:
+
+- Left boundary is a right child? Take it and move right.
+- Right boundary is odd? Take the node immediately before it and move left.
+- Otherwise, we can safely move both boundaries to their parents.
+
+### Step 3: Move both boundaries upwards
+
+After handling those boundaries:
+
+```
+left /= 2;
+right /= 2;
+```
+
+Why?
+
+Because we have moved from one level of the tree to its parent level.
+
+The remaining range is now represented by the parent nodes.
+
+We repeat the same process until:
+
+```
+left == right
+```
+
+At that point, the entire requested range has been covered.
+
+## 6. Walk through the query with actual numbers
+
+Let's execute:
+
+```
+query(2, 7);
+```
+
+Initially:
+
+```
+left  = 10
+right = 15
+sum   = 0
+```
+
+Iteration 1
+
+```
+left = 10   (even)
+right = 15  (odd)
+```
+
+Left is even, so we don't take anything from that side.
+
+Right is odd, so take `tree[14]`.
+
+```
+sum = 0 + tree[14]
+    = 0 + 6
+    = 6
+```
+
+Move the right boundary left:
+
+```
+right = 14
+```
+
+Now move both boundaries to parents:
+
+```
+left  = 10 / 2 = 5
+right = 14 / 2 = 7
+```
+
+Iteration 2
+
+```
+left = 5   (odd)
+right = 7  (odd)
+```
+
+Left is odd, so take `tree[5]`.
+
+```
+sum = 6 + tree[5]
+    = 6 + 8
+    = 14
+```
+
+Move left:
+
+```
+left = 6
+```
+
+Right is odd, so take `tree[6]`.
+
+```
+sum = 14 + tree[6]
+    = 14 + 11
+    = 25
+```
+
+Move right:
+
+```
+right = 6
+```
+
+Move both to parents:
+
+```
+left  = 6 / 2 = 3
+right = 6 / 2 = 3
+```
+
+Now:
+
+```
+left == right
+```
+
+Stop.
+
+Answer = 25
+
+We got the answer by combining three precomputed groups instead of visiting all five elements.
+
+### The query algorithm
+
+```
+public int query(int left, int right) {
+
+    // Move the range boundaries into the leaf section.
+    left += n;
+    right += n;
+
+    int sum = 0;
+
+    while (left < right) {
+
+        // Left boundary is a right child.
+        // Include it because its sibling is outside the range.
+        if (left % 2 == 1) {
+            sum += tree[left];
+            left++;
+        }
+
+        // Right boundary is odd.
+        // Include its previous node because it is inside the range.
+        if (right % 2 == 1) {
+            right--;
+            sum += tree[right];
+        }
+
+        // Move to the parent level.
+        left /= 2;
+        right /= 2;
+    }
+
+    return sum;
+}
+```
+
+Query complexity: `O(log n)`
+
+At each iteration, both boundaries move one level upward. A tree with `n` leaves has approximately `log₂(n)` levels.
+
+## 7. Complete Java implementation
+
+Now put all three operations together.
+
+```
+public class SegmentTree {
+
+    private final int n;
+    private final int[] tree;
+
+    public SegmentTree(int[] arr) {
+
+        n = arr.length;
+        tree = new int[2 * n];
+
+        // Copy original array into the leaf section.
+        for (int i = 0; i < n; i++) {
+            tree[n + i] = arr[i];
+        }
+
+        // Build parent nodes from bottom to top.
+        for (int i = n - 1; i >= 1; i--) {
+            tree[i] = tree[2 * i] + tree[2 * i + 1];
+        }
+    }
+
+    // Update the value at a given index.
+    public void update(int index, int value) {
+
+        // Find the corresponding leaf.
+        int pos = n + index;
+
+        // Update the leaf.
+        tree[pos] = value;
+
+        // Recalculate ancestors.
+        while (pos > 1) {
+
+            pos /= 2;
+
+            tree[pos] = tree[2 * pos] + tree[2 * pos + 1];
+        }
+    }
+
+    // Returns sum of elements in [left, right).
+    public int query(int left, int right) {
+
+        // Convert array indexes into tree indexes.
+        left += n;
+        right += n;
+
+        int sum = 0;
+
+        while (left < right) {
+
+            // Include the left boundary if it is a right child.
+            if (left % 2 == 1) {
+                sum += tree[left];
+                left++;
+            }
+
+            // Include the rightmost node if right is odd.
+            if (right % 2 == 1) {
+                right--;
+                sum += tree[right];
+            }
+
+            // Move both boundaries to their parents.
+            left /= 2;
+            right /= 2;
+        }
+
+        return sum;
+    }
+
+    public static void main(String[] args) {
+
+        int[] arr = {2, 1, 5, 3, 4, 7, 6, 8};
+
+        SegmentTree segTree = new SegmentTree(arr);
+
+        System.out.println(segTree.query(2, 7));
+        // 25
+
+        segTree.update(3, 10);
+
+        System.out.println(segTree.query(2, 7));
+        // 32
+    }
+}
+```
+
+Notice that after the update:
+
+```
+Original: 5 + 3 + 4 + 7 + 6 = 25
+Updated:  5 + 10 + 4 + 7 + 6 = 32
+```
+
+Everything is handled by the same tree.
+
+## 8. Does it work when the array size is not a power of 2?
+
+Yes!
+
+This is an important feature of the compact iterative implementation.
+
+You don't have to pad the array to the next power of 2.
+
+For example:
+
+```
+int[] arr = {2, 1, 5, 3, 4};
+int n = 5;
+int[] tree = new int[2 * n];
+```
+
+The leaves will be:
+
+```
+tree[5] = 2
+tree[6] = 1
+tree[7] = 5
+tree[8] = 3
+tree[9] = 4
+```
+
+The same build, update, and query algorithms work.
+
+One subtle difference: when `n` is not a power of 2, the internal layout is not necessarily the familiar perfectly balanced, left-to-right interval tree you may have drawn in the recursive version.
+
+Don't worry about drawing that tree to implement the compact iterative version. Trust the index relationships and boundary algorithm.
+
+If you prefer a perfectly aligned tree structure for visualization, you can pad to the next power of 2, but it is not required.
+
+## 9. Can we use this for operations other than sum?
+
+Absolutely.
+
+The Segment Tree idea is not tied to addition.
+
+It works whenever you can combine two group answers into one group answer using an associative operation.
+
+In other words:
+
+\\[ (a \circ b) \circ c = a \circ (b \circ c) \\]
+
+The grouping doesn't change the answer.
+
+Common examples:
+
+| Problem       | Combine operation | Identity            |
+| ------------- | ----------------- | ------------------- |
+| Range sum     | `a + b`           | `0`                 |
+| Range minimum | `min(a, b)`       | `Integer.MAX_VALUE` |
+| Range maximum | `max(a, b)`       | `Integer.MIN_VALUE` |
+| Range GCD     | `gcd(a, b)`       | `0`                 |
+| Range XOR     | `a ^ b`           | `0`                 |
+
+For example, to change the tree from range sum to range minimum:
+
+During build:
+
+```
+tree[i] = Math.min(tree[2 * i], tree[2 * i + 1]);
+```
+
+During update:
+
+```
+tree[pos] = Math.min(tree[2 * pos], tree[2 * pos + 1]);
+```
+
+During query, replace addition with `Math.min`, and initialize the answer to `Integer.MAX_VALUE`.
+
+The tree structure and boundary logic remain exactly the same.
+
+One important detail: the sum implementation above works directly because addition is commutative. For operations that are associative but not commutative (such as string concatenation), use two query accumulators:
+
+```
+int leftResult = identity;
+int rightResult = identity;
+
+while (left < right) {
+
+    if (left % 2 == 1) {
+        leftResult = combine(leftResult, tree[left++]);
+    }
+
+    if (right % 2 == 1) {
+        rightResult = combine(tree[--right], rightResult);
+    }
+
+    left /= 2;
+    right /= 2;
+}
+
+return combine(leftResult, rightResult);
+```
+
+The reason for two accumulators is to preserve the original left-to-right order of elements.
+
+## 10. When should you use an iterative Segment Tree?
+
+Use it when you need:
+
+- Range sum/min/max/GCD/XOR queries with point updates.
+- Many queries and updates on a changing array.
+- A data structure with predictable `O(log n)` operations.
+- A compact implementation without recursive calls.
+
+It is particularly useful in competitive programming and array-based query problems.
+
+However, a normal iterative Segment Tree does not automatically handle every kind of update.
+
+For example:
+
+```
+Add 5 to every element in range [2, 7).
+Set every element in range [3, 8) to 10.
+```
+
+These are range updates, not point updates. For such problems, you generally need Lazy Propagation, or a specialized iterative tree designed for that purpose.
+
+## 11. Complexity
+
+Let `n` be the number of elements.
+
+| Operation    | Time complexity | Why?                                                      |
+| ------------ | --------------- | --------------------------------------------------------- |
+| Build        | `O(n)`          | Copy `n` elements and calculate `n - 1` parents           |
+| Point update | `O(log n)`      | Travel from one leaf to the root                          |
+| Range query  | `O(log n)`      | Process at most a constant number of nodes per tree level |
+| Space        | `O(n)`          | Store `2n` values                                         |
+
+## 12. The mental model to take away
+
+Don't memorize the code. Understand these five ideas:
+
+1\. Where are the elements?
+
+```
+tree[n + i] = arr[i];
+```
+
+Original elements live in the leaf section.
+
+2\. How is a parent found?
+
+```
+parent = index / 2;
+```
+
+3\. How are children found?
+
+```
+leftChild  = index * 2;
+rightChild = index * 2 + 1;
+```
+
+4\. How does an update work?
+
+Change one leaf, then travel upward and recalculate its ancestors.
+
+5\. How does a query work?
+
+Convert the query boundaries into leaf positions. Collect nodes that fit completely inside the range, and move the boundaries upward until the whole range is covered.
+
+That's the iterative Segment Tree.
+
+The difference from the recursive version is mainly how we represent and navigate the tree:
+
+- Recursive: Track `start`, `end`, and `mid` to decide which interval to visit.
+- Iterative: Use array indexes, parent/child relationships, and boundary movement. No explicit `start`, `end`, or `mid` is required.
+
+The big idea: A Segment Tree is simply a way of reusing answers for smaller groups to calculate answers for larger ranges efficiently. The iterative version just makes that structure a flat array.&#x20;
+
