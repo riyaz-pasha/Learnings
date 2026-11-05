@@ -152,6 +152,9 @@
 - **Frontend Security**
   - CSP, CORS, XSS, CSRF Protection
 
+## Tooling
+- 🧹 [ChatGPT Mermaid Cleanup Toolkit](../mermaid-cleanup/README.md) — scan, reconstruct, replace, and validate ChatGPT-rendered Mermaid artifacts in Markdown files.
+
 ## References & Resources
 - 📘 [GeeksforGeeks System Design Bootcamp](https://www.geeksforgeeks.org/system-design-interview-bootcamp-guide/)
 - 🎥 [System Design YouTube Video #1](https://www.youtube.com/watch?v=F2FmTdLtb_4)
