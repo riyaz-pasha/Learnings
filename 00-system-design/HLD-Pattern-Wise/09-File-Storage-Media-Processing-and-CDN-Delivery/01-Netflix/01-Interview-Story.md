@@ -6607,7 +6607,277 @@ Which would you like?
 
 
 
+## Content security: who decides, who checks, and what the bytes are worth
 
+V11 skipped the part you're asking about: how security works through all the caches. I'll rebuild it from the ground up, and I found a few gaps while doing it. They are listed in section 8, and I've fixed them.
+
+## 1. The core idea: three questions, three layers
+
+Everything rests on one separation.
+
+| Question | Layer | Where it is answered |
+|---|---|---|
+| May this person fetch these bytes? | Access gate (playback token) | Every box that serves bytes: appliance, edge |
+| What do the bytes reveal if someone gets them anyway? | Encryption (CENC cbcs) | At packaging time, once |
+| May this device unlock the bytes? | License (DRM) | License Service only |
+
+The rule that makes it cache-friendly: **decide once at a stateful place, prove cheaply everywhere else.**
+
+- The API Server and License Service make real decisions. They check plan, region, device and account.
+- Caches never decide anything. They only verify a signature on a proof the API already issued.
+- Caches serve identical ciphertext to everyone, so the cache key never involves the viewer.
+
+## 2. The credentials, with no ambiguity
+
+| Credential | Issued by | Checked by | Lives for | What it proves |
+|---|---|---|---|---|
+| JWT | Login service | API Server | Hours | This is user 9021 |
+| `playback_token` (Ed25519) | API Server, at playback start | Appliance and edge, on every request | 6 hours | The API approved user 9021 to fetch title 4411's bytes |
+| `license_token` (Ed25519) | API Server, at playback start | License Service | 5 minutes | The API approved this session for a license, up to tier HD or SD |
+| License (DRM blob) | License Service | The device's CDM | 24 hours | This one device may decrypt these KIDs |
+| Content key | Coordinator, at ingest | Nobody. It is only used. | Until rotated | The secret that makes the bytes readable |
+
+Two signing keys exist, and they never leave the control plane:
+- The Ed25519 private key sits in KMS. Only API Servers can use it, to sign.
+- Appliances and edges hold only the public key.
+
+## 3. Layer 1: the access gate, and why caching doesn't break it
+
+### The problem
+
+A cache answers by path. If `/titles/4411/v2/720p/seg_00614.m4s` is on the disk, a lookup by path would hand it to anyone who asks. A cache hit skips the origin, so the origin can't be the one checking. The check has to run on the cache box, before the cache lookup.
+
+### What the request looks like
+
+```
+GET /titles/4411/v2/720p/seg_00614.m4s HTTP/2
+Host: bom1-fnet-03.cdn.example.com
+X-Playback-Token: 9021.4411.1730851200.<ed25519 signature>
+```
+
+The token travels in a header. The cache key is the path alone. The token never appears in the URL or the key. That one decision is what keeps one cached copy valid for 200,000 viewers.
+
+### The order of operations inside an appliance or edge
+
+```mermaid
+flowchart LR
+    R[Request arrives] --> V{Verify token}
+    V -->|invalid| D[403, never reaches cache]
+    V -->|valid| K[Cache lookup by path only]
+    K -->|hit| H[Serve from disk]
+    K -->|miss| F[Fetch upstream, store, serve]
+```
+
+Verification happens first, on hits and misses alike. In nginx, the `access` phase runs before the `proxy_cache` logic, so this ordering is built in.
+
+```lua
+-- runs before any cache or disk lookup
+local tok = ngx.var.http_x_playback_token
+local uid, tid, exp, sig = parse(tok)
+if not tok                               then return ngx.exit(403) end
+if tonumber(exp) < ngx.time() - 60       then return ngx.exit(403) end   -- 60 s clock skew allowed
+if tid ~= ngx.var.tid                    then return ngx.exit(403) end   -- title must match the path
+if not ed25519_verify(PUBKEYS, uid.."."..tid.."."..exp, sig)
+                                          then return ngx.exit(403) end
+-- only now does the request continue to try_files / proxy_cache
+```
+
+Four checks, all stateless: signature, expiry, title-in-token equals title-in-path, and token present. There is no database call and no network call.
+
+### Why this is cheap
+
+An Ed25519 verification costs about 100 microseconds of one core. An appliance pushing 100 Gbps of 2 MB segments serves about 6,000 requests per second. That is about 0.6 of one core spent on authentication. So per-request verification adds no meaningful cost, and it is why we can afford to check on every hit.
+
+### Three details that matter
+
+- **Failures are never cached.** A 403 is produced in the access phase, before the cache. It can't be stored and served to a legitimate viewer later.
+- **The token is not part of the cache key and not in `Vary`.** Adding it would give every viewer a private copy, which is the V2 failure.
+- **Key rotation.** Boxes hold a set of public keys, each with a key ID, usually current and previous. Rotation overlaps for 6 hours, the token lifetime, so no valid token breaks mid-stream.
+
+## 4. Hop by hop: who checks what
+
+Here is every box between the viewer and storage. "Trust" below means a network-level credential, not a viewer credential.
+
+| Hop | Who can call it | What it validates | On a cache hit | On a miss |
+|---|---|---|---|---|
+| Appliance in ISP | The public internet | Playback token (4 checks above) | Verify, then serve from disk | Verify, then proxy to the PoP edge, forwarding the token |
+| PoP edge | Viewers and appliances | Playback token again, or appliance mTLS identity (see section 8) | Verify, then serve from SSD | Verify, then ask the Shield |
+| Shield | Our edges and appliances only, over mTLS, on private addresses | Caller's certificate. No viewer token. | Serve | Fetch from S3 |
+| S3 | The Shield only, through an origin access identity | AWS IAM | n/a | Serve the object |
+| Poster path | Anyone | Nothing. Posters are public by design. | Serve | Fetch |
+
+Why the Shield and S3 skip the viewer check: no viewer can reach them. A request that gets that far has already passed a front door that checked the token. Checking again would add cost without adding a barrier.
+
+Why the PoP edge checks again when the appliance already did: a viewer can fail over directly to the edge (V4's last-resort entry). The edge is a front door too, so it needs its own lock.
+
+## 5. Layer 2: encryption, and what it makes useless
+
+### What is encrypted and what is clear
+
+| Object | State | Contains |
+|---|---|---|
+| `master.m3u8`, media playlists | Clear | Segment names, KIDs, DRM system lines |
+| `init.mp4` | Clear | `pssh` and `tenc` boxes holding the KID (an identifier), never the key |
+| Segment headers (`moof`) | Clear | Timing and sample sizes |
+| Segment media (`mdat`) | Encrypted with `cbcs` | The actual video and audio samples |
+
+The clear parts are safe to leave clear. The KID says which key unlocks the bytes. It does not reveal the key.
+
+### Why one encryption works for everyone
+
+Every viewer gets byte-identical segments, so every cache holds one copy. That is why V2 and V3 survive DRM unchanged. The per-viewer part happens only in the license, which is a few hundred bytes.
+
+### Where plaintext keys exist, and where they never do
+
+| Location | Holds plaintext key? | Notes |
+|---|---|---|
+| KMS master key | Never leaves KMS | Used to wrap and unwrap |
+| Postgres `content_keys` | No, wrapped only | Ciphertext under the KMS key |
+| Ingest Coordinator | Briefly, in memory | Serves keys to workers over mTLS |
+| Encode worker | In memory for one task | Never written to disk, never logged |
+| License Service | In memory, cached 5 minutes | Unwrapped on demand |
+| S3, Shield, edges, appliance disks | Never | Ciphertext only |
+| Redis, logs, Kafka, ClickHouse | Never | |
+| Client app and OS | Never in readable form | Only inside the CDM |
+
+An ISP technician with root on an appliance finds ciphertext, the public verification key, and nothing else of value.
+
+## 6. Layer 3: the license flow, every check in order
+
+This runs at playback start, in parallel with the first segment fetch.
+
+**Step 1: the API decides, and mints both tokens.**
+The API Server does the stateful checks here, once:
+1. JWT is valid.
+2. The account's plan allows this title and quality. This sets `max_tier` to `SD` or `HD`.
+3. The title is available in the viewer's region and passes the maturity cap.
+4. The title is finalized (`manifest_key` is set).
+
+It then signs two tokens. The license token carries `user_id`, `title_id`, `asset_version`, `session_id`, `max_tier`, `region` and a 5-minute expiry.
+
+**Step 2: the player reads the clear `init.mp4`.**
+It finds the `pssh` box and passes it to the OS or browser DRM API. The CDM, the protected module on the device, creates a challenge. The challenge contains the KIDs wanted, the device's certificate, and its security level.
+
+**Step 3: the player posts to the License Service.**
+```
+POST https://lic.eu.example.com/v1/license
+X-License-Token: <jwt>
+<binary challenge>
+```
+
+**Step 4: the License Service checks, in this order.**
+
+| # | Check | Fails with |
+|---|---|---|
+| 1 | License token signature and expiry | 403 |
+| 2 | Device certificate is valid and not revoked, per the DRM vendor's chain | 403 |
+| 3 | GeoIP of the caller is in `title_regions` for this title | 403 `region` |
+| 4 | Each requested KID belongs to this `title_id` and `asset_version` | 403 `kid_mismatch` |
+| 5 | For HD KIDs: token `max_tier = HD` and the device's security level is hardware-backed | HD keys left out, SD still granted |
+| 6 | At least one key is grantable | 403 `no_keys` |
+
+**Step 5: build the license.**
+The service unwraps the granted keys through KMS (cached 5 minutes in memory). It then encrypts them to the device's public key from the challenge, so only that device's CDM can open them. Output rules, such as requiring HDCP 2.2 for HD, are inside the license and enforced by the device.
+
+**Step 6: the player adapts.**
+The CDM tells the player which KIDs it can use. If HD keys weren't granted, the player removes 720p and 1080p from its ABR ladder and plays at 480p at most. Nothing stalls.
+
+**Step 7: decryption happens inside the secure path.**
+Encrypted segments arrive from the CDN. The CDM decrypts them in protected memory and hands frames to the video hardware. The app, including its own code, never sees the key or clear frames, on hardware-backed devices.
+
+## 7. The complete flow in one picture
+
+```mermaid
+sequenceDiagram
+    participant C as Client + CDM
+    participant A as API Server
+    participant AP as Appliance
+    participant E as PoP Edge
+    participant SH as Shield
+    participant S3 as S3
+    participant L as License Service
+    participant K as KMS
+
+    C->>A: POST /playback (JWT)
+    Note over A: DECISION: plan, region, maturity, finalized?
+    A-->>C: playback_token (6h), license_token (5m), manifest list
+    C->>AP: GET master.m3u8 + X-Playback-Token
+    Note over AP: VERIFY token, then cache lookup by path
+    AP-->>C: playlist (clear, public bytes)
+    C->>AP: GET init.mp4 + X-Playback-Token
+    AP-->>C: init with pssh and KID
+    par license
+        C->>L: challenge + license_token
+        Note over L: DECISION: signature, device cert, geo, KID match, HW level
+        L->>K: unwrap key (cached 5 min)
+        L-->>C: license encrypted to this CDM
+    and media
+        C->>AP: GET seg_00614.m4s + X-Playback-Token
+        alt segment on appliance disk
+            Note over AP: VERIFY token, hit
+            AP-->>C: ciphertext
+        else miss
+            Note over AP: VERIFY token, miss
+            AP->>E: GET same path + token
+            Note over E: VERIFY token again
+            E->>SH: GET path (mTLS)
+            Note over SH: caller cert only
+            SH->>S3: GET via origin access identity
+            S3-->>SH: ciphertext
+            SH-->>E: ciphertext, cached
+            E-->>AP: ciphertext
+            AP-->>C: ciphertext
+        end
+    end
+    Note over C: CDM decrypts inside secure path
+```
+
+Notice where the two kinds of work sit:
+- **Decisions** happen twice, at the API and the License Service, both stateful and uncached.
+- **Verifications** happen on every byte-serving hop, stateless and cheap.
+
+## 8. Gaps I found while writing this, and the fixes
+
+**Gap 1: audio.** V11's packager example encrypted only the video stream. Audio would sit in clear and leak. Encrypt every audio track under the SD key. Audio has no HD tier.
+
+**Gap 2: the fill agent has no viewer token.** In V3, the fill agent pulls titles from the PoP edge, but the edge now demands a playback token. Fix: appliances authenticate with their mTLS certificate, which they already use for heartbeats. The edge accepts either a valid playback token or a valid appliance certificate on fill paths. A viewer token can't be used to fill, and an appliance certificate can't be used to play.
+
+**Gap 3: the clear `v1` copy.** After repackaging to encrypted `v2`, the clear `v1` segments still sit in S3, and edges may still cache them. A token for title 4411 passes the path check on `v1` paths too. Fix:
+1. After the `v2` cutover and a short grace period, delete clear `v1` from S3 and all replica buckets.
+2. Edge and appliance caches age out clear copies through `inactive=7d`. For urgent cases, issue an explicit purge of that prefix. This is the one place a purge is justified, because the path is not changing.
+
+**Gap 4: license token replay.** A license token is valid for 5 minutes and not bound to a device. If leaked, someone with a genuine CDM could get a license for a title they are not entitled to. Fix: the License Service counts licenses per `session_id` using the V12 limiter and allows about 5. The token already carries `session_id`, so it costs one limiter call.
+
+**Gap 5: no revocation within 6 hours.** A playback token can't be recalled once issued. That is acceptable, because the token only buys ciphertext. The real gate is the license, and it is short-lived. If an account is banned, new license requests and renewals stop. The existing 24-hour license runs out, and the device cannot renew.
+
+## 9. What each attack gets the attacker
+
+| Attacker action | Layer that stops it | Result |
+|---|---|---|
+| Copies segments from an appliance disk | Encryption | Ciphertext, unplayable |
+| Scrapes every segment with a valid token | Encryption | Same ciphertext, unplayable |
+| Replays someone's playback token | License | Can fetch ciphertext only. No license without the license token and a CDM. |
+| Calls the Shield or S3 directly | Network and IAM | Refused. Not reachable from the internet. |
+| Compromises an appliance | Key placement | Finds ciphertext and a public key. Cannot sign tokens or unwrap keys. |
+| Rooted phone dumps its keys | Key tiers | Leaks SD keys only, since HD went only to hardware-backed devices |
+| Uses a VPN to appear in another country | Weak, GeoIP | May pass the region check. Known limit. |
+| Screen-records a playing stream | None | DRM cannot stop capture of the display. Known limit. |
+| Shares a genuine subscription with others | None here | Concurrent-stream limits were cut from scope |
+
+## 10. Recap
+
+| Concept | The Insight |
+|---|---|
+| Decide at the API, verify at the edge | Stateful checks happen once. Caches only check a signature. |
+| Verification precedes the cache lookup | A hit still needs proof, so the token check runs first on every request. |
+| Token in a header, key by path | One cached copy serves every viewer, while every request is still authenticated. |
+| Encrypt once | Identical ciphertext keeps CDN and appliance hit rates intact. |
+| Keys live only in KMS, workers and the License Service | Boxes in third-party racks hold nothing worth stealing. |
+| License wrapped to the CDM | The key never reaches software the viewer controls. |
+
+**Interview-arc sentence:** *"If asked how you secure content through many caches: a token on the URL would break caching and a token only at the origin would be skipped on every hit, so the API makes the entitlement decision once and signs a proof, every serving box verifies that signature before its cache lookup with the token kept out of the cache key, and because the bytes are encrypted once with keys released only through a license wrapped to the device's CDM, anything that leaks from a cache is just ciphertext."*
+
+If this is clear, say "mock interview" and I'll ask you to explain this flow as if I were the interviewer. Or pick another piece to go deeper on.
 
 
 
@@ -6651,7 +6921,133 @@ Which would you like?
 
 
 
+## Chunking, segments, and whether we need the split step at all
 
+First I'll fix how the flow is wired, then answer your two questions. Your second question exposes something I over-built in V5.
+
+### 1. Who publishes what
+
+The queue messages come from the Coordinator, not from the admin or the workers.
+
+1. Admin calls `POST /v1/ingest/jobs` on the Coordinator. Admin never touches the queue.
+2. The Coordinator writes the plan to Postgres and enqueues `split` messages.
+3. A split worker cuts chunks and uploads them to S3. It then calls back to the Coordinator.
+4. The Coordinator flips the split's status in Postgres and enqueues the `encode` messages.
+
+Workers never publish messages. If they did, a worker crash between "wrote chunks" and "published tasks" would leave the database and the queue disagreeing. The Coordinator is the single place that changes state and enqueues in one step.
+
+### 2. Why chunk size is not segment size
+
+They serve two different consumers, so they are tuned for different things.
+
+| | Segment (4 s, 96 frames) | Chunk (60 s, 1,440 frames) |
+|---|---|---|
+| Consumer | The viewer's player | Our encode workers |
+| Optimized for | How fast ABR can switch rungs, request count, compression efficiency | Task startup overhead, cost of a crash, parallelism |
+| Why not smaller | More requests per stream, worse compression | Startup cost swamps the work, rate control resets too often |
+| Why not larger | Slower quality switching, bigger stalls on a bad link | A crash loses more work, and a long task becomes the slowest straggler |
+
+Take a chunk of 4 seconds, one segment per task.
+- A 1-hour title becomes 900 tasks per rung, or 4,500 in total.
+- Starting ffmpeg, downloading the input, calling back and writing a DB row costs about as much as the 4 seconds of video it encodes.
+- The encoder's rate control restarts at every task boundary, so bitrate would wobble every 4 seconds.
+
+Take a chunk of 10 minutes instead.
+- A crash costs up to 10 minutes of work.
+- There are only 6 chunks per rung, so parallelism is capped and the slowest chunk sets the finish time.
+
+The one hard rule is that **a chunk must be a whole number of segments**. 1,440 frames is exactly 15 segments of 96 frames. If a segment straddled two chunks, two workers would each hold half of it and someone would have to stitch them.
+
+### 3. Do we need physical chunking?
+
+**Not strictly.** For an intra-coded master like ProRes, you can skip the split step and have each worker read only its own frame range directly from the original file. V5's split phase was more machinery than that case needs.
+
+### How it works without the split
+
+An intra-coded master stores every frame independently, with an index (the `moov` box) that maps each frame number to a byte offset. So "give me frames 44,640 to 46,079" is just a byte range, and a worker can fetch it with an HTTP range request.
+
+**Plan step (Coordinator, once per job):**
+1. Run `ffprobe` against a presigned URL. It reads the header and index using range requests, never the full 100 GB.
+2. Compute `chunk_count = ceil(86,400 / 1,440) = 60`.
+3. Insert 300 task rows and enqueue 300 messages immediately. There is no split phase.
+
+```json
+{"kind":"encode","job_id":812,"title_id":4411,"asset_version":2,
+ "chunk_idx":31,"rung":"720p",
+ "master_key":"masters/4411/ep01.mov",
+ "start_frame":44640,"frame_count":1440}
+```
+
+**Worker, per task:**
+```bash
+ffmpeg -ss 1861.86 -i "$PRESIGNED_MASTER_URL" -frames:v 1440 \
+  -vf scale=-2:720 -c:v libx264 -b:v 2350k -maxrate 2500k -bufsize 5000k \
+  -g 96 -keyint_min 96 -sc_threshold 0 \
+  -f hls -hls_time 4 -hls_segment_type fmp4 \
+  -start_number 466 -output_ts_offset 1861.86 \
+  -hls_segment_filename "out/seg_%05d.m4s" out/tmp.m3u8
+```
+
+What ffmpeg does here:
+1. It reads the file's index with a few range requests.
+2. It jumps to byte offset X for frame 44,640. Seeking is exact because every frame is independent.
+3. It reads about 1.7 GB of frames and stops after 1,440.
+4. Everything after that is identical to V5: upload segments, call the Coordinator, delete the message.
+
+```mermaid
+sequenceDiagram
+    participant AD as Admin
+    participant CO as Coordinator
+    participant PG as Postgres
+    participant Q as SQS
+    participant W as Encode Worker
+    participant M as S3 masters
+    participant V as S3 video-origin
+    AD->>CO: POST /v1/ingest/jobs
+    CO->>M: ffprobe via range reads (header and index only)
+    CO->>PG: INSERT job + 300 tasks + keys (one transaction)
+    CO->>Q: enqueue 300 encode messages with frame ranges
+    W->>Q: receive (chunk 31, 720p)
+    W->>M: range GET, frames 44640 to 46079 only
+    W->>W: encode, encrypt, package 15 segments
+    W->>V: PUT seg_00466 to seg_00480
+    W->>CO: task done
+    CO->>PG: conditional UPDATE
+```
+
+### Side by side
+
+| | Physical chunks (V5) | Direct range reads |
+|---|---|---|
+| Phases | Plan, split, encode, finalize | Plan, encode, finalize |
+| Extra storage | `chunks` bucket, 100 GB written and read once more | None |
+| Extra state | `transcode_splits`, a split status, a second callback | None |
+| Master bytes read from S3 | 100 GB (split), then 500 GB across the five rung tasks | 500 GB across the five rung tasks |
+| Time to first encode | After the split finishes | Immediately |
+| Failure surface | Split can fail or straggle on a huge master | Only encode tasks can fail |
+| Works on long-GOP masters | Yes, with care | No, because frames depend on earlier frames |
+
+Look at the read volume. Physical chunking does not save any reads of the master. It adds 100 GB of reads and 100 GB of writes on top of the same 500 GB of encode reads. That is why the direct approach is simpler and a little cheaper.
+
+### When the split step is still worth it
+
+- **Long-GOP masters** (for example H.264 or HEVC mezzanine files). A frame depends on earlier frames, so a worker can't start mid-file without decoding from the previous keyframe. A split worker cuts at keyframe boundaries once, and later tasks then work on self-contained files.
+- **Masters with a bad or missing index**, or in a container that doesn't support range seeks well (some MXF variants).
+- **A normalize step you want to run once.** If the master needs conversion before any rung can use it, doing it during one split pass avoids repeating it five times.
+
+### What I'd say in the interview
+
+> "Chunks are the unit of work for encoders, segments are the unit of delivery for players, so they are tuned separately, but a chunk must be a whole number of segments. For intra-coded masters I don't physically split. The coordinator probes the header, then each task range-reads its own frames. If the master is long-GOP, I add a stream-copy split step first so each chunk is independently decodable."
+
+### What changes in our design
+
+If we adopt the direct approach, V5 simplifies:
+- Drop `transcode_splits`, the `chunks` bucket and the split callback.
+- Job status becomes `encoding`, `finalizing`, `done`.
+- Intake validation still rejects masters that aren't intra-coded (or routes them to a split-first path).
+- Everything downstream is unchanged: idempotent writes by deterministic key, the finalize claim, playlists last, the pointer flip last, and DRM packaging in the worker.
+
+Do you want me to redo the write-flow walkthrough from earlier using this simplified version, so you have one clean copy to memorize?
 
 
 
@@ -6693,7 +7089,402 @@ Which would you like?
 
 
 
+## The complete write flow, simplified: no split phase
 
+This is the clean copy to memorize. It applies four changes from our discussion:
+- There is no split phase, so no `chunks` bucket and no `transcode_splits` table.
+- The Coordinator enqueues all encode tasks up front.
+- Each worker range-reads only its own frames from the master.
+- DRM, versioned paths and the multi-region catalog bump are folded in.
+
+Running example:
+- Title 4411, episode 1, 60 minutes, 24 fps, so 86,400 frames.
+- A chunk is 1,440 frames (60 s), which is 15 segments of 96 frames (4 s).
+- That gives 60 chunks, 5 rungs, 300 tasks, and 900 segments per rung.
+- Job 812, asset version 1.
+
+At 23.976 fps the durations stretch slightly (60.06 s and 4.004 s), but the frame counts are identical.
+
+### Final schema (Postgres primary, Mumbai)
+
+```sql
+CREATE TABLE transcode_jobs (
+  job_id        BIGSERIAL PRIMARY KEY,
+  title_id      BIGINT REFERENCES titles,
+  asset_version INT  NOT NULL,
+  kind          TEXT NOT NULL,        -- 'encode' | 'repackage'
+  master_key    TEXT NOT NULL,
+  status        TEXT NOT NULL,        -- 'encoding' | 'finalizing' | 'done' | 'failed'
+  total_frames  BIGINT NOT NULL,
+  chunk_count   INT  NOT NULL,
+  total_tasks   INT  NOT NULL,
+  done_tasks    INT  NOT NULL DEFAULT 0,
+  fail_reason   TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE transcode_tasks (
+  job_id      BIGINT REFERENCES transcode_jobs,
+  chunk_idx   INT  NOT NULL,
+  rung        TEXT NOT NULL,          -- '240p' ... '1080p'
+  status      TEXT NOT NULL,          -- 'pending' | 'done'
+  enqueued_at TIMESTAMPTZ,            -- NULL until the message is in SQS
+  PRIMARY KEY (job_id, chunk_idx, rung)
+);
+```
+
+Start and end frames are not stored. They are computed: `start_frame = chunk_idx × 1440`. `content_keys` and `catalog_meta` are unchanged from V11 and V10.
+
+## Phase A: get the inputs in place
+
+**Step 1. The studio uploads the master.**
+It goes to `masters/4411/ep01.mov` in S3 `masters`, about 100 GB of ProRes, as a multipart upload. S3 checks each part's checksum, so a corrupt upload fails here.
+
+**Step 2. Admin uploads the poster.**
+`posters/4411-1.jpg` goes into S3 `posters`. It is versioned and immutable, as in V9.
+
+**Step 3. Admin creates the title row.**
+```sql
+INSERT INTO titles (name, synopsis, duration_sec, release_year, maturity_rating,
+                    poster_key, release_at, asset_version)
+VALUES ('Night Train S1E1', '...', 3600, 2026, 'TV-14',
+        'posters/4411-1.jpg', '2026-11-13 21:00+05:30', 1);
+INSERT INTO title_regions VALUES (4411,'IN'),(4411,'DE'),(4411,'US');
+-- manifest_key stays NULL
+```
+`manifest_key = NULL` is the "not ready" flag.
+
+## Phase B: plan the job
+
+**Step 4. Admin starts the job.**
+```
+POST /v1/ingest/jobs
+{"title_id":4411,"asset_version":1,"kind":"encode","master_key":"masters/4411/ep01.mov"}
+```
+Admin talks only to the Coordinator. It never touches the queue.
+
+**Step 5. The Coordinator validates the master.**
+1. It runs `HEAD` on the S3 object to confirm it exists.
+2. It runs `ffprobe` against a presigned URL. ffprobe reads the header and the frame index with range requests, never the full 100 GB.
+3. It extracts fps, total frames, codec and GOP structure.
+4. It rejects the master if it is not intra-coded, or has a missing or unusable index. The admin gets `422` with the reason. Long-GOP masters are routed to a stream-copy split path instead, which is out of scope here.
+5. It checks that the title's `duration_sec` matches the probed duration.
+
+**Step 6. The Coordinator computes the plan.**
+```
+total_frames = 86,400
+chunk_count  = ceil(86,400 / 1,440) = 60
+total_tasks  = 60 × 5 rungs = 300
+```
+The finish line is known before any work starts.
+
+**Step 7. One transaction writes everything.**
+```sql
+BEGIN;
+INSERT INTO transcode_jobs (title_id, asset_version, kind, master_key, status,
+                            total_frames, chunk_count, total_tasks)
+VALUES (4411, 1, 'encode', 'masters/4411/ep01.mov', 'encoding', 86400, 60, 300)
+RETURNING job_id;                                    -- 812
+
+INSERT INTO transcode_tasks (job_id, chunk_idx, rung, status)
+SELECT 812, c, r, 'pending'
+FROM generate_series(0,59) c,
+     unnest(ARRAY['240p','360p','480p','720p','1080p']) r;
+
+-- two keys, wrapped under the KMS master key (V11)
+INSERT INTO content_keys (title_id, asset_version, tier, kid, wrapped_key)
+VALUES (4411,1,'SD', :kid_sd, :wrapped_sd),
+       (4411,1,'HD', :kid_hd, :wrapped_hd);
+COMMIT;
+```
+The key bytes come from `os.urandom(16)` and are wrapped by KMS before insert. Postgres never sees a plaintext key.
+
+**Step 8. The Coordinator enqueues 300 messages.**
+This happens after the commit, in 30 SQS batch calls of 10. Each message:
+```json
+{"kind":"encode","job_id":812,"title_id":4411,"asset_version":1,
+ "chunk_idx":31,"rung":"720p","master_key":"masters/4411/ep01.mov"}
+```
+After each batch succeeds, the Coordinator sets `enqueued_at = now()` on those tasks.
+
+**What if the Coordinator crashes between commit and enqueue?**
+A sweep runs every minute:
+```sql
+SELECT job_id, chunk_idx, rung FROM transcode_tasks
+WHERE status = 'pending' AND enqueued_at IS NULL
+  AND job_id IN (SELECT job_id FROM transcode_jobs WHERE status = 'encoding');
+```
+It enqueues whatever it finds. A task enqueued twice is harmless, as Step 17 shows.
+
+## Phase C: encode (300 independent tasks)
+
+**Step 9. A worker receives a message.**
+SQS hides it for 180 seconds. The worker starts a heartbeat thread. Every 60 seconds it extends the visibility timeout, but only if ffmpeg's output time has advanced. If ffmpeg hangs, the worker kills it and stops extending.
+
+**Step 10. The worker asks if the task is already done.**
+```
+GET /v1/ingest/jobs/812/tasks/31/720p   ->  {"status":"pending"}
+```
+If it says `done`, the worker deletes the message and stops. This absorbs redeliveries cheaply.
+
+**Step 11. The worker fetches only the keys this rung needs.**
+```
+GET /v1/ingest/jobs/812/keys?rung=720p      (mTLS, worker role)
+-> {"HD":{"kid":"9b1c...","key":"<hex>"}, "SD":{"kid":"3f2a...","key":"<hex>"}}
+```
+- An HD rung gets both keys: HD for video, SD for audio.
+- An SD rung (240p, 360p, 480p) gets only the SD key.
+- The keys stay in worker memory. They are never written to disk or logged.
+
+**Step 12. The worker computes its frame range.**
+```
+start_frame = 31 × 1440 = 44,640        start_time = 44,640 / 24 = 1,860.0 s
+segments    = 31 × 15 + 1 = 466  to  480
+```
+
+**Step 13. The worker range-reads its slice from the master.**
+```bash
+ffmpeg -ss 1860 -i "$PRESIGNED_MASTER_URL" -t 60 \
+  -vf scale=-2:720 -c:v libx264 -b:v 2350k -maxrate 2500k -bufsize 5000k \
+  -g 96 -keyint_min 96 -sc_threshold 0 -c:a aac -b:a 128k \
+  -f mp4 -movflags +frag_keyframe+empty_moov  work/720p.mp4
+```
+What ffmpeg does:
+1. It reads the file's index with a few small range requests.
+2. It jumps to the byte offset for frame 44,640. The seek is exact because every ProRes frame is independent.
+3. It reads about 1.7 GB of frames, then stops after 60 seconds.
+4. It never downloads the whole 100 GB.
+
+The master is read directly, so there is no `chunks` bucket and no intermediate copy.
+
+**Step 14. The worker packages and encrypts.**
+```bash
+packager in=work/720p.mp4,stream=video,init_segment=init.mp4,segment_template=out/seg_$Number%05d$.m4s,label=HD \
+         in=work/720p.mp4,stream=audio,segment_template=out/aud_$Number%05d$.m4s,label=SD \
+  --protection_scheme cbcs --enable_raw_key_encryption \
+  --keys label=HD:key_id=9b1c...:key=<hex>,label=SD:key_id=3f2a...:key=<hex> \
+  --clear_lead 0
+```
+Exact flags vary by tool. The rules do not:
+- Segments are numbered from 466 and timestamps continue from 1,860 s, so there is no stitching later.
+- The IV is constant per rung, so a retried task produces byte-identical output.
+- Video uses the tier's key. Audio always uses the SD key.
+- Only chunk 0 uploads `init.mp4`. It carries the `pssh` and `tenc` boxes, which hold the KID and never the key.
+
+**Step 15. The worker uploads the segments.**
+```
+titles/4411/v1/720p/seg_00466.m4s ... seg_00480.m4s
+Cache-Control: public, max-age=31536000, immutable
+```
+- Keys are deterministic, so a retry overwrites the same objects.
+- An S3 PUT is all-or-nothing, so there are no half-written objects.
+- The worker discards its temp files.
+
+**Step 16. The worker reports the task done.**
+```
+POST /v1/ingest/jobs/812/tasks/31/720p/done
+```
+It reports only after every upload succeeded.
+
+**Step 17. The Coordinator records it idempotently.**
+```sql
+WITH t AS (
+  UPDATE transcode_tasks SET status = 'done'
+  WHERE job_id = 812 AND chunk_idx = 31 AND rung = '720p' AND status <> 'done'
+  RETURNING 1)
+UPDATE transcode_jobs
+SET done_tasks = done_tasks + (SELECT count(*) FROM t), updated_at = now()
+WHERE job_id = 812
+RETURNING done_tasks, total_tasks;
+```
+A duplicate adds zero. If the result shows `done_tasks = total_tasks`, this same handler continues into finalize (Step 20).
+
+**Step 18. The worker deletes the SQS message** after the Coordinator returns 200.
+
+### What can fail in the encode phase
+
+| Failure | What happens |
+|---|---|
+| Worker crashes before upload | Heartbeat stops. The message reappears within 3 minutes. Another worker redoes only this task. |
+| Spot reclaim warning | The worker kills ffmpeg and sets visibility to 0. Redelivery is immediate. |
+| Crashes after upload, before callback | Redelivered. The re-encode overwrites the same keys. The callback is idempotent. |
+| Callback succeeded, delete failed | Redelivered. Step 10 sees `done`, so the worker just deletes. |
+| ffmpeg hangs, process alive | No progress, so the worker kills it and stops extending. Redelivery follows. |
+| Master range read fails mid-task | ffmpeg errors. The task fails and retries. |
+| Coordinator is down | The worker does not delete. The message returns and retries later. |
+| Poison task (corrupt frames) | After 5 receives it goes to `encode-tasks-dlq` and an alert fires. The job stays `encoding`. |
+| Whole job stalls | No `updated_at` movement for 30 minutes marks it `failed` and alerts. |
+
+Spot reclaims count as receives, so `maxReceiveCount` is 5, not 3. A DLQ entry means "investigate", not "bad data".
+
+## Phase D: finalize (make the title ready)
+
+The Coordinator runs this inside the handler that saw `done_tasks = total_tasks`.
+
+**Step 19. Claim the finalizer role.**
+```sql
+UPDATE transcode_jobs SET status = 'finalizing'
+WHERE job_id = 812 AND status = 'encoding' AND done_tasks = total_tasks
+RETURNING job_id;
+```
+Exactly one caller gets a row. The rest stop.
+
+**Step 20. Verify S3.**
+For each of the five rungs, list `titles/4411/v1/{rung}/`. Expect `init.mp4` plus segments numbered 1 to 900.
+
+**Step 21. Repair if anything is missing.**
+1. Work out which chunk indexes are absent from the segment numbers.
+2. Set those tasks back to `pending`, decrement `done_tasks`, and set the job back to `encoding`.
+3. Re-enqueue only those tasks and stop. Finalize reruns when they finish.
+
+**Step 22. Write the media playlists.**
+Each rung gets a `playlist.m3u8`:
+```
+#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-TARGETDURATION:4
+#EXT-X-MAP:URI="init.mp4"
+#EXT-X-KEY:METHOD=SAMPLE-AES,URI="data:text/plain;base64,<pssh>",
+  KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",KEYID=0x9b1c...
+#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://9b1c...",
+  KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1"
+#EXTINF:4.000,
+seg_00001.m4s
+...
+#EXT-X-ENDLIST
+```
+The header is `Cache-Control: public, max-age=86400`. The lines name the KID and the DRM systems. They never contain a key.
+
+**Step 23. Write `master.m3u8`** with the five `STREAM-INF` entries, header `max-age=3600`.
+
+**Step 24. Flip the pointer, last, in one transaction.**
+```sql
+BEGIN;
+UPDATE titles SET manifest_key = 'titles/4411/v1/master.m3u8', asset_version = 1
+WHERE title_id = 4411 AND asset_version <= 1;
+UPDATE transcode_jobs SET status = 'done' WHERE job_id = 812;
+COMMIT;
+```
+Before this commit, no viewer path can see the title. After it, the title is playable, subject to the release gate below.
+
+If the Coordinator dies mid-finalize, the job stays `finalizing`. A watchdog reruns any job stuck there for 5 minutes. Every step is idempotent, so a rerun is safe.
+
+### A gap I found: release time
+
+In V9 the home builder and playback check `manifest_key IS NOT NULL`, but nothing checks `release_at`. A title finalized on Tuesday would show on every home page on Tuesday. Fixes:
+1. The builder query, the playback endpoint, and the license token minting all add `AND release_at <= now()`.
+2. The catalog version is bumped at release time, not at finalize time. A scheduled job runs `UPDATE catalog_meta SET version = version + 1` at `release_at`. Finalize does not bump it for unreleased titles.
+3. The Fill Controller still uses `manifest_key IS NOT NULL` and a 72-hour look-ahead on `release_at`, so appliances are pre-warmed before release.
+
+## Phase E: the title reaches viewers
+
+**Step 25. S3 replication copies the objects** from Mumbai to the Frankfurt and Virginia buckets. It is usually quick. If a regional Shield asks for an object that has not arrived, it gets a 404 and falls back to Mumbai for that one object (V10).
+
+**Step 26. The Fill Controller plans (22:00 UTC).**
+It reads titles where `manifest_key IS NOT NULL` and `release_at` is within 72 hours. These get the +10⁹ score and top every appliance's `fill_plan`. This is why finalizing days early matters: a title not finalized by Thursday night cannot be in Thursday's plan.
+
+**Step 27. Each fill agent fetches it, 02:00 to 08:00 local.**
+1. The agent polls `GET /v1/fill-plan?appliance_id=...` and sees title 4411, version 1.
+2. It reads the master playlist, then each rung playlist, to list every object.
+3. It fetches them from the PoP edge at up to 5 Gbps. It authenticates with its appliance mTLS certificate, not a viewer token.
+4. On a cold PoP, the edge asks the Shield, and the Shield asks S3.
+5. The agent writes ciphertext to `/data/video/titles/4411/v1/...`.
+
+**Step 28. The agent reports inventory.**
+```
+POST /v1/appliances/bom1-fnet-07/inventory   {"added":[4411],"removed":[]}
+```
+The Steering Service runs `SADD inv:{id} 4411`. From now on the box is a steering candidate for this title.
+
+**Step 29. At `release_at`, the catalog version bumps.**
+1. The scheduled job runs `UPDATE catalog_meta SET version = version + 1` on the Mumbai primary.
+2. Replicas apply it. Each regional Invalidator sees it within about 2 seconds, sets its local `catalog:version`, and warms `home:v{new}:{region}`.
+3. The title appears on home pages. Playback now works.
+
+## The whole write flow in one diagram
+
+```mermaid
+sequenceDiagram
+    participant ST as Studio / Admin
+    participant S3M as S3 masters
+    participant CO as Ingest Coordinator
+    participant PG as Postgres
+    participant KMS as KMS
+    participant Q as SQS encode-tasks
+    participant W as Encode Worker
+    participant S3V as S3 video-origin
+    participant FC as Fill Controller
+    participant FA as Fill Agent
+    participant PE as PoP Edge
+    participant SS as Steering Service
+    ST->>S3M: upload master (multipart)
+    ST->>PG: INSERT titles (manifest_key NULL), title_regions
+    ST->>CO: POST /v1/ingest/jobs
+    CO->>S3M: HEAD + ffprobe via range reads
+    CO->>KMS: wrap two new keys
+    CO->>PG: one transaction: job, 300 tasks, content_keys
+    CO->>Q: enqueue 300 encode messages (batches of 10)
+    W->>Q: receive (visibility 180 s + progress heartbeat)
+    W->>CO: GET task status (already done?)
+    W->>CO: GET keys for this rung (mTLS)
+    W->>S3M: range GET, frames 44640 to 46079 only
+    W->>W: encode, encrypt cbcs, package 15 segments
+    W->>S3V: PUT seg_00466 to seg_00480 (+ init.mp4 if chunk 0)
+    W->>CO: POST task done
+    CO->>PG: conditional UPDATE, done_tasks + 1
+    W->>Q: delete message
+    Note over CO: done_tasks = total_tasks
+    CO->>PG: claim finalizing
+    CO->>S3V: list, verify 900 segments per rung
+    CO->>S3V: write rung playlists, then master.m3u8
+    CO->>PG: UPDATE titles.manifest_key, job done
+    FC->>PG: plan fill_plan (release within 72 h)
+    FA->>PG: poll fill_plan
+    FA->>PE: fetch ciphertext (mTLS, 02:00-08:00)
+    PE->>S3V: cold fill via Shield
+    FA->>SS: POST inventory added 4411
+    Note over PG: at release_at, scheduled job bumps catalog_meta.version
+```
+
+## Who writes, who reads
+
+| Structure | Who writes, and when | Who reads, and when |
+|---|---|---|
+| S3 `masters` | Studio, at delivery | Coordinator (ffprobe), encode workers (range reads) |
+| `titles` row | Admin (create). Coordinator (`manifest_key`, at finalize) | API Server, Fill Controller, home builder |
+| `transcode_jobs`, `transcode_tasks` | Coordinator only: plan, task callbacks, finalize | Coordinator. Workers read task status through its API. |
+| `content_keys` | Coordinator, in the plan transaction | Coordinator (serves workers), License Service |
+| SQS `encode-tasks` | Coordinator, at plan time and by the sweep | Encode workers |
+| S3 `video-origin` segments, `init.mp4` | Encode workers | Coordinator (verify), Shield cache |
+| S3 `video-origin` playlists | Coordinator, at finalize only | Shield cache, then edges and appliances |
+| `fill_plan` | Fill Controller, nightly | Fill agents |
+| Appliance disk | Fill agents | Clients |
+| Redis `inv:{id}` | Steering Service, on inventory report | Steering Service, on every steer |
+| `catalog_meta.version` | Scheduled release job | Regional Invalidators, every 2 s |
+
+## Rough timeline for this 60-minute episode
+
+| Phase | Time |
+|---|---|
+| Validate and plan (Steps 4-8) | A few seconds |
+| Encode, 300 tasks on about 100 workers, about 3 waves (Steps 9-18) | 6 to 10 minutes |
+| Finalize (Steps 19-24) | Under a minute |
+| S3 replication (Step 25) | Minutes |
+| Wait for the nightly fill (Steps 26-28) | Until the next 02:00 local |
+| Wait for release (Step 29) | Until `release_at` |
+
+## Rules that hold it together
+
+1. **Every worker write uses a deterministic key,** so retries overwrite.
+2. **Every state change is a conditional update,** so duplicates add zero.
+3. **Only the Coordinator changes state and enqueues,** so the database and queue can't disagree. The sweep covers the one crash window.
+4. **Playlists and `manifest_key` are written last,** so viewers never see a half-built title.
+5. **Keys exist in plaintext only in KMS, the Coordinator and worker memory,** never on disk or in the cache tier.
+6. **A chunk is always a whole number of segments,** so no stitching exists anywhere.
+
+**Interview-arc sentence:** *"If asked how you ingest a season: one box takes 60 hours and loses hours to a crash, so the Coordinator probes the intra-coded master once, writes a task per 1,440-frame chunk and rung in one transaction, and workers range-read only their own frames, encrypt, and write deterministic keys. Duplicates are harmless because every write is idempotent, and the manifest pointer flips only after every segment is verified."*
+
+If you want to test this, say "mock interview" and I'll ask you to walk me through the write flow cold, with follow-ups on failures.
 
 
 
