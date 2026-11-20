@@ -3837,7 +3837,400 @@ The agent sends a goodbye on graceful shutdown, so scale-ins become RETIRED imme
 
 
 
+## V10: Back Up Sealed Blocks Outside the Region
 
+V10 has one job: recover a cell's history after its region is destroyed. Replicas (V5) and federation (V8) don't cover that case. Alerting stays cut, since it is P2.
+
+A bank keeps your money in one vault. It also keeps a sealed copy of the ledger in another city. The copy is never the live book. It holds only finished, sealed pages, so every page is complete and checkable.
+
+## Break It
+
+Wednesday, 9:20am. A flood takes out the Mumbai data center. All three AZs of ap-south-1 are in one metro, so all three flood. The facility is out for about 3 weeks.
+
+Everything on disk is destroyed:
+- All 3 TSDB replicas, so all copies of the cell's history.
+- Kafka, which held only the last 6 hours (V2).
+- etcd, Redis and Postgres.
+
+A cell holds about **0.7 TB** of unique data: 15 days raw (about 0.33 TB), 90 days of 5m (about 0.27 TB), 400 days of 1h (about 0.1 TB). On disk, that is 3 copies, about 2.1 TB, and all of it is gone.
+
+Our config survives, because it lives in git: the IaC, `cells.yaml` and the shard map. We can rebuild an empty cell in about 45 minutes.
+
+An empty cell is not enough. Priya's Black Friday capacity review needs Mumbai's checkout CPU for the last two Black Fridays. That is a 1h-tier read from 12 months ago. It is a blank chart, and it will stay blank. V8's federation shows `partial: true, missing_cells: ["ap-south-1"]`. It can hide a dead region. It cannot bring the region's history back.
+
+This is the crux, so let's walk the naive attempts.
+
+### Attempt 1: Nightly disk snapshots
+
+It looked reasonable because it is standard and needs no code. It breaks in three ways:
+- **Wasteful.** We snapshot all 3 replicas, so we pay to store the same 0.7 TB three times.
+- **Torn.** A snapshot of a live disk is crash-consistent. It catches WAL, head and half-written blocks mid-flight.
+- **Stale.** Recovery point is up to 24 hours, and a snapshot is tied to one replica's disk layout.
+
+### Attempt 2: Mirror Kafka to another region
+
+Meera: "We already have Kafka. Mirror `metrics.raw` to Dublin and keep it there."
+
+Arjun: "Keep it for how long? Retention is 6 hours. To hold 400 days of raw samples, that is about 9 TB a cell. With RF=3, about 26 TB."
+
+Meera: "So we keep 15 days."
+
+Arjun: "Then it holds raw only. We would replay and re-roll everything to rebuild the 1h tier."
+
+It looked reasonable because the log is already there and it is continuous. It breaks because we would be keeping raw samples for 400 days. That is the same cost V3 rejected.
+
+### Attempt 3: Warm standby cell in a buddy region
+
+It looked reasonable because it is the classic disaster-recovery pattern. It breaks in two ways:
+- **Cost.** It is a second full cell, idle until the day we need it.
+- **History.** It consumes a mirrored Kafka, so it also only has the last 6 hours. It never got the old history.
+
+V8 adds a third problem. If the standby ever served queries, it would hold the same series as the primary. Federation would double-count them. V8 depends on every series having one owner.
+
+### The real fix: back up the blocks we already seal
+
+Look at what we already have:
+- **Immutable.** A sealed block never changes (V1, V3).
+- **Deterministic.** Block IDs are `{resolution}-{minTime}` and the content is identical on every replica (V5).
+- **Verifiable.** Each has a `sha256` (V5).
+- **Already compressed**, and sealed every 2 hours.
+
+That is exactly the shape an object store wants: big, write-once files that are checked by hash. There is no WAL to snapshot and no log to mirror.
+
+Think of the sealed envelope again. We never copy the open page. We copy each envelope after it is closed.
+
+### Options compared
+
+| Option | Recovery point (RPO) | Restore | Storage per cell | Verdict |
+|---|---|---|---|---|
+| Nightly disk snapshots | Up to 24h | Replica-specific | 2.1 TB (3 copies) | Rejected |
+| Mirror Kafka | 6h of raw only | Re-ingest and re-roll | 9 TB raw or more | Rejected |
+| Warm standby cell | Seconds, but only 6h of history | Fast, but no old data | A whole second cell | Rejected |
+| **Sealed blocks to object storage** | **About 2h** | **Copy blocks back, no re-indexing** | **0.7 TB, one copy** | **Chosen** |
+
+## Solve It
+
+**Decision:** every sealed block in all three tiers is uploaded once to an object-storage bucket **in another region**.
+
+- **Which region?** A ring. ap-south-1 backs up to a bucket in eu-west-1, eu-west-1 to us-east-1, and us-east-1 to ap-south-1. No new regions are needed. A bucket lives in the object store, so it does not depend on the buddy cell being up.
+- **Which tiers?** All three. Raw is only 22 GB a day per cell. The whole upload is about **25 GB per day** per cell, which costs tens of dollars a month.
+- **Not backed up:** the WAL, the head and Kafka. That is the next 2 hours of data plus the Kafka window. This is the recovery-point cost.
+
+**Storage class justification:** a blob store. The data is large, written once, read rarely, and needs very high durability at the lowest price per GB. A block-device snapshot is tied to one disk, and a database adds nothing here.
+
+- ✅ **What we gained**
+  - A cell survives total loss of its region with a known recovery point.
+  - We store one copy (0.7 TB), not three.
+  - Restore needs no re-indexing. Series IDs are `hash64(labels)` (V5), so block indexes work as they are.
+  - It also protects against a bug or a bad operator command. Replication copies a corruption to all three replicas, and determinism makes a rollup bug identical on all of them. A versioned bucket in a separate account does not.
+- ⚠️ **What we gave up / new problems**
+  - **Recovery point is about 2 hours, not zero.** We lose the newest unsealed head, plus the 6h of Kafka that is in the same flooded region.
+  - **Restore is not instant.** About 2 hours end to end (numbers below).
+  - **An untested backup is not a backup.** We must run restore drills.
+  - A new dependency and cross-region traffic (about 25 GB per day per cell).
+  - **Dashboards during restore are incomplete,** and the V7 cache could remember that emptiness. We handle this explicitly.
+  - The `kafkaOffsetEnd` inside a restored block refers to the dead Kafka cluster. Restore must ignore it.
+- ❌ **What we considered and rejected**
+  - Nightly disk snapshots, Kafka mirroring and a warm standby: covered above.
+  - Writing every sample to object storage as it arrives: too many tiny files, and it duplicates the Kafka log.
+  - Streaming the WAL to the bucket every minute: it would cut the recovery point to minutes. It is a valid upgrade, and it adds a new uploader and replay path. A few hours of loss is acceptable for monitoring.
+  - Cross-region copies of all 3 replicas: pays 3x for identical data.
+
+### Who uploads? A known sub-problem
+
+Three replicas hold the same block. If all three upload, we triple the WAN cost. If we pick one fixed uploader and it is down, nothing is backed up until someone notices. These are the real fixes:
+
+| Option | Mechanism | Cost |
+|---|---|---|
+| All replicas upload | Each does its own `PUT` | 3x WAN and request cost |
+| One fixed uploader | One replica owns all uploads | If it is down or slow, the backup stops silently |
+| **Designated uploader by hash, others verify later** | `replica = hash(block_id) % 3` uploads right away. The other two check after 30 minutes and upload only if it is missing. | One cheap `HEAD` per block per replica |
+
+Pick the third.
+
+### Recovery numbers
+
+| Stage | Time | Why |
+|---|---|---|
+| Empty cell by IaC | about 45 min | Kafka, etcd, nodes, Redis, Postgres, balancers |
+| 1h tier (0.1 TB) | about 8 min | At about 200 MB/s over the WAN |
+| 5m tier (0.27 TB) | about 22 min | Same rate |
+| Raw tier (0.33 TB) | about 28 min | Same rate |
+| Replicas 2 and 3 | about 12 min | Copy from the first restored replica inside the region, at about 1 GB/s |
+
+Quarter-and-year charts are back at about **1 hour**. Everything is back at about **2 hours**. We restore coarse tiers first, because a long-range chart needs very little data. Live ingest runs from minute 45, so new data is never waiting on the restore.
+
+## Implement It
+
+### Object layout (first appearance)
+
+The resolution comes first in the key so that bucket lifecycle rules can filter by prefix.
+
+```
+s3://backup-<cell>/v1/<resolution>/<vshard>/<block_id>/
+    meta.json
+    index
+    chunks/000001
+    MANIFEST.json        <- written last: the commit marker
+```
+
+```json
+// MANIFEST.json
+{ "block_id": "raw-1763424000", "vshard": 12, "resolution": "raw", "format": 1,
+  "minTime": 1763424000, "maxTime": 1763431200, "kafkaOffsetEnd": 88123411,
+  "files": [ {"name":"meta.json",      "size":212,       "sha256":"a1..."},
+             {"name":"index",          "size":48211934,  "sha256":"7c..."},
+             {"name":"chunks/000001",  "size":517734400, "sha256":"9f..." } ] }
+```
+
+A block without a `MANIFEST.json` does not exist as far as restore is concerned. A crash mid-upload leaves harmless orphan files.
+
+### Bucket settings
+
+```json
+{ "Versioning": "Enabled",
+  "Lifecycle": [
+    {"Prefix":"v1/raw/", "ExpireDays": 17},     // 15d retention + 2d margin
+    {"Prefix":"v1/5m/",  "ExpireDays": 92},
+    {"Prefix":"v1/1h/",  "ExpireDays": 402}
+  ],
+  "Policy": "deny s3:DeleteObject* for every principal except the lifecycle service" }
+```
+
+The bucket is in a separate cloud account. Only the TSDB uploaders can write, and only the restore role can read. A compromised cell cannot delete its own backups.
+
+### Who writes / who reads
+
+| Structure | Who writes, and when | Who reads, and when | Lives in |
+|---|---|---|---|
+| Backup block objects and `MANIFEST.json` | The TSDB node's backup uploader, after each block seals (designated replica at once, others after 30 min if missing) | Restore job on a rebuilt cell, plus the monthly drill | Object storage bucket `backup-<cell>`, in the buddy region |
+| `backup_lag_seconds{vshard,tier}` | Uploader, after each upload, as an ordinary metric through the normal pipeline | The platform team's own health dashboard | TSDB, like any metric |
+| `/tsdb/restore` state `{"active":true,"frontier":{...}}` | Restore job, as it progresses | Query API on each cell query | etcd, in the cell |
+
+### Upload path (new, background)
+
+Triggered when a flush or rollup job (V3) seals a block. The uploader runs in each TSDB node.
+
+1. The node reads the shard map and picks the designated replica:
+
+```python
+def on_block_sealed(blk):
+    reps = sorted(ready_replicas(blk.vshard))          # from the shard map (V5)
+    first = reps[hash64(blk.id) % len(reps)] == NODE_ID
+    schedule(upload_if_missing, blk, delay=0 if first else 1800)   # 30 min grace
+```
+
+2. It uploads the data files first and the manifest last, using put-if-absent:
+
+```python
+def upload_if_missing(blk):
+    key = f"v1/{blk.res}/{blk.vshard}/{blk.id}"
+    if s3.exists(f"{key}/MANIFEST.json"):
+        return                                          # someone already finished it
+    files = []
+    for f in blk.files():                               # meta.json, index, chunks/*
+        s3.put(f"{key}/{f.name}", f.stream, sha256=f.sha256, if_none_match="*")
+        files.append({"name": f.name, "size": f.size, "sha256": f.sha256})
+    s3.put(f"{key}/MANIFEST.json", manifest_json(blk, files), if_none_match="*")
+    emit("backup_lag_seconds", now() - blk.maxTime, vshard=blk.vshard, tier=blk.res)
+```
+
+3. **Branch: two replicas race.** Both upload byte-identical files (V5). The second `if_none_match` fails harmlessly.
+4. **Branch: upload fails.** Retry with exponential backoff and jitter. The block stays on local disk, so it is never deleted before it is backed up. Retention (V3) now also checks for the manifest.
+5. The 5m and 1h blocks upload on the same path after the rollup job creates them.
+
+```mermaid
+sequenceDiagram
+    participant F as Flush + rollup job
+    participant D as tsdb-b2 (designated by hash)
+    participant S as Backup bucket (buddy region)
+    participant O as tsdb-a1 (other replica)
+
+    F->>D: block raw-1763424000 sealed
+    F->>O: block raw-1763424000 sealed
+    D->>S: PUT meta.json, index, chunks (if-none-match)
+    D->>S: PUT MANIFEST.json (last)
+    D->>D: emit backup_lag_seconds
+    Note over O: waits 30 min
+    O->>S: HEAD MANIFEST.json
+    S-->>O: exists, skip
+```
+
+### Restore path (new, runbook for a destroyed cell)
+
+1. **Provision.** IaC rebuilds an empty cell under the same cell ID `ap-south-1`. The ID is a logical name, and DNS points it at the new infrastructure. The shard map is regenerated from git, with all replicas `bootstrapping`.
+2. **Open ingest at once.** Agents resume pushing to the new cell. The Writers consume the new Kafka from offset 0. Health Tracker (V9) rebuilds `source_state` from the first push of every agent, in about a minute.
+3. **Set the restore flag** in etcd: `/tsdb/restore {"active": true}`.
+4. **Restore one replica, coarse tiers first:**
+
+```python
+def restore_vshard_tier(vs, tier):
+    manifests = list_manifests(f"v1/{tier}/{vs}/")                 # only keys with MANIFEST.json
+    manifests.sort(key=lambda m: m.maxTime, reverse=(tier == "raw"))   # raw newest first
+    for m in manifests:
+        tmp = f"/data/vs-{vs}/{tier}/.tmp-{m.block_id}"
+        for f in m.files:
+            download(f"v1/{tier}/{vs}/{m.block_id}/{f.name}", tmp)
+            assert sha256_of(tmp, f) == f.sha256                   # verify every file
+        os.rename(tmp, f"/data/vs-{vs}/{tier}/{m.block_id}")       # appears atomically
+        tsdb.reload_blocks(vs)
+        # kafkaOffsetEnd is ignored: it belongs to the dead cluster
+```
+
+Order: all 24 vshards of `1h`, then `5m`, then `raw`. Blocks are verified against the manifest. A mismatch retries once and then aborts the restore for that block.
+
+5. **Copy to the other two replicas.** They use V5's bootstrap block copy from the restored peer, inside the region.
+6. **Clear the flag** when every manifest is restored. Then bump the V7 cache key prefix from `v1` to `v2`.
+
+```mermaid
+sequenceDiagram
+    participant I as IaC pipeline
+    participant C as New cell (empty)
+    participant R as Restore job (tsdb-a1)
+    participant S as Backup bucket
+    participant P as Peers tsdb-b1, tsdb-c1
+
+    I->>C: provision cell ap-south-1 (shard map from git)
+    C->>C: agents push, Writers consume from offset 0
+    I->>R: start restore (flag active=true)
+    loop tier 1h, then 5m, then raw
+        R->>S: list MANIFEST.json, download files
+        R->>R: verify sha256, rename into place, reload_blocks
+    end
+    R->>P: bootstrap block copy (V5), in-region
+    P-->>R: replicas ready
+    R->>C: flag active=false, bump cache prefix to v2
+```
+
+### Read path while restoring (changed in the cell coordinator)
+
+The API call is unchanged. One rule is added. While `/tsdb/restore.active` is true:
+
+1. The cell coordinator reads the segment cache as usual, but writes nothing to it. A sealed segment that happens to be empty must not be cached for 24 hours.
+2. The cell response gets `"restoring": true`. The global coordinator turns it into a banner: "history for ap-south-1 is still restoring".
+3. When the flag clears and the prefix moves to `v2`, any stray entry is dead. This is V7's emergency switch, used on purpose.
+
+### Restore drill (new, monthly)
+
+1. A job picks one random vshard and a random 30-day range.
+2. It restores that vshard from the bucket onto a scratch node.
+3. It runs the same query on the scratch node and on a live replica. The merged `count` and `sum` must match.
+4. It reports pass or fail. A failing drill is a priority incident.
+
+## Current State After V10
+
+The cells `eu-west-1` and `us-east-1` are identical to `ap-south-1`, including uploaders. Only `ap-south-1` is drawn in full.
+
+```mermaid
+graph TB
+    UI["Dashboard UI"] -->|"GET /v1/query, /v1/health/*"| DNS["Latency-based DNS with health checks (V8)"]
+    DNS --> LBQ1
+    DNS --> LBQ2
+    DNS --> LBQ3
+    CFG["cells.yaml (V8)"] -.-> QA1
+
+    subgraph C1["Cell ap-south-1 (V8): full stack"]
+        AG1["Agents: host / container / app, final push on SIGTERM (V9)"] -->|"POST /v1/ingest"| LBI1["Ingest L7 LB, 3 AZs (V6)"]
+        LBI1 --> ING1["Ingest API pool: stamps cell label, passes final flag (V6, V8)"]
+        ING1 -->|"produce acks=all, partition=vshard(src)"| K1[("Kafka metrics.raw: 24 partitions, RF=3, LogAppendTime (V9), plus DLQ")]
+        K1 --> T1["TSDB nodes in 3 AZs: 24 vshards x 3 replicas, WAL, head, raw / 5m / 1h blocks, repair, sealed_until, backup uploader ← changed in V10"]
+        K1 -->|"group health-tracker"| HT1["Health Tracker: 3 instances (V9)"]
+        HT1 -->|"up=1/0 every 10s"| K1
+        HT1 -->|"state transitions"| PG1[("Postgres: source_state, tracker_status (V9)")]
+        E1[("etcd: shard map (V5), restore flag ← new in V10")] -.-> T1
+        LBQ1["Query L7 LB (V6)"] --> QA1["Query API pool: cell coordinator, global mode, health endpoints, restoring flag ← changed in V10"]
+        QA1 <--> R1[("Redis segment cache (V7)")]
+        QA1 -->|"select_partial on miss"| T1
+        QA1 --> PG1
+        E1 -.-> QA1
+        AS1["Autoscaler (V6)"] -.-> ING1
+        AS1 -.-> QA1
+    end
+
+    subgraph C2["Cell eu-west-1: identical stack, incl. uploaders ← new in V10"]
+        S2["Ingest, Kafka, TSDB, Health Tracker, Postgres, etcd, Redis, Query API"]
+    end
+    subgraph C3["Cell us-east-1: identical stack, incl. uploaders ← new in V10"]
+        S3["Ingest, Kafka, TSDB, Health Tracker, Postgres, etcd, Redis, Query API"]
+    end
+    LBQ2["Query LB, eu-west-1"] --> S2
+    LBQ3["Query LB, us-east-1"] --> S3
+    QA1 -.->|"POST /internal/cell/query and /health over WAN, 2s timeout (V8)"| LBQ2
+    QA1 -.-> LBQ3
+    S2 -.->|"same cross-cell fan-out from every region"| LBQ1
+    S3 -.-> LBQ1
+
+    BK1[("Bucket backup-ap-south-1, stored in eu-west-1 ← new in V10")]
+    BK2[("Bucket backup-eu-west-1, stored in us-east-1 ← new in V10")]
+    BK3[("Bucket backup-us-east-1, stored in ap-south-1 ← new in V10")]
+    T1 -->|"sealed blocks + MANIFEST, hash-designated uploader ← new in V10"| BK1
+    S2 -->|"sealed blocks"| BK2
+    S3 -->|"sealed blocks"| BK3
+    BK1 -.->|"restore after region loss, coarse tiers first ← new in V10"| T1
+```
+
+**Every current flow:**
+
+*Write path (unchanged from V9)*
+1. The agent samples every 10s and POSTs to its home cell, with jittered retry. On `SIGTERM` it sends a final push with `final: true`.
+2. The cell's balancer picks the lighter of two random ready Ingest instances.
+3. The instance validates, overwrites the `cell` label, produces to `metrics.raw` at partition `vshard(src_id)` with `acks=all`, and returns `204`.
+4. Each of the 3 replicas of that vshard reads the partition, applies the series cap, appends to WAL and head, syncs and commits its own offset. Duplicates are dropped.
+
+*Health detection (unchanged from V9)*
+1. The Health Tracker keeps `last_seen` per source and a watermark per partition. A quiet partition makes its sources UNKNOWN.
+2. On a state change it updates `source_state` and emits `up` samples through the normal pipeline.
+
+*Cell-local read path (changed)*
+1. The coordinator plans the tier, cuts aligned segments, and reads Redis with one `MGET`.
+2. On a miss, it takes the lease, fans out to one replica per vshard (hedged), stores complete segments, stitches, clips to the lowest watermark, and returns the partials.
+3. While a restore is active, it stores nothing in Redis and sets `restoring: true`.
+
+*Global read path (unchanged from V8)*
+1. DNS sends the user to the nearest healthy region. That instance fans out to all cells and merges, flagging `missing_cells`.
+
+*Fleet view and health trend (unchanged from V9)*
+
+*Flush, rollup and retention (changed)*
+1. Each replica cuts a 2h block, builds 5m and 1h rollups, and deletes by tier retention. A block is deleted locally only after its manifest exists in the bucket.
+
+*Backup upload (new)*
+1. The hash-designated replica uploads data files then `MANIFEST.json` with put-if-absent. The other two verify after 30 minutes. The bucket lives in the buddy region.
+
+*Region destroyed: rebuild and restore (new)*
+1. Provision an empty cell with IaC under the same ID, open ingest, restore 1h then 5m then raw from the bucket, bootstrap the other two replicas from the first, clear the flag, bump the cache prefix.
+
+*Restore drill (new)*
+1. Monthly, restore one vshard and range to a scratch node, and compare query results with a live replica.
+
+*Repair, bootstrap, vshard move, node restart: unchanged from V4 and V5.*
+
+*Autoscaling, rolling deploys, instance failure: unchanged from V6.*
+
+*Region dark but not destroyed: unchanged from V8. It comes back with its disks, and there is no restore.*
+
+## Interview Follow-ups
+
+**Q: You already have three replicas in three AZs. Why isn't that enough?**
+Replicas protect against a node or an AZ. They do not protect against losing the region, and they replicate mistakes. A bad retention job, a rollup bug or an operator deleting data hits all three copies. Because replicas are deterministic, a bug is identical on all of them. A versioned bucket in a separate account, in another region, survives all of that.
+
+**Q: A 2-hour recovery point seems large. Can you do better?**
+Yes. We could archive WAL segments to the bucket every minute and replay them after the block restore. That brings the loss to minutes. It also means a new uploader, a replay path and more bucket traffic. For 10-second monitoring data, losing 2 hours in a region-destroying event is a fair trade. I would ask the interviewer about their recovery objective before paying for it.
+
+## Recap
+
+| Concept | The Insight |
+|---|---|
+| Replicas are not backups | Three AZs protect against a node or zone. A flood, a bug or a bad delete hits all copies at once. |
+| Blocks are the backup unit | Sealed, immutable, deterministic and hash-checked blocks go to object storage as they are. No re-indexing. |
+| Manifest last | Upload data files, then the manifest. A block without a manifest does not exist. |
+| Designated uploader | The replica picked by `hash(block_id) % 3` uploads. The others check later. This avoids 3x cost and a single point of failure. |
+| Restore order | Coarse tiers first. A year-long chart needs 0.1 TB, so it is back in about an hour. |
+| Honest recovery | The cell says `restoring` and the cache writes nothing, so empty history is never remembered. |
+
+**Interview arc:** *"Three replicas in three AZs all die together when a region floods, and Kafka only holds 6 hours, so we upload every sealed block in all three tiers, with manifest-last commit and a hash-designated uploader, to a versioned bucket in a buddy region, and restore into a rebuilt cell coarse tiers first, accepting about 2 hours of data loss and about 2 hours to recover."*
+
+**Next:** the design is interview-complete for the scoped requirements. We do the final wrap-up: one full architecture diagram, every end-to-end path, the "why not X" arsenal, the master recap table, and an offer to run a mock interview. Say "next" when ready.
 
 
 
@@ -3881,7 +4274,232 @@ The agent sends a goodbye on graceful shutdown, so scale-ins become RETIRED imme
 
 
 
+## Final Wrap-Up
 
+## Full Architecture
+
+One cell is drawn in full. `eu-west-1` and `us-east-1` run the identical stack. The solid arrows are the write path. The dashed arrows are the read path, plus control and background traffic.
+
+```mermaid
+graph TB
+    UI["Dashboard UI"] --> DNS["Latency-based DNS with health checks"]
+    DNS --> LBQ["Query L7 LB: power-of-two least-request"]
+
+    subgraph CELL["Cell ap-south-1: self-contained, one of three"]
+        AG["Agents: host / container / app, push every 10s, final push on SIGTERM"] -->|"POST /v1/ingest, jittered retry"| LBI["Ingest L7 LB, 3 AZs"]
+        LBI --> ING["Ingest API pool: 6-24 stateless pods, stamps cell label"]
+        ING -->|"produce, acks=all, partition = vshard(src)"| KF[("Kafka metrics.raw: 24 partitions, RF=3, 6h, plus DLQ")]
+        KF -->|"each replica reads own partitions"| TS["TSDB nodes in 3 AZs: 24 vshards x 3 replicas. Writer, WAL, head, raw / 5m / 1h blocks, rollup job, repair, backup uploader"]
+        KF -->|"group health-tracker"| HT["Health Tracker x3: last_seen per source, partition watermarks"]
+        HT -->|"up=1/0 every 10s"| KF
+        HT --> PG[("Postgres: source_state, tracker_status")]
+        ETCD[("etcd: shard map with replica state, restore flag")] -.->|"watch"| TS
+        LBQ --> QA["Query API pool: 3-12 pods. Tier planner, segment cache logic, single-flight, hedged fan-out, global mode"]
+        QA <-.->|"MGET / SET segments, leases"| RC[("Redis segment cache, 4 GB LRU")]
+        QA -.->|"select_partial on cache miss, one replica per vshard"| TS
+        QA -.->|"fleet view"| PG
+        ETCD -.->|"watch"| QA
+        AS["Autoscaler: CPU target 50%"] -.-> ING
+        AS -.-> QA
+    end
+
+    CFG["cells.yaml in git"] -.-> QA
+    QA -.->|"POST /internal/cell/query, 2s timeout"| OTHER["Other cells: eu-west-1, us-east-1"]
+    OTHER -.->|"count / sum / min / max partials + watermark"| QA
+    TS -->|"sealed blocks + MANIFEST, hash-designated uploader"| BK[("Versioned bucket in buddy region, separate account")]
+    BK -.->|"restore after region loss: 1h, then 5m, then raw"| TS
+```
+
+## Every End-to-End Path
+
+### 1. Write path
+
+1. The agent samples the host every 10s and POSTs `/v1/ingest` to its home cell, with jittered retry.
+2. The L7 balancer picks the lighter of two random ready Ingest pods.
+3. The Ingest pod validates and overwrites the `cell` label.
+4. It produces to `metrics.raw` at partition `vshard(src_id)` with `acks=all`, then returns `204`.
+5. Each of the 3 replicas of that vshard reads the partition with its own consumer group.
+6. Each Writer applies the series cap, writes its WAL, appends to the head, and syncs.
+7. Each Writer commits its offset after the sync. Duplicates are dropped by idempotent append.
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant L as L7 LB
+    participant I as Ingest pod
+    participant K as Kafka partition
+    participant R as 3 TSDB replicas
+
+    A->>L: POST /v1/ingest
+    L->>I: lighter of two random
+    I->>K: produce acks=all, partition=vshard(src)
+    K-->>I: ack (2 in-sync replicas)
+    I-->>A: 204
+    par each replica independently
+        K-->>R: poll
+        R->>R: series cap, WAL, head append
+        R->>R: wal_sync, then commit offset
+    end
+```
+
+### 2. Health detection path
+
+1. The Health Tracker reads the same records in its own consumer group.
+2. It keeps `last_seen` per source and a watermark per partition, using broker time.
+3. Every 10s it judges silence against the partition watermark: 30s is STALE and 2 minutes with no goodbye is DOWN.
+4. A quiet partition makes its sources UNKNOWN, never DOWN.
+5. On a state change it upserts `source_state` in Postgres.
+6. It emits `up` samples back into `metrics.raw`, so they are stored like any metric.
+
+### 3. Cell-local read path
+
+1. The UI calls `GET /v1/query` through DNS and the Query L7 balancer.
+2. The Query pod plans the tier (raw, 5m or 1h) and rounds the step to the tier resolution.
+3. It cuts the range into aligned segments and reads them from Redis with one `MGET`.
+4. On a miss, it takes a lease, then fans out to one replica per vshard. A slow node is hedged to another replica.
+5. Each node returns `count`, `sum`, `min`, `max`, a watermark and `sealed_until`.
+6. The pod stores complete segments only: sealed ones with a long TTL, the head with 5s plus a 10s stale window.
+7. It stitches, clips to the lowest watermark, and computes `avg = sum / count`.
+
+### 4. Global read path
+
+```mermaid
+sequenceDiagram
+    participant U as Dashboard UI
+    participant Q as Query pod (nearest cell)
+    participant L as Local cell path
+    participant E as Cell eu-west-1
+    participant S as Cell us-east-1
+
+    U->>Q: GET /v1/query?service=checkout&start=-30d
+    Q->>Q: read cells.yaml, plan, single-flight
+    par fan out to all cells
+        Q->>L: in-process cell query (Redis, then TSDB on miss)
+        Q->>E: POST /internal/cell/query (2s timeout)
+        Q->>S: POST /internal/cell/query (2s timeout)
+    end
+    L-->>Q: partials + watermark
+    E-->>Q: partials + watermark
+    S--xQ: timeout (region dark)
+    Q->>Q: merge, clip to lowest watermark
+    Q-->>U: points, partial=true, missing_cells=[us-east-1]
+```
+
+### 5. Fleet health view
+
+1. The Query pod reads `tracker_status` to find partitions it can trust.
+2. It queries `source_state` and relabels rows on untrusted partitions as `unknown`.
+3. In global mode it sums per-cell counts and reports `missing_cells`.
+4. The trend chart is an ordinary query on `up`: `avg` for fraction up, `min` for blips.
+
+### 6. Background path: flush, rollup, retention, backup
+
+1. Every 2h, each replica cuts the head into a raw block, driven by the data watermark so replicas cut identically.
+2. The rollup job builds 5m blocks from raw, and 1h blocks from 5m, each with `count`, `sum`, `min`, `max`.
+3. The hash-designated replica uploads data files, then `MANIFEST.json`, to the buddy-region bucket. The others verify 30 minutes later.
+4. Retention deletes raw after 15 days, 5m after 90, 1h after 400, and only when the coarser tier and the backup manifest exist.
+5. Hourly, each replica diffs sealed-block hashes with its peers and copies any missing or mismatched block.
+
+### 7. Failure paths
+
+**TSDB node loss or replacement**
+1. Reads move to the other two replicas, with no `partial: true`.
+2. A replacement joins as `bootstrapping`, copies sealed blocks from a peer, and replays Kafka from the newest block's offset.
+3. It flips to `ready` when lag is under 5s.
+
+**Region dark**
+1. DNS health checks drop the region within about a minute.
+2. Other cells keep ingesting and serving. Global answers carry `missing_cells`.
+3. The region returns with its disks and rejoins when the circuit breaker closes.
+
+**Region destroyed**
+1. IaC rebuilds an empty cell under the same ID, and agents resume pushing.
+2. The restore job downloads 1h, then 5m, then raw blocks from the bucket and verifies every hash.
+3. The other two replicas copy from the first inside the region.
+4. The cell reports `restoring`, and the cache stores nothing until it finishes.
+
+## The "Why Not X" Arsenal
+
+1. **Why not stay on Postgres or Timescale?** A row per sample costs about 110 bytes. At 550K samples per second that is 5 TB a day. Per-series compression gets it to about 1.4 bytes per sample, and appends hit RAM and a WAL, not a B-tree.
+2. **Why push instead of pull?** Short-lived containers can die before a scraper reaches them. Push also needs no service discovery. The cost is protecting the ingest tier, which the durable log and autoscaling cover.
+3. **Why not quorum writes between TSDB nodes?** Kafka is already a durable, ordered log. Replicas that read the same partition end up identical, with no election and no extra write round trip. The cost is seconds of skew, which watermarks hide.
+4. **Why fixed vshards instead of `hash % N` or a ring?** `hash % N` remaps about 86% of sources on a resize. 24 fixed vshards, matching the Kafka partitions, move whole crates, about 12-17%, through a small etcd map.
+5. **Why not a CDN or browser cache?** The audience is about 600 internal engineers and the URL contains a moving `end`. We cache aligned segments in a shared Redis instead. Sealed segments never need invalidating.
+6. **Why not active-active across regions?** It triples storage and ships every sample over the WAN. A failed-over agent could put one series in two places and double-count it. Cells with one writer per series and federated partials avoid all of that.
+7. **Why store `count` and `sum`, not an average?** Averages can't be merged across buckets, shards or cells. `count` and `sum` merge exactly, and `min` and `max` keep spikes visible.
+8. **Why aren't three replicas a backup?** They die together in a regional disaster, and they copy a bad delete or a rollup bug to every copy. A versioned bucket in another account and region survives both.
+
+## Master Recap Table
+
+| Version | Concept | The Insight |
+|---|---|---|
+| V0 | A metric sample | Name, labels, timestamp and a number. That is the whole data model. |
+| V0 | Push agent | Short-lived containers can report before they die. Scrapers might miss them. |
+| V0 | First store | One relational table gives exact aggregates and simple SQL. |
+| V0 | Read path | A dashboard is a `GROUP BY` time bucket over a name and a time range. |
+| V1 | Series ID | Store labels once. Every sample carries only a small ID. |
+| V1 | Delta-of-delta and XOR | Regular timestamps and slow values compress to about 1.4 bytes per sample. |
+| V1 | Head and WAL | Writes become RAM appends plus sequential disk, with no random index updates. |
+| V1 | Inverted index | Label lookups are intersections of sorted ID lists. |
+| V1 | Trade | We gave up SQL and a safe single node for 11x writes and 75x less storage. |
+| V2 | Durable log | Bursts become lag, not loss. |
+| V2 | `acks=all` + `min.insync.replicas=2` | A `204` survives losing a broker. |
+| V2 | Commit after WAL sync | A crash between the two means a re-read, never a loss. |
+| V2 | Idempotent append | At-least-once delivery is safe when duplicates are ignored. |
+| V2 | Jittered backoff | Without jitter, 55,000 agents retry on the same tick. |
+| V3 | Rollups | Query cost is values read, so precompute the buckets. |
+| V3 | `count` + `sum`, not average | They merge forever. Averages never do. |
+| V3 | `min` and `max` | Spikes survive downsampling. |
+| V3 | Tier planner | Pick the coarsest tier that fits the step. A chart needs about 1,000 points. |
+| V3 | Histograms | Percentiles can't be rolled up, but bucket counts can. |
+| V4 | Stateful tier | You can't clone a TSDB. You must split its state. |
+| V4 | Shard key | `hash(source_id)` keeps a host on one shard and matches the Kafka key. |
+| V4 | Fixed vshards | 24 fixed crates move whole, instead of remapping 86%. |
+| V4 | Hotspot is cardinality | Write rate per source is even. Series count is not, so cap it. |
+| V4 | Mergeable partials | Fan-out works because shards return `count`, `sum`, `min`, `max`. |
+| V5 | Why replicate | This system is write-dominated, so replicas buy durability, not read scaling. |
+| V5 | Kafka as replication log | Same ordered input into three Writers gives three identical copies. |
+| V5 | Determinism | Series IDs and block cuts must depend on the log, not counters or clocks. |
+| V5 | Hash-diffed immutable blocks | Repair is a simple diff, and the majority hash wins. |
+| V5 | One replica per vshard | Merge one copy of each vshard, hedge slow ones, clip to the lowest watermark. |
+| V6 | Local state audit | List what each instance holds in RAM before scaling out. |
+| V6 | Single instance | A 20s deploy became a 4-minute retry storm at 213% of capacity. |
+| V6 | L7 per request | Agents reuse connections, so only per-request balancing feeds new pods. |
+| V6 | Power of two choices | Pushes cost 100x apart. Pick the lighter of two random pods. |
+| V6 | Headroom and rolling deploys | Autoscaling lags, so keep 2x headroom and never drain more than 25%. |
+| V6 | Separate pools | A dashboard storm can't starve ingestion. |
+| V7 | Identical questions | A clock in the key means zero hits. Align time to boundaries. |
+| V7 | Sealed means immutable | Closed segments need no invalidation, only a TTL. |
+| V7 | Only the edge moves | A 30-day refresh recomputes about 6 hours. |
+| V7 | Cache partials | `count`, `sum`, `min`, `max` at tier resolution serve any step and aggregate. |
+| V7 | Stampede | Single-flight and a lease for cold segments, stale-while-revalidate for the head. |
+| V8 | Failure domain | Monitor a region from inside it. |
+| V8 | Single writer by construction | A stamped `cell` label means nothing to reconcile. |
+| V8 | Federate, don't replicate | Send the question to the data and get back about 30 KB of partials. |
+| V8 | Honest partial results | `missing_cells` and never caching partials. A silent undercount is worse than an error. |
+| V9 | Silence isn't data | Build the roster from who has spoken. |
+| V9 | Dead vs retired | A goodbye clears deliberate exits. Silence without one is the signal. |
+| V9 | Debounce | 30s is late, 2 minutes is down. |
+| V9 | Judge by partition time | A quiet partition means UNKNOWN, never a fleet-wide DOWN. |
+| V9 | Verdict as a metric | `up` reuses the rollups: `avg` for fraction up, `min` for blips. |
+| V10 | Replicas are not backups | They die together and copy mistakes. |
+| V10 | Blocks are the backup unit | Sealed, deterministic, hash-checked files go to object storage as they are. |
+| V10 | Manifest last | A block without a manifest does not exist. |
+| V10 | Designated uploader | `hash(block_id) % 3` uploads. The others verify later. |
+| V10 | Restore order | Coarse tiers first. A year-long chart needs only 0.1 TB. |
+| V10 | Honest recovery | The cell says `restoring`, and the cache stores nothing meanwhile. |
+
+**The design in one breath:** *"Agents push to a stateless, autoscaled front door that writes to a durable log. Replicated, sharded time-series nodes consume that log and compress each series. Rollups keep long ranges cheap. A segment cache absorbs dashboard load. Regional cells with federated queries limit blast radius, a health tracker detects silence, and sealed blocks in another region cover disaster recovery."*
+
+## What Next?
+
+Pick one:
+
+**(a) Drill deeper** into one piece. Good candidates are Gorilla compression, the inverted index and cardinality control, the stampede fixes, or the restore drill.
+
+**(b) Mock interview.** I play the interviewer, give you the problem cold, and pressure-test your design with follow-ups. I would push hardest on the crux: ingestion, cardinality and rollups.
+
+Which one do you want?
 
 
 
